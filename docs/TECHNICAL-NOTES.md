@@ -173,10 +173,14 @@ Photos use the largest size (`photo[-1]`).
 
 ## Skill System
 
-### Skill Types
+### Skill Classification
 
-- **Markdown-only** (no `skill.yaml`): Just `SKILL.md` makes it always active. No separate configuration needed.
-- **Tool-based** (`skill.yaml` present): `type` is cli/mcp/browser. Initial state inactive. Activate via `cclaw skill setup` after requirement verification.
+Skills are classified by origin:
+
+- **Built-in** (`builtin`): Pre-packaged with cclaw in `src/cclaw/builtin_skills/`. Installable via `cclaw skills install <name>`.
+- **Custom** (`custom`): User-created via `cclaw skills add`. Can be markdown-only or tool-based.
+
+Internally, `skill.yaml` has a `type` field (cli/mcp/browser/None) for tool configuration, but the display (CLI `cclaw skills` and Telegram `/skills`) shows origin-based classification (builtin/custom).
 
 ### CLAUDE.md Composition
 
@@ -216,6 +220,7 @@ On skill attach/detach, `update_session_claude_md()` explicitly overwrites CLAUD
 
 The `/skills` command queries installed skill list via `list_skills()`,
 and displays link status for each skill via `bots_using_skill()`.
+Each skill shows its origin type (`builtin` or `custom`) instead of tool type.
 Skills not linked to any bot are also included.
 Additionally, `list_builtin_skills()` shows uninstalled built-in skills at the bottom.
 
@@ -533,10 +538,7 @@ The `mcp.json` in the skill directory defines the Supabase MCP server configurat
 
 ## Per-Skill Emoji Display
 
-Each builtin skill has an `emoji` field in its `skill.yaml` (e.g., `"\U0001F4AC"` for iMessage). This emoji is displayed in:
-
-- **CLI**: `cclaw skills` table prepends emoji to skill name
-- **Telegram**: `/skills` command uses skill emoji instead of generic checkmarks for active skills
+Each builtin skill has an `emoji` field in its `skill.yaml` (e.g., `"\U0001F4AC"` for iMessage). Emojis are used in README documentation and skill guides but are not displayed in the CLI or Telegram skills table to avoid terminal width calculation issues (see "Emoji Width Consistency" section below).
 
 ### Builtin Fallback
 

@@ -239,37 +239,32 @@ def skills_callback(context: typer.Context) -> None:
             console.print("[yellow]No skills found. Run 'cclaw skills add' to create one.[/yellow]")
             return
 
-        table = Table(title="All Skills")
-        table.add_column("Name", style="cyan")
-        table.add_column("Type", style="magenta")
-        table.add_column("Status", style="green")
-        table.add_column("Bots", style="dim")
-        table.add_column("Description", style="dim")
+        builtin_names = {skill["name"] for skill in builtin_skills}
+
+        table = Table(title="All Skills", expand=False)
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Type", style="magenta", no_wrap=True)
+        table.add_column("Status", style="green", no_wrap=True)
+        table.add_column("Bots", style="dim", no_wrap=True)
 
         for skill in installed_skills:
-            skill_type_display = skill["type"] or "markdown"
+            type_display = "builtin" if skill["name"] in builtin_names else "custom"
             status = skill["status"]
             status_style = "green" if status == "active" else "yellow"
             connected_bots = ", ".join(bots_using_skill(skill["name"])) or "-"
-            skill_emoji = skill.get("emoji", "")
-            display_name = f"{skill_emoji} {skill['name']}" if skill_emoji else skill["name"]
             table.add_row(
-                display_name,
-                skill_type_display,
+                skill["name"],
+                type_display,
                 f"[{status_style}]{status}[/{status_style}]",
                 connected_bots,
-                skill["description"],
             )
 
         for skill in not_installed_builtins:
-            skill_emoji = skill.get("emoji", "")
-            display_name = f"{skill_emoji} {skill['name']}" if skill_emoji else skill["name"]
             table.add_row(
-                display_name,
-                "[dim]builtin[/dim]",
+                skill["name"],
+                "builtin",
                 "[dim]not installed[/dim]",
                 "-",
-                skill["description"],
             )
 
         console.print(table)
@@ -547,10 +542,10 @@ def skill_builtins() -> None:
         console.print("[yellow]No built-in skills available.[/yellow]")
         return
 
-    table = Table(title="Built-in Skills")
-    table.add_column("Name", style="cyan")
+    table = Table(title="Built-in Skills", expand=False)
+    table.add_column("Name", style="cyan", no_wrap=True)
     table.add_column("Description", style="dim")
-    table.add_column("Installed", style="green")
+    table.add_column("Installed", style="green", no_wrap=True)
 
     for skill in builtin_skills:
         installed = is_skill(skill["name"])
@@ -585,10 +580,10 @@ def skill_install(
             console.print("[yellow]No built-in skills available.[/yellow]")
             return
 
-        table = Table(title="Built-in Skills")
-        table.add_column("Name", style="cyan")
+        table = Table(title="Built-in Skills", expand=False)
+        table.add_column("Name", style="cyan", no_wrap=True)
         table.add_column("Description", style="dim")
-        table.add_column("Installed", style="green")
+        table.add_column("Installed", style="green", no_wrap=True)
 
         for skill in builtin_skills:
             installed = is_skill(skill["name"])

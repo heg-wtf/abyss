@@ -65,11 +65,16 @@ Per-bot Claude model configuration with runtime changes.
 
 ### 7. Skill System
 
-Extends bot capabilities by linking tools/knowledge.
+Extends bot capabilities by linking tools/knowledge. Skills are classified by origin:
+
+- **Built-in skills** (`builtin`): Pre-packaged with cclaw, installable via `cclaw skills install <name>`
+- **Custom skills** (`custom`): User-created via `cclaw skills add`
+
+Internally, skills have different tool configurations:
 
 - Minimum skill unit: folder + single `SKILL.md`
 - **Markdown-only skills**: Just `SKILL.md` makes it immediately active. Adds knowledge/instructions to bot
-- **Tool-based skills**: `skill.yaml` defines type (cli/mcp/browser), required commands, environment variables. Activated via `cclaw skill setup`
+- **Tool-based skills**: `skill.yaml` defines tool type (cli/mcp/browser), required commands, environment variables. Activated via `cclaw skill setup`
 - On skill attachment, `compose_claude_md()` merges bot prompt + skill content to regenerate CLAUDE.md
 - MCP skills: Auto-generates `.mcp.json` in session directory. Environment variables injected via subprocess env
 - CLI skills: Environment variables auto-injected during subprocess execution
@@ -115,8 +120,8 @@ Frequently used skills are bundled as templates inside the package, installable 
 - After installation: requirement check -> auto-activate on pass, stays inactive with guidance on fail
 - `skill.yaml`'s `install_hints` field provides installation instructions for missing tools
 - Built-in skills: iMessage (`imsg` CLI), Apple Reminders (`reminders-cli`), Naver Map (knowledge type, web URL based), Image Processing (`slimg` CLI), Best Price (knowledge type, web search based), Supabase (MCP type, DB/Storage/Edge Functions with no-deletion guardrails), Gmail (`gogcli`), Google Calendar (`gogcli`), Twitter/X (MCP type, tweet posting/search via `@enescinar/twitter-mcp`), Jira (MCP type, issue management via `mcp-atlassian`), Naver Search (`naver-cli`, 6-type search), Kakao Local (`kakao-cli`, address/coordinate/keyword search), DART (`dartcli`, corporate disclosure/finance/filings), Translate (`translatecli`, Gemini-powered text/transcript translation), Daiso (`daiso-cli`, Daiso Mall product search)
-- `cclaw skills` command also displays uninstalled built-in skills
-- Telegram `/skills` handler also shows uninstalled built-in skills
+- `cclaw skills` command shows all skills with origin type (builtin/custom), including uninstalled builtins
+- Telegram `/skills` handler also shows origin type (builtin/custom) and uninstalled builtins
 
 ### 11. Session Continuity
 

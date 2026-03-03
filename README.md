@@ -84,9 +84,8 @@ cclaw status             # Show running status
 
 cclaw has a **skill system** that extends your bot's capabilities with tools and knowledge. Skills are modular — attach or detach them per bot as needed.
 
-- **Markdown skills**: Just a `SKILL.md` file. Adds instructions/knowledge to the bot.
-- **Tool-based skills**: Include `skill.yaml` with CLI tools, MCP servers, or browser automation.
-- **Built-in skills**: Pre-packaged skill templates installable with `cclaw skills install <name>`.
+- **Built-in skills**: Pre-packaged skill templates bundled with cclaw, installable with `cclaw skills install <name>`.
+- **Custom skills**: User-created skills added via `cclaw skills add`. Can be markdown-only or tool-based (CLI, MCP, browser).
 
 ### Built-in Skills
 
