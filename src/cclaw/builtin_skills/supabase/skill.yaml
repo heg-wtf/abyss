@@ -1,5 +1,5 @@
 name: supabase
-emoji: "\U0001F5C4"
+emoji: "\U0001F5C4\uFE0F"
 description: "Supabase MCP integration (Database, Storage, Edge Functions - read/write only, no deletion)"
 type: mcp
 status: inactive

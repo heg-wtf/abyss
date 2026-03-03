@@ -1,5 +1,5 @@
 name: naver-map
-emoji: "\U0001F5FA"
+emoji: "\U0001F5FA\uFE0F"
 description: "Naver Map web link generation (search, route, navigation)"
 type: knowledge
 status: inactive

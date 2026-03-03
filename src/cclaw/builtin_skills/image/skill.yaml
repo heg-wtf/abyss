@@ -1,5 +1,5 @@
 name: image
-emoji: "\U0001F5BC"
+emoji: "\U0001F5BC\uFE0F"
 description: "Image processing - convert, optimize, resize, crop, extend (slimg CLI)"
 type: cli
 status: inactive

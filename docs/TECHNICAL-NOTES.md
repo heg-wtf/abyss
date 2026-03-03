@@ -651,6 +651,24 @@ Password is read via `getpass.getpass()` which masks terminal input. Confirmed t
 
 Backup file is written to the current working directory as `YYMMDD-cclaw.zip`. Same-day re-runs prompt for overwrite via `typer.confirm()`.
 
+## Emoji Width Consistency (Variation Selector-16)
+
+### Problem
+
+Some emojis in skill.yaml have Unicode `east_asian_width=N` (Narrow), rendering as 1 terminal column instead of 2. This breaks column alignment in Rich tables (e.g., `cclaw skills` list).
+
+Affected emojis: `\U0001F5BC` (image), `\U0001F5FA` (naver-map), `\U0001F5C4` (supabase).
+
+### Solution
+
+Append Variation Selector-16 (`\uFE0F`) to force emoji presentation (Wide, 2 columns):
+
+- `\U0001F5BC\uFE0F` (🖼️), `\U0001F5FA\uFE0F` (🗺️), `\U0001F5C4\uFE0F` (🗄️)
+
+### Note
+
+Installed skills (`~/.cclaw/skills/`) may lack the `emoji` field. The `list_skills()` fallback in `skill.py` reads the emoji from the builtin template via `get_builtin_skill_path()`, so only the builtin template needs the fix.
+
 ## IME-Compatible CLI Input
 
 ### Problem
