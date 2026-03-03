@@ -93,7 +93,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     async def check_authorization(update: Update) -> bool:
         """Check if the user is authorized."""
         if not _is_user_allowed(update.effective_user.id, allowed_users):
-            await update.message.reply_text("Unauthorized.")
+            await update.effective_message.reply_text("Unauthorized.")
             return False
         return True
 
@@ -109,7 +109,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             "\U0001f4ac Send me a message to start chatting!\n"
             "\U00002753 Type /help for available commands."
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.effective_message.reply_text(text, parse_mode="Markdown")
 
     async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command."""
@@ -135,7 +135,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             "\U00002139 /version - Show version\n"
             "\U00002753 /help - Show this message"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.effective_message.reply_text(text, parse_mode="Markdown")
 
     async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reset command."""
@@ -144,7 +144,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
         chat_id = update.effective_chat.id
         reset_session(bot_path, chat_id)
-        await update.message.reply_text("\U0001f504 Conversation reset. Workspace files preserved.")
+        message = "\U0001f504 Conversation reset. Workspace files preserved."
+        await update.effective_message.reply_text(message)
 
     async def resetall_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /resetall command."""
@@ -153,7 +154,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
         chat_id = update.effective_chat.id
         reset_all_session(bot_path, chat_id)
-        await update.message.reply_text("\U0001f5d1 Session completely reset.")
+        await update.effective_message.reply_text("\U0001f5d1 Session completely reset.")
 
     async def files_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /files command."""
@@ -165,12 +166,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         files = list_workspace_files(session_directory)
 
         if not files:
-            await update.message.reply_text("\U0001f4c2 No files in workspace.")
+            await update.effective_message.reply_text("\U0001f4c2 No files in workspace.")
             return
 
         file_list = "\n".join(f"  {f}" for f in files)
         text = f"\U0001f4c2 *Workspace files:*\n```\n{file_list}\n```"
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.effective_message.reply_text(text, parse_mode="Markdown")
 
     async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /status command."""
@@ -191,7 +192,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             f"\U0001f4dd Conversation: {conversation_status}\n"
             f"\U0001f4c2 Workspace files: {len(files)}"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.effective_message.reply_text(text, parse_mode="Markdown")
 
     async def send_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /send command - send a workspace file to the user."""
@@ -205,31 +206,35 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         if not context.args:
             files = list_workspace_files(session_directory)
             if not files:
-                await update.message.reply_text("\U0001f4c2 No files in workspace.")
+                await update.effective_message.reply_text("\U0001f4c2 No files in workspace.")
                 return
             file_list = "\n".join(f"  {f}" for f in files)
             text = f"\U0001f4e4 Usage: `/send filename`\n\nAvailable files:\n```\n{file_list}\n```"
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.effective_message.reply_text(text, parse_mode="Markdown")
             return
 
         filename = " ".join(context.args)
         file_path = workspace / filename
 
         if not file_path.exists():
-            await update.message.reply_text(f"File not found: `{filename}`", parse_mode="Markdown")
+            await update.effective_message.reply_text(
+                f"File not found: `{filename}`", parse_mode="Markdown"
+            )
             return
 
         if not file_path.is_file():
-            await update.message.reply_text(f"Not a file: `{filename}`", parse_mode="Markdown")
+            await update.effective_message.reply_text(
+                f"Not a file: `{filename}`", parse_mode="Markdown"
+            )
             return
 
         try:
-            await update.message.reply_document(
+            await update.effective_message.reply_document(
                 document=open(file_path, "rb"),
                 filename=file_path.name,
             )
         except Exception as error:
-            await update.message.reply_text(f"Failed to send file: {error}")
+            await update.effective_message.reply_text(f"Failed to send file: {error}")
             logger.error("Failed to send file %s: %s", filename, error)
 
     async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -248,12 +253,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 f"Available: {model_list}\n"
                 "Usage: `/model sonnet`"
             )
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.effective_message.reply_text(text, parse_mode="Markdown")
             return
 
         new_model = context.args[0].lower()
         if not is_valid_model(new_model):
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"Invalid model: `{new_model}`\nAvailable: {', '.join(VALID_MODELS)}",
                 parse_mode="Markdown",
             )
@@ -262,7 +267,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         current_model = new_model
         bot_config["model"] = new_model
         save_bot_config(bot_name, bot_config)
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"\U0001f9e0 Model changed to *{model_display_name(new_model)}*",
             parse_mode="Markdown",
         )
@@ -276,14 +281,14 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         session_key = f"{bot_name}:{chat_id}"
 
         if not is_process_running(session_key):
-            await update.message.reply_text("No running process to cancel.")
+            await update.effective_message.reply_text("No running process to cancel.")
             return
 
         cancelled = cancel_process(session_key)
         if cancelled:
-            await update.message.reply_text("\u26d4 Execution cancelled.")
+            await update.effective_message.reply_text("\u26d4 Execution cancelled.")
         else:
-            await update.message.reply_text("No running process to cancel.")
+            await update.effective_message.reply_text("No running process to cancel.")
 
     async def streaming_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /streaming command - toggle streaming mode on/off."""
@@ -297,7 +302,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 f"\U0001f4e1 Streaming: *{status_text}*\n\n"
                 "Usage: `/streaming on` or `/streaming off`"
             )
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.effective_message.reply_text(text, parse_mode="Markdown")
             return
 
         value = context.args[0].lower()
@@ -305,14 +310,18 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             streaming_enabled = True
             bot_config["streaming"] = True
             save_bot_config(bot_name, bot_config)
-            await update.message.reply_text("\U0001f4e1 Streaming enabled.", parse_mode="Markdown")
+            await update.effective_message.reply_text(
+                "\U0001f4e1 Streaming enabled.", parse_mode="Markdown"
+            )
         elif value == "off":
             streaming_enabled = False
             bot_config["streaming"] = False
             save_bot_config(bot_name, bot_config)
-            await update.message.reply_text("\U0001f4e1 Streaming disabled.", parse_mode="Markdown")
+            await update.effective_message.reply_text(
+                "\U0001f4e1 Streaming disabled.", parse_mode="Markdown"
+            )
         else:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "Usage: `/streaming on` or `/streaming off`",
                 parse_mode="Markdown",
             )
@@ -335,7 +344,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         async def send_typing_periodically() -> None:
             try:
                 while True:
-                    await update.message.chat.send_action("typing")
+                    await update.effective_message.chat.send_action("typing")
                     await asyncio.sleep(4)
             except asyncio.CancelledError:
                 pass
@@ -361,9 +370,9 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         chunks = split_message(html_response)
         for chunk in chunks:
             try:
-                await update.message.reply_text(chunk, parse_mode="HTML")
+                await update.effective_message.reply_text(chunk, parse_mode="HTML")
             except Exception:
-                await update.message.reply_text(chunk)
+                await update.effective_message.reply_text(chunk)
 
         return response
 
@@ -436,7 +445,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             if fallback_message_id is None:
                 try:
-                    sent = await update.message.reply_text(display + STREAMING_CURSOR)
+                    sent = await update.effective_message.reply_text(display + STREAMING_CURSOR)
                     fallback_message_id = sent.message_id
                     last_draft_time = now
                 except Exception as send_error:
@@ -506,16 +515,16 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     )
                 for chunk in chunks:
                     try:
-                        await update.message.reply_text(chunk, parse_mode="HTML")
+                        await update.effective_message.reply_text(chunk, parse_mode="HTML")
                     except Exception:
-                        await update.message.reply_text(chunk)
+                        await update.effective_message.reply_text(chunk)
         else:
             # Draft path or no preview: send final message directly
             for chunk in chunks:
                 try:
-                    await update.message.reply_text(chunk, parse_mode="HTML")
+                    await update.effective_message.reply_text(chunk, parse_mode="HTML")
                 except Exception:
-                    await update.message.reply_text(chunk)
+                    await update.effective_message.reply_text(chunk)
 
         return response
 
@@ -638,12 +647,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             return
 
         chat_id = update.effective_chat.id
-        user_message = update.message.text
+        user_message = update.effective_message.text
         lock_key = f"{bot_name}:{chat_id}"
         lock = _get_session_lock(lock_key)
 
         if lock.locked():
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "\U0001f4e5 Message queued. Processing previous request..."
             )
 
@@ -674,15 +683,15 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             except asyncio.CancelledError:
                 response = "\u26d4 Execution was cancelled."
                 logger.info("Claude cancelled for chat %d", chat_id)
-                await update.message.reply_text(response)
+                await update.effective_message.reply_text(response)
             except TimeoutError:
                 response = "Request timed out. Please try a shorter request."
                 logger.error("Claude timed out for chat %d", chat_id)
-                await update.message.reply_text(response)
+                await update.effective_message.reply_text(response)
             except RuntimeError as error:
                 response = f"Error: {error}"
                 logger.error("Claude error for chat %d: %s", chat_id, error)
-                await update.message.reply_text(response)
+                await update.effective_message.reply_text(response)
 
             log_conversation(session_dir, "assistant", response)
 
@@ -693,7 +702,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
         from cclaw import __version__
 
-        await update.message.reply_text(f"\U00002139 cclaw v{__version__}")
+        await update.effective_message.reply_text(f"\U00002139 cclaw v{__version__}")
 
     async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo/document messages - download to workspace and forward to Claude."""
@@ -705,7 +714,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         lock = _get_session_lock(lock_key)
 
         if lock.locked():
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "\U0001f4e5 Message queued. Processing previous request..."
             )
 
@@ -714,13 +723,13 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             workspace = session_dir / "workspace"
 
             # Determine file to download
-            if update.message.photo:
-                photo = update.message.photo[-1]  # largest size
+            if update.effective_message.photo:
+                photo = update.effective_message.photo[-1]  # largest size
                 file = await photo.get_file()
                 extension = ".jpg"
                 filename = f"photo_{photo.file_unique_id}{extension}"
-            elif update.message.document:
-                document = update.message.document
+            elif update.effective_message.document:
+                document = update.effective_message.document
                 file = await document.get_file()
                 filename = document.file_name or f"file_{document.file_unique_id}"
             else:
@@ -729,7 +738,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             file_path = workspace / filename
             await file.download_to_drive(str(file_path))
 
-            caption = update.message.caption or ""
+            caption = update.effective_message.caption or ""
             if caption:
                 user_prompt = f"{caption}\n\nFile: {file_path}"
             else:
@@ -760,15 +769,15 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             except asyncio.CancelledError:
                 response = "\u26d4 Execution was cancelled."
                 logger.info("Claude cancelled for chat %d", chat_id)
-                await update.message.reply_text(response)
+                await update.effective_message.reply_text(response)
             except TimeoutError:
                 response = "Request timed out. Please try a shorter request."
                 logger.error("Claude timed out for chat %d", chat_id)
-                await update.message.reply_text(response)
+                await update.effective_message.reply_text(response)
             except RuntimeError as error:
                 response = f"Error: {error}"
                 logger.error("Claude error for chat %d: %s", chat_id, error)
-                await update.message.reply_text(response)
+                await update.effective_message.reply_text(response)
 
             log_conversation(session_dir, "assistant", response)
 
@@ -780,24 +789,24 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         if not context.args:
             memory_content = load_bot_memory(bot_path)
             if not memory_content:
-                await update.message.reply_text("\U0001f9e0 No memories saved yet.")
+                await update.effective_message.reply_text("\U0001f9e0 No memories saved yet.")
                 return
             html = markdown_to_telegram_html(memory_content)
             chunks = split_message(html)
             for chunk in chunks:
                 try:
-                    await update.message.reply_text(chunk, parse_mode="HTML")
+                    await update.effective_message.reply_text(chunk, parse_mode="HTML")
                 except Exception:
-                    await update.message.reply_text(chunk)
+                    await update.effective_message.reply_text(chunk)
             return
 
         subcommand = context.args[0].lower()
 
         if subcommand == "clear":
             clear_bot_memory(bot_path)
-            await update.message.reply_text("\U0001f9e0 Memory cleared.")
+            await update.effective_message.reply_text("\U0001f9e0 Memory cleared.")
         else:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "Usage: `/memory` (show) or `/memory clear`",
                 parse_mode="Markdown",
             )
@@ -820,48 +829,48 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             ]
 
             if not installed_skills and not not_installed_builtins:
-                await update.message.reply_text("\U0001f9e9 No skills available.")
+                await update.effective_message.reply_text("\U0001f9e9 No skills available.")
                 return
+
+            builtin_names = {skill["name"] for skill in builtin_skills}
 
             lines = ["\U0001f9e9 *All Skills:*\n"]
             for skill in installed_skills:
-                skill_type_display = skill["type"] or "markdown"
-                skill_emoji = skill.get("emoji", "")
+                type_display = "builtin" if skill["name"] in builtin_names else "custom"
                 if skill["status"] == "active":
-                    status_icon = skill_emoji if skill_emoji else "\u2705"
+                    status_icon = "\u2705"
                 else:
                     status_icon = "\U0001f6d1"
                 connected_bots = bots_using_skill(skill["name"])
                 attached_label = f" \u2190 {', '.join(connected_bots)}" if connected_bots else ""
-                lines.append(
-                    f"{status_icon} `{skill['name']}` ({skill_type_display}){attached_label}"
-                )
+                lines.append(f"{status_icon} `{skill['name']}` ({type_display}){attached_label}")
 
             for skill in not_installed_builtins:
-                builtin_emoji = skill.get("emoji", "\U0001f4e6")
-                lines.append(f"{builtin_emoji} `{skill['name']}` (builtin, not installed)")
+                lines.append(f"\U0001f4e6 `{skill['name']}` (builtin, not installed)")
 
             lines.append("")
             lines.append("`/skills attach <name>` | `/skills detach <name>`")
 
-            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+            await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
             return
 
         subcommand = context.args[0].lower()
 
         if subcommand == "list":
             if not attached_skills:
-                await update.message.reply_text("\U0001f9e9 No skills attached to this bot.")
+                await update.effective_message.reply_text(
+                    "\U0001f9e9 No skills attached to this bot."
+                )
                 return
             skill_list = "\n".join(f"  - {s}" for s in attached_skills)
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 f"\U0001f9e9 *Attached Skills:*\n```\n{skill_list}\n```",
                 parse_mode="Markdown",
             )
 
         elif subcommand == "attach":
             if len(context.args) < 2:
-                await update.message.reply_text(
+                await update.effective_message.reply_text(
                     "Usage: `/skills attach <name>`", parse_mode="Markdown"
                 )
                 return
@@ -870,12 +879,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             skill_name = context.args[1]
             if not is_skill(skill_name):
-                await update.message.reply_text(f"Skill '{skill_name}' not found.")
+                await update.effective_message.reply_text(f"Skill '{skill_name}' not found.")
                 return
 
             status = skill_status(skill_name)
             if status == "inactive":
-                await update.message.reply_text(
+                await update.effective_message.reply_text(
                     f"Skill '{skill_name}' is inactive. "
                     f"Run `cclaw skills setup {skill_name}` first.",
                     parse_mode="Markdown",
@@ -883,7 +892,9 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 return
 
             if skill_name in attached_skills:
-                await update.message.reply_text(f"Skill '{skill_name}' is already attached.")
+                await update.effective_message.reply_text(
+                    f"Skill '{skill_name}' is already attached."
+                )
                 return
 
             attach_skill_to_bot(bot_name, skill_name)
@@ -891,11 +902,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             if skill_name not in bot_config["skills"]:
                 bot_config["skills"].append(skill_name)
             attached_skills = bot_config["skills"]
-            await update.message.reply_text(f"\U0001f9e9 Skill '{skill_name}' attached.")
+            await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' attached.")
 
         elif subcommand == "detach":
             if len(context.args) < 2:
-                await update.message.reply_text(
+                await update.effective_message.reply_text(
                     "Usage: `/skills detach <name>`", parse_mode="Markdown"
                 )
                 return
@@ -904,17 +915,17 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             skill_name = context.args[1]
             if skill_name not in attached_skills:
-                await update.message.reply_text(f"Skill '{skill_name}' is not attached.")
+                await update.effective_message.reply_text(f"Skill '{skill_name}' is not attached.")
                 return
 
             detach_skill_from_bot(bot_name, skill_name)
             if skill_name in bot_config.get("skills", []):
                 bot_config["skills"].remove(skill_name)
             attached_skills = bot_config.get("skills", [])
-            await update.message.reply_text(f"\U0001f9e9 Skill '{skill_name}' detached.")
+            await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' detached.")
 
         else:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "Unknown subcommand. Use: list, attach, detach",
             )
 
@@ -931,7 +942,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 "`/cron list` - Show cron jobs\n"
                 "`/cron run <name>` - Run a job now"
             )
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.effective_message.reply_text(text, parse_mode="Markdown")
             return
 
         subcommand = context.args[0].lower()
@@ -939,7 +950,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         if subcommand == "list":
             jobs = list_cron_jobs(bot_name)
             if not jobs:
-                await update.message.reply_text("\u23f0 No cron jobs configured.")
+                await update.effective_message.reply_text("\u23f0 No cron jobs configured.")
                 return
 
             lines = ["\u23f0 *Cron Jobs:*\n"]
@@ -955,25 +966,27 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     f"{status_icon} `{job['name']}` (`{schedule_display}` {timezone_label})\n"
                     f"   Next: {next_display} | {message_preview}"
                 )
-            await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+            await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
 
         elif subcommand == "run":
             if len(context.args) < 2:
-                await update.message.reply_text("Usage: `/cron run <name>`", parse_mode="Markdown")
+                await update.effective_message.reply_text(
+                    "Usage: `/cron run <name>`", parse_mode="Markdown"
+                )
                 return
 
             job_name = context.args[1]
             cron_job = get_cron_job(bot_name, job_name)
             if not cron_job:
-                await update.message.reply_text(f"Job '{job_name}' not found.")
+                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
                 return
 
-            await update.message.reply_text(f"\u23f0 Running job '{job_name}'...")
+            await update.effective_message.reply_text(f"\u23f0 Running job '{job_name}'...")
 
             async def send_typing_periodically() -> None:
                 try:
                     while True:
-                        await update.message.chat.send_action("typing")
+                        await update.effective_message.chat.send_action("typing")
                         await asyncio.sleep(4)
                 except asyncio.CancelledError:
                     pass
@@ -988,12 +1001,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     send_message_callback=context.bot.send_message,
                 )
             except Exception as error:
-                await update.message.reply_text(f"Job failed: {error}")
+                await update.effective_message.reply_text(f"Job failed: {error}")
             finally:
                 typing_task.cancel()
 
         else:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "Unknown subcommand. Use: list, run",
             )
 
@@ -1026,30 +1039,30 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 "`/heartbeat off` - Disable\n"
                 "`/heartbeat run` - Run now"
             )
-            await update.message.reply_text(text, parse_mode="Markdown")
+            await update.effective_message.reply_text(text, parse_mode="Markdown")
             return
 
         subcommand = context.args[0].lower()
 
         if subcommand == "on":
             if enable_heartbeat(bot_name):
-                await update.message.reply_text("\U0001f493 Heartbeat enabled.")
+                await update.effective_message.reply_text("\U0001f493 Heartbeat enabled.")
             else:
-                await update.message.reply_text("Failed to enable heartbeat.")
+                await update.effective_message.reply_text("Failed to enable heartbeat.")
 
         elif subcommand == "off":
             if disable_heartbeat(bot_name):
-                await update.message.reply_text("\U0001f493 Heartbeat disabled.")
+                await update.effective_message.reply_text("\U0001f493 Heartbeat disabled.")
             else:
-                await update.message.reply_text("Failed to disable heartbeat.")
+                await update.effective_message.reply_text("Failed to disable heartbeat.")
 
         elif subcommand == "run":
-            await update.message.reply_text("\U0001f493 Running heartbeat check...")
+            await update.effective_message.reply_text("\U0001f493 Running heartbeat check...")
 
             async def send_typing_periodically() -> None:
                 try:
                     while True:
-                        await update.message.chat.send_action("typing")
+                        await update.effective_message.chat.send_action("typing")
                         await asyncio.sleep(4)
                 except asyncio.CancelledError:
                     pass
@@ -1062,14 +1075,14 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     bot_config=bot_config,
                     send_message_callback=context.bot.send_message,
                 )
-                await update.message.reply_text("\U0001f493 Heartbeat check completed.")
+                await update.effective_message.reply_text("\U0001f493 Heartbeat check completed.")
             except Exception as error:
-                await update.message.reply_text(f"Heartbeat failed: {error}")
+                await update.effective_message.reply_text(f"Heartbeat failed: {error}")
             finally:
                 typing_task.cancel()
 
         else:
-            await update.message.reply_text(
+            await update.effective_message.reply_text(
                 "Unknown subcommand. Use: on, off, run",
             )
 
@@ -1087,20 +1100,20 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
         targets = collect_compact_targets(bot_name)
         if not targets:
-            await update.message.reply_text("No compactable files found.")
+            await update.effective_message.reply_text("No compactable files found.")
             return
 
         target_list = "\n".join(
             f"  - {t.label} ({t.line_count} lines, ~{t.token_count:,} tokens)" for t in targets
         )
-        await update.message.reply_text(
+        await update.effective_message.reply_text(
             f"\U0001f4e6 Found {len(targets)} file(s) to compact:\n{target_list}\n\nCompacting..."
         )
 
         async def send_typing_periodically() -> None:
             try:
                 while True:
-                    await update.message.chat.send_action("typing")
+                    await update.effective_message.chat.send_action("typing")
                     await asyncio.sleep(4)
             except asyncio.CancelledError:
                 pass
@@ -1112,7 +1125,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             report = format_compact_report(bot_name, results)
 
             for chunk in split_message(report):
-                await update.message.reply_text(chunk)
+                await update.effective_message.reply_text(chunk)
 
             successful = [r for r in results if r.error is None]
             if successful:
@@ -1122,11 +1135,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
                 regenerate_bot_claude_md(bot_name)
                 update_session_claude_md(bot_path)
-                await update.message.reply_text("\u2705 Compacted files saved.")
+                await update.effective_message.reply_text("\u2705 Compacted files saved.")
             else:
-                await update.message.reply_text("No files were successfully compacted.")
+                await update.effective_message.reply_text("No files were successfully compacted.")
         except Exception as error:
-            await update.message.reply_text(f"Compact failed: {error}")
+            await update.effective_message.reply_text(f"Compact failed: {error}")
         finally:
             typing_task.cancel()
 

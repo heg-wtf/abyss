@@ -98,6 +98,7 @@ def mock_update():
     update.message.text = "Hello Claude"
     update.message.reply_text = AsyncMock()
     update.message.chat.send_action = AsyncMock()
+    update.effective_message = update.message
     return update
 
 
