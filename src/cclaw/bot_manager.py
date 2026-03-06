@@ -93,6 +93,15 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
         console.print("[red]No valid bots to start.[/red]")
         return
 
+    # Start the Node.js bridge for persistent Claude Code sessions
+    from cclaw.bridge import start_bridge
+
+    bridge_started = await start_bridge()
+    if bridge_started:
+        console.print("  [green]BRIDGE[/green] Node.js bridge (persistent sessions)")
+    else:
+        console.print("  [yellow]BRIDGE[/yellow] Not available, using subprocess fallback")
+
     console.print(f"Starting {len(applications)} bot(s)...")
     for name, _ in applications:
         console.print(f"  [green]OK[/green] {name}")
@@ -201,6 +210,12 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
                 logger.info("Stopped bot: %s", name)
             except Exception as error:
                 logger.error("Error stopping %s: %s", name, error)
+
+        # Stop the bridge
+        from cclaw.bridge import stop_bridge
+
+        stop_bridge()
+        console.print("  Bridge stopped.")
 
         if pid_file.exists():
             pid_file.unlink()

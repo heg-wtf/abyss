@@ -27,9 +27,13 @@ MOCK_WHICH = "cclaw.claude_runner.shutil.which"
 
 @pytest.fixture(autouse=True)
 def mock_claude_path():
-    """Mock shutil.which to always return a claude path."""
+    """Mock shutil.which to always return a claude path and reset cache."""
+    import cclaw.claude_runner as runner_module
+
+    runner_module._cached_claude_path = None
     with patch(MOCK_WHICH, return_value="/usr/local/bin/claude"):
         yield
+    runner_module._cached_claude_path = None
 
 
 @pytest.mark.asyncio
@@ -122,6 +126,9 @@ async def test_run_claude_working_directory():
 @pytest.mark.asyncio
 async def test_run_claude_not_found():
     """run_claude raises RuntimeError when claude CLI is not found."""
+    import cclaw.claude_runner as runner_module
+
+    runner_module._cached_claude_path = None
     with patch(MOCK_WHICH, return_value=None):
         with pytest.raises(RuntimeError, match="CLI not found"):
             await run_claude("/tmp/test", "Hello")
@@ -678,12 +685,8 @@ async def test_run_claude_streaming_with_allowed_tools(tmp_path):
     with (
         patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec,
         patch(
-            "cclaw.claude_runner._prepare_skill_environment",
-            return_value=None,
-        ),
-        patch(
-            "cclaw.skill.collect_skill_allowed_tools",
-            return_value=["Bash(imsg:*)"],
+            "cclaw.claude_runner._prepare_skill_config",
+            return_value=(["Bash(imsg:*)"], None),
         ),
     ):
         mock_exec.return_value = mock_process

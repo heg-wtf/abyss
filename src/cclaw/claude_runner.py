@@ -1,4 +1,11 @@
-"""Claude Code subprocess runner."""
+"""Claude Code subprocess runner.
+
+Supports two execution modes:
+- Bridge mode: Uses Node.js bridge for persistent sessions (faster, no process spawn per message)
+- Subprocess mode: Direct `claude -p` invocation (fallback when bridge is unavailable)
+
+The bridge is tried first; on failure (bridge down, error), falls back to subprocess automatically.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +25,21 @@ STREAMING_CURSOR = "\u258c"
 
 # Tracks running processes per session key (e.g. "botname:chat_id")
 _running_processes: dict[str, asyncio.subprocess.Process] = {}
+
+# Cached claude path to avoid repeated shutil.which() lookups
+_cached_claude_path: str | None = None
+
+
+def _get_claude_path() -> str:
+    """Get the claude CLI path, caching the result."""
+    global _cached_claude_path
+    if _cached_claude_path is None:
+        _cached_claude_path = shutil.which("claude")
+    if not _cached_claude_path:
+        raise RuntimeError(
+            "Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code"
+        )
+    return _cached_claude_path
 
 
 def _write_session_settings(working_directory: str, allowed_tools: list[str]) -> None:
@@ -123,11 +145,7 @@ async def run_claude(
         RuntimeError: If Claude Code returns a non-zero exit code.
         asyncio.CancelledError: If the process was cancelled via cancel_process.
     """
-    claude_path = shutil.which("claude")
-    if not claude_path:
-        raise RuntimeError(
-            "Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code"
-        )
+    claude_path = _get_claude_path()
 
     command = [
         claude_path,
@@ -149,29 +167,9 @@ async def run_claude(
         command.extend(extra_arguments)
 
     # Inject MCP config and environment variables from skills
-    environment = None
-    if skill_names:
-        from cclaw.skill import (
-            collect_skill_allowed_tools,
-            collect_skill_environment_variables,
-            merge_mcp_configs,
-        )
-
-        mcp_config = merge_mcp_configs(skill_names)
-        if mcp_config:
-            mcp_json_path = str(Path(working_directory) / ".mcp.json")
-            with open(mcp_json_path, "w") as mcp_file:
-                json.dump(mcp_config, mcp_file, indent=2)
-
-        skill_environment_variables = collect_skill_environment_variables(skill_names)
-        if skill_environment_variables:
-            environment = {**os.environ, **skill_environment_variables}
-
-        allowed_tools = collect_skill_allowed_tools(skill_names)
-        if allowed_tools:
-            command.extend(["--allowedTools", ",".join(allowed_tools)])
-            _write_session_settings(working_directory, allowed_tools)
-            logger.info("Allowed tools from skills: %s", allowed_tools)
+    allowed_tools, environment = _prepare_skill_config(working_directory, skill_names)
+    if allowed_tools:
+        command.extend(["--allowedTools", ",".join(allowed_tools)])
 
     logger.info("Running claude in %s: %s", working_directory, message[:100])
 
@@ -213,15 +211,23 @@ async def run_claude(
     return output
 
 
-def _prepare_skill_environment(
+def _prepare_skill_config(
     working_directory: str,
     skill_names: list[str] | None,
-) -> dict[str, str] | None:
-    """Prepare MCP config and environment variables for skills."""
-    if not skill_names:
-        return None
+) -> tuple[list[str] | None, dict[str, str] | None]:
+    """Prepare MCP config, settings, and environment variables for skills.
 
-    from cclaw.skill import collect_skill_environment_variables, merge_mcp_configs
+    Writes .mcp.json and .claude/settings.json to the working directory.
+    Returns (allowed_tools, environment_variables).
+    """
+    if not skill_names:
+        return None, None
+
+    from cclaw.skill import (
+        collect_skill_allowed_tools,
+        collect_skill_environment_variables,
+        merge_mcp_configs,
+    )
 
     mcp_config = merge_mcp_configs(skill_names)
     if mcp_config:
@@ -230,10 +236,17 @@ def _prepare_skill_environment(
             json.dump(mcp_config, mcp_file, indent=2)
 
     skill_environment_variables = collect_skill_environment_variables(skill_names)
-    if skill_environment_variables:
-        return {**os.environ, **skill_environment_variables}
+    environment_variables = (
+        {**os.environ, **skill_environment_variables} if skill_environment_variables else None
+    )
 
-    return None
+    allowed_tools = collect_skill_allowed_tools(skill_names) or None
+
+    if allowed_tools:
+        _write_session_settings(working_directory, allowed_tools)
+        logger.info("Allowed tools from skills: %s", allowed_tools)
+
+    return allowed_tools, environment_variables
 
 
 def _extract_text_delta(data: dict[str, Any]) -> str | None:
@@ -317,11 +330,7 @@ async def run_claude_streaming(
         RuntimeError: If Claude Code returns a non-zero exit code.
         asyncio.CancelledError: If the process was cancelled via cancel_process.
     """
-    claude_path = shutil.which("claude")
-    if not claude_path:
-        raise RuntimeError(
-            "Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code"
-        )
+    claude_path = _get_claude_path()
 
     command = [
         claude_path,
@@ -344,16 +353,9 @@ async def run_claude_streaming(
     if extra_arguments:
         command.extend(extra_arguments)
 
-    environment = _prepare_skill_environment(working_directory, skill_names)
-
-    if skill_names:
-        from cclaw.skill import collect_skill_allowed_tools
-
-        allowed_tools = collect_skill_allowed_tools(skill_names)
-        if allowed_tools:
-            command.extend(["--allowedTools", ",".join(allowed_tools)])
-            _write_session_settings(working_directory, allowed_tools)
-            logger.info("Allowed tools from skills: %s", allowed_tools)
+    allowed_tools, environment = _prepare_skill_config(working_directory, skill_names)
+    if allowed_tools:
+        command.extend(["--allowedTools", ",".join(allowed_tools)])
 
     logger.info(
         "Running claude (streaming) in %s: %s",
@@ -460,3 +462,121 @@ async def run_claude_streaming(
     # Prefer result event text, fall back to accumulated streaming text
     final_text = result_text if result_text is not None else accumulated_text
     return final_text.strip()
+
+
+# ─── Bridge-aware wrappers ──────────────────────────────────────────────────
+
+
+async def run_claude_with_bridge(
+    working_directory: str,
+    message: str,
+    extra_arguments: list[str] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    session_key: str | None = None,
+    model: str | None = None,
+    skill_names: list[str] | None = None,
+    claude_session_id: str | None = None,
+    resume_session: bool = False,
+) -> str:
+    """Run Claude Code, trying the bridge first, falling back to subprocess.
+
+    Same interface as run_claude() but attempts the bridge for faster execution.
+    If the bridge is unavailable or fails, transparently falls back to subprocess.
+    """
+    from cclaw.bridge import bridge_query, is_bridge_running
+
+    if session_key and is_bridge_running():
+        try:
+            allowed_tools, environment_variables = _prepare_skill_config(
+                working_directory, skill_names
+            )
+            logger.info("Running claude via bridge for %s: %s", session_key, message[:100])
+
+            return await bridge_query(
+                session_key=session_key,
+                prompt=message,
+                working_directory=working_directory,
+                model=model,
+                session_id=claude_session_id,
+                resume_session=resume_session,
+                allowed_tools=allowed_tools,
+                environment_variables=environment_variables,
+                timeout=timeout,
+            )
+        except (ConnectionError, OSError) as error:
+            logger.warning("Bridge unavailable, falling back to subprocess: %s", error)
+        except Exception as error:
+            logger.warning("Bridge query failed, falling back to subprocess: %s", error)
+
+    # Fallback to direct subprocess
+    return await run_claude(
+        working_directory=working_directory,
+        message=message,
+        extra_arguments=extra_arguments,
+        timeout=timeout,
+        session_key=session_key,
+        model=model,
+        skill_names=skill_names,
+        claude_session_id=claude_session_id,
+        resume_session=resume_session,
+    )
+
+
+async def run_claude_streaming_with_bridge(
+    working_directory: str,
+    message: str,
+    on_text_chunk: Callable[[str], Any] | None = None,
+    extra_arguments: list[str] | None = None,
+    timeout: int = DEFAULT_TIMEOUT,
+    session_key: str | None = None,
+    model: str | None = None,
+    skill_names: list[str] | None = None,
+    claude_session_id: str | None = None,
+    resume_session: bool = False,
+) -> str:
+    """Run Claude Code with streaming, trying bridge first.
+
+    Same interface as run_claude_streaming() but attempts the bridge for
+    persistent sessions. Falls back to subprocess streaming if bridge fails.
+    """
+    from cclaw.bridge import bridge_query_streaming, is_bridge_running
+
+    if session_key and is_bridge_running():
+        try:
+            allowed_tools, environment_variables = _prepare_skill_config(
+                working_directory, skill_names
+            )
+            logger.info(
+                "Running claude (streaming) via bridge for %s: %s", session_key, message[:100]
+            )
+
+            return await bridge_query_streaming(
+                session_key=session_key,
+                prompt=message,
+                working_directory=working_directory,
+                on_text_chunk=on_text_chunk,
+                model=model,
+                session_id=claude_session_id,
+                resume_session=resume_session,
+                allowed_tools=allowed_tools,
+                environment_variables=environment_variables,
+                timeout=timeout,
+            )
+        except (ConnectionError, OSError) as error:
+            logger.warning("Bridge unavailable (streaming), falling back to subprocess: %s", error)
+        except Exception as error:
+            logger.warning("Bridge streaming failed, falling back to subprocess: %s", error)
+
+    # Fallback to direct subprocess streaming
+    return await run_claude_streaming(
+        working_directory=working_directory,
+        message=message,
+        on_text_chunk=on_text_chunk,
+        extra_arguments=extra_arguments,
+        timeout=timeout,
+        session_key=session_key,
+        model=model,
+        skill_names=skill_names,
+        claude_session_id=claude_session_id,
+        resume_session=resume_session,
+    )

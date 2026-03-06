@@ -73,7 +73,10 @@ pytest
 - `src/cclaw/cli.py` - Typer app entry point, ASCII art banner, all command definitions (skills, bot, cron, heartbeat, memory, global-memory subcommands)
 - `src/cclaw/config.py` - `~/.cclaw/` configuration management (YAML), model version mapping (`MODEL_VERSIONS`, `model_display_name()`)
 - `src/cclaw/onboarding.py` - Environment check, token validation, bot creation wizard
-- `src/cclaw/claude_runner.py` - `claude -p` subprocess execution (async, path resolution via `shutil.which`, process tracking + `cancel_all_processes()` for graceful shutdown, model selection, skill MCP/env injection, streaming output, `--resume`/`--session-id` session continuity)
+- `src/cclaw/claude_runner.py` - `claude -p` subprocess execution (async, path resolution via `shutil.which`, process tracking + `cancel_all_processes()` for graceful shutdown, model selection, skill MCP/env injection via `_prepare_skill_config()`, streaming output, `--resume`/`--session-id` session continuity, bridge-aware wrappers `run_claude_with_bridge`/`run_claude_streaming_with_bridge`)
+- `src/cclaw/bridge.py` - Node.js bridge client (Unix socket JSONL protocol, bridge process lifecycle start/stop/health, pipe draining threads, `bridge_query`/`bridge_query_streaming` functions, `_bridge_directory()` auto-install from package data)
+- `src/cclaw/bridge_data/server.mjs` - Bridge server bundled with package (copied to `~/.cclaw/bridge/` at runtime)
+- `bridge/server.mjs` - Bridge server source (development copy, synced to bridge_data and runtime)
 - `src/cclaw/session.py` - Session directory/conversation log/workspace management, Claude session ID management (`get`/`save`/`clear_claude_session_id`), daily conversation rotation (`conversation-YYMMDD.md`, legacy `conversation.md` fallback), bot-level memory CRUD (`load_bot_memory`/`save_bot_memory`/`clear_bot_memory`), global memory CRUD (`load_global_memory`/`save_global_memory`/`clear_global_memory`), `collect_session_chat_ids()` for proactive message fallback
 - `src/cclaw/handlers.py` - Telegram handler factory (slash commands + messages + file receive/send + model change (with version display) + process cancel + /skills unified management (list/attach/detach/builtins) + /cron management (list/add natural language/run/remove/enable/disable) + /heartbeat management + /memory management + /compact token compaction + streaming response + /streaming toggle + session continuity (`_prepare_session_context`, `_call_with_resume_fallback`) + `set_bot_commands` command menu registration)
 - `src/cclaw/bot_manager.py` - Multi-bot polling, launchd daemon, per-bot error isolation, cron/heartbeat scheduler integration, graceful shutdown (`cancel_all_processes()` before `application.stop()`)
@@ -152,6 +155,18 @@ pytest
 - `_prepare_session_context()`: Determines resume/bootstrap (bootstrap order: global memory -> bot memory -> conversation history -> message)
 - `_call_with_resume_fallback()`: Handles fallback on resume failure (same bootstrap order)
 
+## Node.js Bridge
+
+- **Purpose**: Runs Claude Code queries via the Agent SDK's v1 `query()` function inside a long-lived Node.js process, avoiding Python subprocess spawn overhead per message
+- **Architecture**: Python (cclaw) → Unix socket (JSONL) → Node.js bridge (server.mjs) → Claude Agent SDK `query()` → Claude Code
+- **Lifecycle**: `bot_manager.py` calls `start_bridge()` before polling, `stop_bridge()` on shutdown
+- **Fallback**: If bridge is unavailable or errors, transparently falls back to `claude -p` subprocess
+- **Session retry**: If a stale session ID causes an error, bridge automatically retries without session options
+- **Logging**: Bridge logs to `/tmp/cclaw-bridge.log` (configurable via `CCLAW_BRIDGE_LOG`). Python drains stdout/stderr via background threads
+- **Doctor**: `cclaw doctor` shows bridge process status, socket connectivity, and SDK version
+- **Files**: `bridge/server.mjs` (source) → `src/cclaw/bridge_data/server.mjs` (packaged) → `~/.cclaw/bridge/server.mjs` (runtime, auto-overwritten on start)
+- **SDK v2 preview**: `unstable_v2_createSession`/`unstable_v2_prompt` exist but do NOT support CLAUDE.md or Bash tools (alpha API, direct Anthropic API call). Will be reconsidered when v2 matures. See: https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview
+
 ## Bot-Level Long-Term Memory
 
 - When user requests "remember this", the bot saves to `MEMORY.md`
@@ -192,6 +207,10 @@ pytest
 │       ├── conversation-YYMMDD.md # Daily conversation log (UTC date rotation)
 │       ├── .claude_session_id     # Claude Code session ID (for --resume)
 │       └── workspace/             # File storage
+├── bridge/
+│   ├── server.mjs        # Bridge server (auto-copied from package data on start)
+│   ├── package.json      # NPM package (depends on @anthropic-ai/claude-agent-sdk)
+│   └── node_modules/     # NPM dependencies (auto-installed on first start)
 ├── skills/<name>/
 │   ├── SKILL.md          # Skill instructions (required, composed into bot CLAUDE.md)
 │   ├── skill.yaml        # Skill config (tool-based only: type, status, required_commands, install_hints, environment_variables)

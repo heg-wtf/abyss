@@ -23,8 +23,8 @@ from cclaw.claude_runner import (
     STREAMING_CURSOR,
     cancel_process,
     is_process_running,
-    run_claude,
-    run_claude_streaming,
+    run_claude_streaming_with_bridge,
+    run_claude_with_bridge,
 )
 from cclaw.config import (
     DEFAULT_MODEL,
@@ -352,7 +352,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         typing_task = asyncio.create_task(send_typing_periodically())
 
         try:
-            response = await run_claude(
+            response = await run_claude_with_bridge(
                 working_directory=working_directory,
                 message=prompt,
                 extra_arguments=claude_arguments if claude_arguments else None,
@@ -464,7 +464,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 logger.debug("Stream fallback edit failed: %s", edit_error)
                 stream_stopped = True
 
-        response = await run_claude_streaming(
+        response = await run_claude_streaming_with_bridge(
             working_directory=working_directory,
             message=prompt,
             on_text_chunk=on_text_chunk,

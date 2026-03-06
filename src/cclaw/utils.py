@@ -111,11 +111,28 @@ def setup_logging(log_level: str = "INFO") -> None:
     today = datetime.now().strftime("%y%m%d")
     log_file = log_directory / f"cclaw-{today}.log"
 
+    from rich.logging import RichHandler
+
+    level = getattr(logging, log_level.upper(), logging.INFO)
+
     logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        level=level,
+        format="%(message)s",
+        datefmt="[%X]",
         handlers=[
             logging.FileHandler(log_file),
-            logging.StreamHandler(),
+            RichHandler(
+                level=level,
+                rich_tracebacks=True,
+                tracebacks_show_locals=False,
+                show_path=False,
+            ),
         ],
+        force=True,
+    )
+
+    # Keep file handler with full format for log files
+    file_handler = logging.root.handlers[0]
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s")
     )

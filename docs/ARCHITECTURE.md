@@ -3,11 +3,15 @@
 ## Overall Structure
 
 ```
-Telegram <-> python-telegram-bot (Long Polling) <-> handlers.py <-> claude_runner.py <-> Claude Code CLI
+Telegram <-> python-telegram-bot (Long Polling) <-> handlers.py <-> claude_runner.py
                                                        |                 |
                                                   session.py         skill.py
                                                        |                 |
                                               ~/.cclaw/bots/      ~/.cclaw/skills/
+
+claude_runner.py execution paths:
+  (1) Bridge path:     Python -> Unix socket (JSONL) -> bridge.py -> Node.js (server.mjs) -> Claude Agent SDK query()
+  (2) Subprocess path: Python -> subprocess -> claude -p (fallback when bridge unavailable)
 ```
 
 ## Core Design Decisions
@@ -21,7 +25,21 @@ Instead of calling the LLM API directly, we run the `claude -p` CLI as a subproc
 - Sets session directory as working directory via subprocess `cwd` parameter
 - Model selection via `--model` flag (sonnet/opus/haiku)
 
-### 2. File-Based Sessions
+### 2. Node.js Bridge (Claude Agent SDK)
+
+A long-lived Node.js process runs Claude Code queries via the Agent SDK's v1 `query()` function, communicating with Python over a Unix socket using JSONL protocol.
+
+- **Purpose**: Avoids spawning a new `claude` process per message. The bridge keeps a single Node.js runtime alive
+- **Architecture**: `bridge.py` (Python client) <-> Unix socket (`/tmp/cclaw-bridge.sock`) <-> `server.mjs` (Node.js server) <-> `@anthropic-ai/claude-agent-sdk` `query()`
+- **Lifecycle**: `bot_manager.py` calls `start_bridge()` before polling, `stop_bridge()` on shutdown
+- **Auto-install**: `_bridge_directory()` copies bundled `bridge_data/` files to `~/.cclaw/bridge/` and runs `npm install` on first start. `server.mjs` is always overwritten to pick up fixes
+- **Fallback**: If bridge is unavailable (not started, connection error), `claude_runner.py` transparently falls back to `claude -p` subprocess execution
+- **Session retry**: If a stale session ID causes an error, bridge automatically retries without session options
+- **Pipe draining**: Background daemon threads drain stdout/stderr to prevent buffer overflow
+- **Doctor**: `cclaw doctor` shows bridge process status, socket connectivity, and SDK version
+- **SDK v2 note**: `unstable_v2_createSession`/`unstable_v2_prompt` exist but do NOT support CLAUDE.md or Bash tools (alpha API). Will be reconsidered when v2 matures. See: https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview
+
+### 3. File-Based Sessions
 
 Sessions are managed via directory structure without a database.
 
@@ -30,7 +48,7 @@ Sessions are managed via directory structure without a database.
 - `conversation-YYMMDD.md`: Daily conversation log (UTC date rotation, markdown append). Legacy `conversation.md` supported as read fallback
 - `workspace/`: File storage for Claude Code outputs
 
-### 3. Multi-Bot Architecture
+### 4. Multi-Bot Architecture
 
 Multiple Telegram bots run simultaneously in a single process.
 
@@ -39,14 +57,14 @@ Multiple Telegram bots run simultaneously in a single process.
 - Per-bot independent configuration (token, personality, role, permissions, model)
 - Individual bot errors are isolated from other bots
 
-### 4. Per-Session Concurrency Control
+### 5. Per-Session Concurrency Control
 
 Sequential processing when multiple messages arrive in the same chat.
 
 - `asyncio.Lock` managed by `{bot_name}:{chat_id}` key
 - When lock is held, sends "Message queued" notification then waits (message queuing)
 
-### 5. Process Tracking
+### 6. Process Tracking
 
 Running Claude Code subprocesses are tracked per session.
 
@@ -54,7 +72,7 @@ Running Claude Code subprocesses are tracked per session.
 - `/cancel` command kills running process with SIGKILL
 - `returncode == -9` raises `asyncio.CancelledError`
 
-### 6. Model Selection
+### 7. Model Selection
 
 Per-bot Claude model configuration with runtime changes.
 
@@ -63,7 +81,7 @@ Per-bot Claude model configuration with runtime changes.
 - Also changeable via CLI `cclaw bot model <name> <model>`
 - Valid models: sonnet (4.5), opus (4.6), haiku (3.5) — `/model` shows version alongside name
 
-### 7. Skill System
+### 8. Skill System
 
 Extends bot capabilities by linking tools/knowledge. Skills are classified by origin:
 
@@ -80,7 +98,7 @@ Internally, skills have different tool configurations:
 - CLI skills: Environment variables auto-injected during subprocess execution
 - **Dual-layer permission defense**: `allowed_tools` in skill.yaml controls hard auto-approval (tools not listed are blocked in `-p` mode). SKILL.md provides soft guardrails for tools that are allowed but can be used destructively (e.g., `execute_sql` with DELETE statements)
 
-### 8. Cron Schedule Automation
+### 9. Cron Schedule Automation
 
 Automatically runs Claude Code at scheduled times and sends results via Telegram.
 
@@ -100,7 +118,7 @@ Automatically runs Claude Code at scheduled times and sends results via Telegram
 - **Unique naming**: `generate_unique_job_name()` appends `-2`, `-3` suffix on conflict
 - **Full Telegram CRUD**: `/cron list|add|run|remove|enable|disable`
 
-### 9. Heartbeat (Periodic Situation Awareness)
+### 10. Heartbeat (Periodic Situation Awareness)
 
 Proactive agent feature that periodically wakes Claude Code to run HEARTBEAT.md checklist and only sends Telegram messages when there's something to report.
 
@@ -114,7 +132,7 @@ Proactive agent feature that periodically wakes Claude Code to run HEARTBEAT.md 
 - Scheduler loop re-reads `bot.yaml` every cycle for runtime config changes
 - Isolated working directory: Claude Code runs in `heartbeat_sessions/`
 
-### 10. Built-in Skill System
+### 11. Built-in Skill System
 
 Frequently used skills are bundled as templates inside the package, installable via `cclaw skills install`.
 
@@ -127,7 +145,7 @@ Frequently used skills are bundled as templates inside the package, installable 
 - `cclaw skills` command shows all skills with origin type (builtin/custom), including uninstalled builtins
 - Telegram `/skills` handler also shows origin type (builtin/custom) and uninstalled builtins
 
-### 11. Session Continuity
+### 12. Session Continuity
 
 Each message runs `claude -p` as a new process, but maintains conversation context.
 
@@ -141,7 +159,7 @@ Each message runs `claude -p` as a new process, but maintains conversation conte
 - `_call_with_resume_fallback()`: Handles fallback on resume failure
 - Cron and heartbeat: one-shot executions with global memory + bot memory injected into prompt
 
-### 12. Bot-Level Long-Term Memory
+### 13. Bot-Level Long-Term Memory
 
 When user requests "remember this", the bot saves to `MEMORY.md` and injects it into the prompt on new session bootstrap for persistent memory.
 
@@ -152,7 +170,7 @@ When user requests "remember this", the bot saves to `MEMORY.md` and injects it 
 - Management: Telegram `/memory` (show), `/memory clear` (reset), CLI `cclaw memory show|edit|clear`
 - CRUD functions in `session.py`: `memory_file_path()`, `load_bot_memory()`, `save_bot_memory()`, `clear_bot_memory()`
 
-### 13. Global Memory
+### 14. Global Memory
 
 Shared read-only memory accessible by all bots, managed via CLI only.
 
@@ -165,7 +183,7 @@ Shared read-only memory accessible by all bots, managed via CLI only.
 - Not editable via Telegram (no file path exposed, no Telegram command)
 - CRUD functions in `session.py`: `global_memory_file_path()`, `load_global_memory()`, `save_global_memory()`, `clear_global_memory()`
 
-### 14. Streaming Response
+### 15. Streaming Response
 
 Delivers Claude Code output to Telegram in real-time. User-toggleable on/off.
 
@@ -183,7 +201,7 @@ Delivers Claude Code output to Telegram in real-time. User-toggleable on/off.
   - `run_claude()`: Sends typing action every 4 seconds -> Markdown-to-HTML conversion on completion -> batch send
   - Same pattern as cron and heartbeat (Phase 3 approach)
 
-### 15. Token Compact
+### 16. Token Compact
 
 Compresses bot MD files (MEMORY.md, user-created SKILL.md, HEARTBEAT.md) via one-shot `claude -p` calls to reduce token costs.
 
@@ -195,7 +213,7 @@ Compresses bot MD files (MEMORY.md, user-created SKILL.md, HEARTBEAT.md) via one
 - **CLI**: `cclaw bot compact <name>` with `--yes/-y` skip confirmation
 - **Telegram**: `/compact` auto-saves on success
 
-### 16. Encrypted Backup
+### 17. Encrypted Backup
 
 Full backup of `~/.cclaw/` directory to an AES-256 encrypted zip file.
 
@@ -209,15 +227,17 @@ Full backup of `~/.cclaw/` directory to an AES-256 encrypted zip file.
 
 ```
 cli.py
-├── onboarding.py -> config.py
+├── onboarding.py -> config.py, bridge.py (bridge_health, is_bridge_running)
 ├── bot_manager.py
 │   ├── config.py
+│   ├── bridge.py (start_bridge, stop_bridge)
 │   ├── skill.py (regenerate_bot_claude_md)
 │   ├── cron.py (list_cron_jobs, run_cron_scheduler)
 │   ├── heartbeat.py (run_heartbeat_scheduler)
 │   ├── handlers.py
 │   │   ├── claude_runner.py
-│   │   │   └── skill.py (merge_mcp_configs, collect_skill_environment_variables)
+│   │   │   ├── skill.py (merge_mcp_configs, collect_skill_environment_variables)
+│   │   │   └── bridge.py (bridge_query, bridge_query_streaming, is_bridge_running)
 │   │   ├── cron.py (list_cron_jobs, get_cron_job, execute_cron_job, next_run_time, resolve_job_timezone)
 │   │   ├── heartbeat.py (get/enable/disable_heartbeat, execute_heartbeat)
 │   │   ├── skill.py (attach/detach, is_skill, skill_status)
@@ -227,6 +247,7 @@ cli.py
 │   │   ├── config.py (save_bot_config, VALID_MODELS)
 │   │   └── utils.py
 │   └── utils.py
+├── bridge.py -> config.py (cclaw_home), bridge_data/ (package data auto-copy)
 ├── cron.py -> config.py, claude_runner.py, session.py (load_global_memory, load_bot_memory), utils.py
 ├── heartbeat.py -> config.py, claude_runner.py, session.py (load_global_memory, load_bot_memory), utils.py
 ├── backup.py -> (standalone: pathlib, pyzipper)

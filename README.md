@@ -166,6 +166,8 @@ Use the `/send` command to retrieve workspace files back via Telegram.
 | Cron Scheduler | croniter |
 | Encrypted Backup | pyzipper (AES-256) |
 | AI Engine | Claude Code CLI (`claude -p`, streaming) |
+| AI Bridge | Node.js + Claude Agent SDK (optional, Unix socket) |
+| Logging | Rich (RichHandler, colorized console) |
 | Process Manager | launchd (macOS) |
 
 ## CLI Commands
@@ -248,11 +250,15 @@ cclaw backup                   # Backup ~/.cclaw/ to AES-256 encrypted zip
 ```
 cclaw/
 ├── pyproject.toml
+├── bridge/
+│   └── server.mjs          # Node.js bridge server (development source)
 ├── src/cclaw/
 │   ├── cli.py              # Typer CLI entry point (ASCII art banner)
 │   ├── config.py           # Configuration load/save
 │   ├── onboarding.py       # Setup wizard
-│   ├── claude_runner.py    # Claude Code subprocess runner (batch + streaming)
+│   ├── claude_runner.py    # Claude Code runner (subprocess + bridge, batch + streaming)
+│   ├── bridge.py           # Node.js bridge client (Unix socket, lifecycle management)
+│   ├── bridge_data/        # Bridge server bundled with package (server.mjs, package.json)
 │   ├── session.py          # Session directory management
 │   ├── handlers.py         # Telegram handler factory
 │   ├── bot_manager.py      # Multi-bot lifecycle
@@ -307,6 +313,10 @@ Configuration and session data are stored in `~/.cclaw/`. Override the path with
 │               ├── conversation-YYMMDD.md  # Daily conversation log (UTC date)
 │               ├── .claude_session_id      # Claude Code session ID (for --resume)
 │               └── workspace/
+├── bridge/
+│   ├── server.mjs            # Bridge server (auto-copied from package data)
+│   ├── package.json          # NPM package (@anthropic-ai/claude-agent-sdk)
+│   └── node_modules/         # NPM dependencies (auto-installed)
 ├── skills/
 │   └── <skill-name>/
 │       ├── SKILL.md          # Skill instructions (required)

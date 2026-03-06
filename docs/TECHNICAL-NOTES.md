@@ -16,18 +16,85 @@ It attempts to split at line break boundaries, and truncates at the limit when n
 
 ## Claude Code Execution
 
-Two execution modes are supported:
+Three execution paths are supported:
 
-- **Batch mode**: `claude -p "<message>" --output-format text` (cron, heartbeat, etc.)
-- **Streaming mode**: `claude -p "<message>" --output-format stream-json --verbose --include-partial-messages` (Telegram conversations)
+- **Bridge batch**: `bridge_query()` via Unix socket -> Claude Agent SDK `query()` (preferred, when bridge is running)
+- **Bridge streaming**: `bridge_query_streaming()` via Unix socket -> Claude Agent SDK `query()` with streaming
+- **Subprocess batch**: `claude -p "<message>" --output-format text` (fallback when bridge unavailable)
+- **Subprocess streaming**: `claude -p "<message>" --output-format stream-json --verbose --include-partial-messages`
 
-The working directory is set to the session directory via the subprocess `cwd` parameter.
+The working directory is set to the session directory via the subprocess `cwd` parameter (subprocess) or `cwd` field in JSONL request (bridge).
 
 - `shutil.which("claude")` resolves the full path to the Claude CLI. Works regardless of installation method (`uv run`, `pip install`, `pipx install`, etc.) by searching PATH. Raises `RuntimeError` with installation guidance if not found.
 - `--output-format text`: Text output (not JSON)
 - `--model <model>`: Model selection (sonnet/opus/haiku). Flag is omitted when `model` parameter is None.
 - Additional arguments can be passed via the `claude_args` field in `bot.yaml`
 - Default timeout: 300 seconds (`command_timeout` in `config.yaml`)
+
+### Skill Config Preparation (`_prepare_skill_config`)
+
+Shared function that handles skill-related file setup for both subprocess and bridge execution paths:
+
+- Writes `.mcp.json` to working directory (merged MCP configs from all attached skills)
+- Writes `.claude/settings.json` with `allowedTools` list
+- Collects environment variables from all attached skills
+- Returns `(allowed_tools, environment_variables)` tuple
+- Used by `run_claude()`, `run_claude_streaming()`, `run_claude_with_bridge()`, `run_claude_streaming_with_bridge()`
+
+## Node.js Bridge
+
+### Protocol
+
+JSONL over Unix socket (`/tmp/cclaw-bridge.sock`, configurable via `CCLAW_BRIDGE_SOCKET`).
+
+Request format:
+```json
+{"action": "query", "sessionKey": "...", "prompt": "...", "cwd": "...", "model": "...", "streaming": false}
+```
+
+Response format:
+```json
+{"type": "result", "text": "...", "sessionId": "..."}
+```
+
+Streaming responses send multiple `{"type": "text", "text": "..."}` lines followed by a final `{"type": "result", ...}`.
+
+### Bridge Lifecycle
+
+1. `bot_manager.py` calls `start_bridge()` before starting bot polling
+2. Bridge spawns Node.js process running `server.mjs`
+3. Waits for `BRIDGE_READY` on stdout (up to 30 seconds)
+4. Background daemon threads drain stdout/stderr to prevent pipe buffer overflow
+5. On shutdown, `stop_bridge()` sends SIGTERM, waits 5 seconds, then SIGKILL if needed
+6. Socket file is cleaned up on shutdown
+
+### Bridge Auto-Install
+
+`_bridge_directory()` ensures `~/.cclaw/bridge/` exists with the latest files:
+- Copies `server.mjs` and `package.json` from bundled `bridge_data/` package
+- `server.mjs` is always overwritten to pick up fixes (not just when missing)
+- Runs `npm install --silent` if `node_modules/` doesn't exist
+
+### Session Retry in Bridge
+
+If a query fails with a session-related error (stale session ID), the bridge automatically retries without session options (`resume`/`sessionId`). This matches the subprocess fallback behavior in `_call_with_resume_fallback()`.
+
+### Bridge Health Check
+
+`cclaw doctor` shows bridge status including:
+- Process running state and PID
+- Socket file existence
+- SDK version (from `package.json`)
+- Health endpoint response (uptime)
+
+## Logging (RichHandler)
+
+`setup_logging()` in `utils.py` configures two handlers on the root logger:
+
+- **FileHandler**: Writes to `~/.cclaw/logs/cclaw-YYMMDD.log` with full format (`%(asctime)s [%(name)s] %(levelname)s: %(message)s`)
+- **RichHandler**: Colorized console output via `rich.logging.RichHandler` (tracebacks enabled, show_path disabled)
+
+Key detail: `logging.basicConfig()` is called with `force=True` to ensure it replaces any pre-existing handlers. Without `force=True`, if any library (e.g., `httpx`, `telegram`) configures logging before `setup_logging()` is called, `basicConfig()` would be a no-op and all logs would bypass RichHandler.
 
 ## Model Selection
 
