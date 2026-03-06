@@ -1,6 +1,6 @@
 [project]
 name = "cclaw"
-version = "2026.02.28"
+version = "2026.03.06"
 description = "Telegram + Claude Code personal AI assistant"
 requires-python = ">=3.11"
 dependencies = [
