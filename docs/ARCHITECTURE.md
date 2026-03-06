@@ -2,16 +2,30 @@
 
 ## Overall Structure
 
+```mermaid
+graph LR
+    TG[Telegram] <-->|Long Polling| PTB[python-telegram-bot]
+    PTB <--> H[handlers.py]
+    H <--> CR[claude_runner.py]
+    H <--> S[session.py]
+    CR <--> SK[skill.py]
+    S <--> BOTS[~/.cclaw/bots/]
+    SK <--> SKILLS[~/.cclaw/skills/]
 ```
-Telegram <-> python-telegram-bot (Long Polling) <-> handlers.py <-> claude_runner.py
-                                                       |                 |
-                                                  session.py         skill.py
-                                                       |                 |
-                                              ~/.cclaw/bots/      ~/.cclaw/skills/
 
-claude_runner.py execution paths:
-  (1) Bridge path:     Python -> Unix socket (JSONL) -> bridge.py -> Node.js (server.mjs) -> Claude Agent SDK query()
-  (2) Subprocess path: Python -> subprocess -> claude -p (fallback when bridge unavailable)
+### Claude Code Execution Paths
+
+```mermaid
+graph LR
+    CR[claude_runner.py] -->|1. Bridge| B[bridge.py]
+    B -->|Unix Socket JSONL| NJ[Node.js server.mjs]
+    NJ --> SDK["Claude Agent SDK query()"]
+
+    CR -->|2. Subprocess| SUB["claude -p"]
+    SUB --> CC[Claude Code]
+
+    style B fill:#2d6,color:#fff
+    style SUB fill:#d62,color:#fff
 ```
 
 ## Core Design Decisions
@@ -237,134 +251,174 @@ Full backup of `~/.cclaw/` directory to an AES-256 encrypted zip file.
 
 ## Module Dependencies
 
-```
-cli.py
-├── onboarding.py -> config.py, bridge.py (bridge_health, is_bridge_running)
-├── bot_manager.py
-│   ├── config.py
-│   ├── bridge.py (start_bridge, stop_bridge)
-│   ├── skill.py (regenerate_bot_claude_md)
-│   ├── cron.py (list_cron_jobs, run_cron_scheduler)
-│   ├── heartbeat.py (run_heartbeat_scheduler)
-│   ├── handlers.py
-│   │   ├── claude_runner.py
-│   │   │   ├── skill.py (merge_mcp_configs, collect_skill_environment_variables)
-│   │   │   └── bridge.py (bridge_query, bridge_query_streaming, is_bridge_running)
-│   │   ├── cron.py (list_cron_jobs, get_cron_job, execute_cron_job, next_run_time, resolve_job_timezone)
-│   │   ├── heartbeat.py (get/enable/disable_heartbeat, execute_heartbeat)
-│   │   ├── skill.py (attach/detach, is_skill, skill_status)
-│   │   ├── builtin_skills (list_builtin_skills)
-│   │   ├── token_compact.py (collect_compact_targets, run_compact, format_compact_report, save_compact_results)
-│   │   ├── session.py (ensure_session, reset_session, get/save/clear_claude_session_id, load_conversation_history, load_bot_memory, clear_bot_memory, load_global_memory)
-│   │   ├── config.py (save_bot_config, VALID_MODELS)
-│   │   └── utils.py
-│   └── utils.py
-├── bridge.py -> config.py (cclaw_home), bridge_data/ (package data auto-copy)
-├── cron.py -> config.py, claude_runner.py, session.py (load_global_memory, load_bot_memory), utils.py
-├── heartbeat.py -> config.py, claude_runner.py, session.py (load_global_memory, load_bot_memory), utils.py
-├── backup.py -> (standalone: pathlib, pyzipper)
-├── token_compact.py -> config.py, skill.py (skill_directory), builtin_skills (is_builtin_skill), claude_runner.py (run_claude)
-├── skill.py -> config.py, builtin_skills (circular reference: config.py -> skill.py resolved via lazy import)
-├── builtin_skills -> (internal package templates, no external dependencies)
-└── config.py
+```mermaid
+graph TD
+    CLI[cli.py] --> OB[onboarding.py]
+    CLI --> BM[bot_manager.py]
+    CLI --> BR[bridge.py]
+    CLI --> CRON[cron.py]
+    CLI --> HB[heartbeat.py]
+    CLI --> BAK[backup.py]
+    CLI --> TC[token_compact.py]
+    CLI --> SK[skill.py]
+
+    OB --> CFG[config.py]
+    OB --> BR
+
+    BM --> CFG
+    BM --> BR
+    BM --> SK
+    BM --> CRON
+    BM --> HB
+    BM --> HA[handlers.py]
+
+    HA --> CR[claude_runner.py]
+    HA --> CRON
+    HA --> HB
+    HA --> SK
+    HA --> BS[builtin_skills]
+    HA --> TC
+    HA --> SE[session.py]
+    HA --> CFG
+    HA --> UT[utils.py]
+
+    CR --> SK
+    CR --> BR
+
+    BR --> CFG
+
+    CRON --> CFG
+    CRON --> CR
+    CRON --> SE
+
+    HB --> CFG
+    HB --> CR
+    HB --> SE
+
+    TC --> CFG
+    TC --> SK
+    TC --> BS
+    TC --> CR
+
+    SK --> CFG
+    SK --> BS
+
+    CFG -.->|lazy import| SK
+
+    style CLI fill:#36c,color:#fff
+    style BM fill:#36c,color:#fff
+    style HA fill:#f90,color:#fff
+    style CR fill:#f90,color:#fff
 ```
 
 ## Process Management
 
-- **Foreground**: `cclaw start` -> `asyncio.run()` -> Ctrl+C to quit
-- **Daemon**: `cclaw start --daemon` -> Creates launchd plist -> `launchctl load`
+```mermaid
+graph TD
+    START["cclaw start"] --> MODE{daemon?}
+    MODE -->|No| FG["asyncio.run(_run_bots())"]
+    MODE -->|Yes| PLIST["Create launchd plist"]
+    PLIST --> LOAD["launchctl load"]
+
+    FG --> BRIDGE["start_bridge()"]
+    BRIDGE --> QMD["_start_qmd_daemon()"]
+    QMD --> POLL["start_polling() per bot"]
+    POLL --> CRON["cron/heartbeat schedulers"]
+    CRON --> WAIT["await stop_event"]
+
+    WAIT -->|SIGINT/SIGTERM| SHUT["Graceful Shutdown"]
+    SHUT --> K1["cancel_all_processes()"]
+    K1 --> K2["cancel cron/heartbeat tasks"]
+    K2 --> K3["application.stop() per bot"]
+    K3 --> K4["_stop_qmd_daemon()"]
+    K4 --> K5["stop_bridge()"]
+```
+
 - **PID file**: Records current process ID in `~/.cclaw/cclaw.pid`
-- **Graceful Shutdown**: SIGINT/SIGTERM -> `cancel_all_processes()` kills all running Claude subprocesses first -> cancel cron/heartbeat tasks -> `application.stop()` for each bot. Without killing subprocesses first, `application.stop()` would wait for running handlers (up to `command_timeout` seconds)
+- **Graceful Shutdown**: Without killing subprocesses first, `application.stop()` would wait for running handlers (up to `command_timeout` seconds)
 
 ## Message Processing Flow
 
 ### Text Messages
-```
-Receive -> Permission check -> Session Lock (queuing) -> ensure_session -> _prepare_session_context (resume/bootstrap decision, inject global memory+bot memory+history on bootstrap)
-  -> _call_with_resume_fallback -> streaming_enabled branch
-    -> (streaming on) run_claude_streaming (--resume or --session-id) -> per-token message edit -> Markdown->HTML conversion -> final message replace/split send
-    -> (streaming off) typing action every 4s -> run_claude (--resume or --session-id) -> Markdown->HTML conversion -> batch send
-  -> (on resume failure) clear_session_id -> retry with bootstrap
+
+```mermaid
+graph TD
+    RCV[Receive Message] --> PERM[Permission Check]
+    PERM --> LOCK[Session Lock / Queuing]
+    LOCK --> SESS[ensure_session]
+    SESS --> CTX["_prepare_session_context()"]
+    CTX --> FALLBACK["_call_with_resume_fallback()"]
+
+    FALLBACK --> STREAM{streaming?}
+    STREAM -->|On| SS["run_claude_streaming()"]
+    SS --> EDIT[Per-token message edit]
+    EDIT --> HTML1[Markdown → HTML]
+    HTML1 --> FINAL[Final message replace/split]
+
+    STREAM -->|Off| TYPE[Typing action every 4s]
+    TYPE --> RC["run_claude()"]
+    RC --> HTML2[Markdown → HTML]
+    HTML2 --> BATCH[Batch send]
+
+    FALLBACK -->|Resume failure| CLEAR[clear_session_id]
+    CLEAR --> RETRY[Retry with bootstrap]
 ```
 
 ### Files (Photos/Documents)
-```
-Receive -> Permission check -> Session Lock (queuing) -> Download to workspace -> Pass caption + file path to Claude -> Send response
-```
 
-### /cancel Command
-```
-Receive -> Permission check -> Look up process in _running_processes -> process.kill() -> "Execution cancelled" response
-```
-
-### /send Command
-```
-Receive -> Permission check -> Look up workspace file -> reply_document() to send
-```
-
-### /skills Command
-```
-Receive -> Permission check -> Args branch
-  -> (none or "list"): list_skills() -> bots_using_skill() for link status -> list_builtin_skills() for uninstalled builtins -> full skill list response
-  -> "attach <name>": is_skill() -> skill_status() == "active" check -> attach_skill_to_bot() -> sync in-memory bot_config -> response
-  -> "detach <name>": detach_skill_from_bot() -> sync in-memory bot_config -> response
+```mermaid
+graph LR
+    RCV[Receive] --> PERM[Permission] --> LOCK[Session Lock]
+    LOCK --> DL[Download to workspace]
+    DL --> CLAUDE[Pass caption + file path to Claude]
+    CLAUDE --> SEND[Send response]
 ```
 
 ### Cron Scheduler
-```
-Bot start -> Load cron.yaml -> asyncio.create_task(run_cron_scheduler) -> 30-second loop
-  -> Match current time against schedule -> execute_cron_job -> inject global memory + bot memory -> run_claude -> Send results to allowed_users
+
+```mermaid
+graph TD
+    START[Bot start] --> LOAD[Load cron.yaml]
+    LOAD --> TASK["asyncio.create_task(run_cron_scheduler)"]
+    TASK --> LOOP[30-second loop]
+    LOOP --> MATCH{Schedule match?}
+    MATCH -->|Yes| EXEC[execute_cron_job]
+    MATCH -->|No| LOOP
+    EXEC --> INJECT[Inject global memory + bot memory]
+    INJECT --> RUN["run_claude()"]
+    RUN --> SEND[Send results to allowed_users]
+    SEND --> LOOP
 ```
 
 ### /cron add (Natural Language)
-```
-Receive "/cron add 매일 아침 9시 이메일 요약" -> resolve_default_timezone()
-  -> parse_natural_language_schedule() via claude -p (haiku) -> JSON {type, schedule/at, message, name}
-  -> generate_unique_job_name() -> add_cron_job() -> Reply with confirmation + next run time
-```
 
-### /cron run Command
-```
-Receive -> Permission check -> get_cron_job() -> execute_cron_job() -> Send results
+```mermaid
+graph LR
+    INPUT["/cron add 매일 아침 9시 이메일 요약"] --> TZ["resolve_default_timezone()"]
+    TZ --> PARSE["parse_natural_language_schedule()
+    via claude -p (haiku)"]
+    PARSE --> JSON["JSON {type, schedule, message, name}"]
+    JSON --> NAME["generate_unique_job_name()"]
+    NAME --> ADD["add_cron_job()"]
+    ADD --> REPLY[Confirmation + next run time]
 ```
 
 ### Heartbeat Scheduler
-```
-Bot start -> Check heartbeat.enabled -> asyncio.create_task(run_heartbeat_scheduler) -> interval_minutes loop
-  -> Check active_hours range -> Skip if outside range
-  -> Load HEARTBEAT.md -> inject global memory + bot memory -> run_claude -> Check for HEARTBEAT_OK in response
-  -> If HEARTBEAT_OK present: log only
-  -> If HEARTBEAT_OK absent: send to allowed_users via Telegram
-```
 
-### /memory Command
-```
-Receive -> Permission check -> Args branch
-  -> (none): load_bot_memory() -> Show contents (or "No memories" message)
-  -> clear: clear_bot_memory() -> "Memory cleared" response
-```
-
-### /compact Command
-```
-Receive -> Permission check -> collect_compact_targets() -> Show target list
-  -> typing action -> run_compact() (sequential, per-target error isolation)
-  -> format_compact_report() -> split_message() + send
-  -> save_compact_results() (success only) -> regenerate_bot_claude_md() + update_session_claude_md()
-```
-
-### /streaming Command
-```
-Receive -> Permission check -> Args branch
-  -> (none): Show current streaming_enabled status
-  -> on: streaming_enabled = True, save to bot.yaml
-  -> off: streaming_enabled = False, save to bot.yaml
-```
-
-### /heartbeat Command
-```
-Receive -> Permission check -> Subcommand branch
-  -> (none): get_heartbeat_config() -> Show status
-  -> on: enable_heartbeat() -> Enable (auto-creates HEARTBEAT.md)
-  -> off: disable_heartbeat() -> Disable
-  -> run: execute_heartbeat() -> Run immediately
+```mermaid
+graph TD
+    START[Bot start] --> CHECK{heartbeat.enabled?}
+    CHECK -->|No| SKIP[Skip]
+    CHECK -->|Yes| TASK["asyncio.create_task(run_heartbeat_scheduler)"]
+    TASK --> LOOP[interval_minutes loop]
+    LOOP --> HOURS{Within active_hours?}
+    HOURS -->|No| LOOP
+    HOURS -->|Yes| LOAD[Load HEARTBEAT.md]
+    LOAD --> INJECT[Inject global memory + bot memory]
+    INJECT --> RUN["run_claude()"]
+    RUN --> OK{HEARTBEAT_OK?}
+    OK -->|Yes| LOG[Log only]
+    OK -->|No| SEND[Send to allowed_users]
+    LOG --> LOOP
+    SEND --> LOOP
 ```

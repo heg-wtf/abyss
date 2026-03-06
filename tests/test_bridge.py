@@ -33,7 +33,6 @@ class TestBridgeDirectory:
         monkeypatch.setenv("CCLAW_HOME", str(tmp_path))
         # First install
         directory = _bridge_directory()
-        old_content = (directory / "server.mjs").read_text()
         # Modify server.mjs
         (directory / "server.mjs").write_text("old version")
         # Re-install should overwrite
