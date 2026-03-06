@@ -278,6 +278,21 @@ def bots_using_skill(skill_name: str) -> list[str]:
 # --- CLAUDE.md Composition ---
 
 
+def _load_qmd_builtin_markdown() -> str | None:
+    """Load QMD SKILL.md from the builtin skills directory."""
+    from cclaw.builtin_skills import get_builtin_skill_path
+
+    builtin_path = get_builtin_skill_path("qmd")
+    if builtin_path is None:
+        return None
+
+    skill_md = builtin_path / "SKILL.md"
+    if not skill_md.exists():
+        return None
+
+    return skill_md.read_text(encoding="utf-8")
+
+
 def compose_claude_md(
     bot_name: str,
     personality: str,
@@ -335,23 +350,34 @@ def compose_claude_md(
         sections.append("- 기존 내용을 유지하고, 새 항목을 추가하라.")
         sections.append("- 카테고리별로 정리하라 (개인정보, 선호사항, 프로젝트, 기타).")
 
+    # Collect skills (attached + auto-injected)
+    active_skills = []
+
     if skill_names:
-        active_skills = []
         for skill_name in skill_names:
             markdown = load_skill_markdown(skill_name)
             if markdown is not None:
                 active_skills.append((skill_name, markdown))
 
-        if active_skills:
+    # Auto-inject QMD instructions if CLI is available (system-wide, all bots)
+    if shutil.which("qmd"):
+        # Check if qmd is already in the skill list (avoid duplicate)
+        qmd_already_included = any(name == "qmd" for name, _ in active_skills)
+        if not qmd_already_included:
+            qmd_markdown = _load_qmd_builtin_markdown()
+            if qmd_markdown:
+                active_skills.append(("qmd", qmd_markdown))
+
+    if active_skills:
+        sections.append("")
+        sections.append("---")
+        sections.append("")
+        sections.append("# Available Skills")
+        for skill_name, markdown in active_skills:
             sections.append("")
-            sections.append("---")
+            sections.append(f"## {skill_name}")
             sections.append("")
-            sections.append("# Available Skills")
-            for skill_name, markdown in active_skills:
-                sections.append("")
-                sections.append(f"## {skill_name}")
-                sections.append("")
-                sections.append(markdown.strip())
+            sections.append(markdown.strip())
 
     sections.append("")
     return "\n".join(sections)
@@ -452,6 +478,49 @@ def install_builtin_skill(name: str) -> Path:
 
     logger.info("Installed built-in skill '%s' to %s", name, target)
     return target
+
+
+def setup_qmd_conversations_collection() -> bool:
+    """Register cclaw conversation logs as a QMD collection.
+
+    Creates a 'cclaw-conversations' collection pointing to ~/.cclaw/bots/
+    with a glob mask for conversation-*.md files.
+
+    Returns True if the collection was registered successfully.
+    """
+    import subprocess
+
+    bots_path = cclaw_home() / "bots"
+    if not bots_path.exists():
+        logger.warning("No bots directory found, skipping QMD collection setup")
+        return False
+
+    result = subprocess.run(
+        [
+            "qmd",
+            "collection",
+            "add",
+            str(bots_path),
+            "--name",
+            "cclaw-conversations",
+            "--mask",
+            "**/conversation-*.md",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        logger.error("Failed to register QMD collection: %s", result.stderr)
+        return False
+
+    logger.info("Registered QMD collection 'cclaw-conversations' at %s", bots_path)
+
+    # Run indexing
+    subprocess.run(["qmd", "update"], capture_output=True, text=True)
+    logger.info("QMD index updated")
+
+    return True
 
 
 def collect_skill_allowed_tools(skill_names: list[str]) -> list[str]:

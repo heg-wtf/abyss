@@ -30,8 +30,13 @@ def mock_claude_path():
     """Mock shutil.which to always return a claude path and reset cache."""
     import cclaw.claude_runner as runner_module
 
+    def _which_claude_only(name, *args, **kwargs):
+        if name == "claude":
+            return "/usr/local/bin/claude"
+        return None
+
     runner_module._cached_claude_path = None
-    with patch(MOCK_WHICH, return_value="/usr/local/bin/claude"):
+    with patch(MOCK_WHICH, side_effect=_which_claude_only):
         yield
     runner_module._cached_claude_path = None
 

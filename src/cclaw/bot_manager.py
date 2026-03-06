@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -101,6 +102,15 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
         console.print("  [green]BRIDGE[/green] Node.js bridge (persistent sessions)")
     else:
         console.print("  [yellow]BRIDGE[/yellow] Not available, using subprocess fallback")
+
+    # Start QMD HTTP daemon if QMD CLI is available (system-wide, all bots)
+    if shutil.which("qmd"):
+        qmd_started = await _start_qmd_daemon()
+        if qmd_started:
+            console.print("  [green]QMD[/green] HTTP daemon (port 8181)")
+            _ensure_qmd_conversations_collection()
+        else:
+            console.print("  [yellow]QMD[/yellow] Daemon failed to start")
 
     console.print(f"Starting {len(applications)} bot(s)...")
     for name, _ in applications:
@@ -211,6 +221,9 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
             except Exception as error:
                 logger.error("Error stopping %s: %s", name, error)
 
+        # Stop the QMD daemon
+        _stop_qmd_daemon()
+
         # Stop the bridge
         from cclaw.bridge import stop_bridge
 
@@ -221,6 +234,95 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
             pid_file.unlink()
 
         console.print("[green]All bots stopped.[/green]")
+
+
+QMD_DEFAULT_PORT = 8181
+
+
+def _ensure_qmd_conversations_collection() -> None:
+    """Register cclaw conversation logs as a QMD collection if not already done."""
+    bots_path = cclaw_home() / "bots"
+    if not bots_path.exists():
+        return
+
+    result = subprocess.run(
+        [
+            "qmd",
+            "collection",
+            "add",
+            str(bots_path),
+            "--name",
+            "cclaw-conversations",
+            "--mask",
+            "**/conversation-*.md",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        logger.info("QMD collection 'cclaw-conversations' registered")
+
+
+async def _start_qmd_daemon() -> bool:
+    """Start the QMD HTTP MCP daemon if not already running."""
+    import shutil
+
+    if not shutil.which("qmd"):
+        logger.warning("QMD CLI not found, skipping daemon start")
+        return False
+
+    if await _qmd_health_check():
+        logger.info("QMD daemon already running")
+        return True
+
+    result = subprocess.run(
+        ["qmd", "mcp", "--http", "--daemon"],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        logger.error("QMD daemon start failed: %s", result.stderr)
+        return False
+
+    for _ in range(30):
+        if await _qmd_health_check():
+            logger.info("QMD daemon started on port %d", QMD_DEFAULT_PORT)
+            return True
+        await asyncio.sleep(1)
+
+    logger.error("QMD daemon did not become ready within 30s")
+    return False
+
+
+async def _qmd_health_check() -> bool:
+    """Check if QMD HTTP daemon is reachable."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("localhost", QMD_DEFAULT_PORT),
+            timeout=2,
+        )
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
+        return False
+
+
+def _stop_qmd_daemon() -> None:
+    """Stop the QMD HTTP MCP daemon."""
+    import shutil
+
+    if not shutil.which("qmd"):
+        return
+
+    result = subprocess.run(
+        ["qmd", "mcp", "stop"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        logger.info("QMD daemon stopped")
 
 
 def start_bots(bot_name: str | None = None, daemon: bool = False) -> None:
@@ -326,6 +428,9 @@ def stop_bots() -> None:
         pid_file.unlink(missing_ok=True)
     elif not plist_path.exists():
         console.print("[yellow]No running cclaw process found.[/yellow]")
+
+    # Stop QMD daemon if running
+    _stop_qmd_daemon()
 
 
 def show_status() -> None:

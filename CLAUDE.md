@@ -79,10 +79,10 @@ pytest
 - `bridge/server.mjs` - Bridge server source (development copy, synced to bridge_data and runtime)
 - `src/cclaw/session.py` - Session directory/conversation log/workspace management, Claude session ID management (`get`/`save`/`clear_claude_session_id`), daily conversation rotation (`conversation-YYMMDD.md`, legacy `conversation.md` fallback), bot-level memory CRUD (`load_bot_memory`/`save_bot_memory`/`clear_bot_memory`), global memory CRUD (`load_global_memory`/`save_global_memory`/`clear_global_memory`), `collect_session_chat_ids()` for proactive message fallback
 - `src/cclaw/handlers.py` - Telegram handler factory (slash commands + messages + file receive/send + model change (with version display) + process cancel + /skills unified management (list/attach/detach/builtins) + /cron management (list/add natural language/run/remove/enable/disable) + /heartbeat management + /memory management + /compact token compaction + streaming response + /streaming toggle + session continuity (`_prepare_session_context`, `_call_with_resume_fallback`) + `set_bot_commands` command menu registration)
-- `src/cclaw/bot_manager.py` - Multi-bot polling, launchd daemon, per-bot error isolation, cron/heartbeat scheduler integration, graceful shutdown (`cancel_all_processes()` before `application.stop()`)
+- `src/cclaw/bot_manager.py` - Multi-bot polling, launchd daemon, per-bot error isolation, cron/heartbeat scheduler integration, QMD HTTP daemon lifecycle (`_start_qmd_daemon`/`_stop_qmd_daemon`/`_qmd_health_check`), graceful shutdown (`cancel_all_processes()` before `application.stop()`)
 - `src/cclaw/heartbeat.py` - Heartbeat periodic situation awareness (config CRUD, active hours check, HEARTBEAT.md management, HEARTBEAT_OK detection, session chat ID fallback for result delivery, scheduler loop)
 - `src/cclaw/cron.py` - Cron schedule automation (cron.yaml CRUD, croniter-based schedule matching, per-job timezone support via `resolve_job_timezone()`, one-shot support with auto-disable, session chat ID fallback for result delivery, scheduler loop, natural language parsing via `parse_natural_language_schedule()` using Claude haiku one-shot, `resolve_default_timezone()` from GLOBAL_MEMORY.md/system/UTC fallback, `generate_unique_job_name()` with conflict resolution)
-- `src/cclaw/skill.py` - Skill management (discovery/loading/creation/deletion/builtin installation, bot-skill linking, CLAUDE.md composition (global memory + memory instructions + Telegram formatting rules), MCP/env variable merging, builtin/custom origin detection)
+- `src/cclaw/skill.py` - Skill management (discovery/loading/creation/deletion/builtin installation, bot-skill linking, CLAUDE.md composition (global memory + memory instructions + Telegram formatting rules), MCP/env variable merging, builtin/custom origin detection, `setup_qmd_conversations_collection()` for auto-registering conversation logs)
 - `src/cclaw/builtin_skills/__init__.py` - Built-in skill registry (scans subdirectories for templates)
 - `src/cclaw/builtin_skills/imessage/` - iMessage built-in skill template (SKILL.md, skill.yaml)
 - `src/cclaw/builtin_skills/reminders/` - Apple Reminders built-in skill template (SKILL.md, skill.yaml)
@@ -99,6 +99,7 @@ pytest
 - `src/cclaw/builtin_skills/dart/` - DART corporate disclosure built-in skill template (SKILL.md, skill.yaml, dartcli based company/finance/filing search)
 - `src/cclaw/builtin_skills/translate/` - Translate built-in skill template (SKILL.md, skill.yaml, translatecli based Gemini translation with format preservation)
 - `src/cclaw/builtin_skills/daiso/` - Daiso Mall built-in skill template (SKILL.md, skill.yaml, daiso-cli based product search)
+- `src/cclaw/builtin_skills/qmd/` - QMD markdown knowledge search built-in skill template (SKILL.md, skill.yaml, mcp.json, HTTP MCP daemon, BM25 + vector search)
 - `src/cclaw/backup.py` - Encrypted backup (AES-256 zip via pyzipper, file collection with pid/pycache exclusion)
 - `src/cclaw/token_compact.py` - Token compaction (estimate_token_count, collect_compact_targets for MEMORY.md/user SKILL.md/HEARTBEAT.md, compact_content via claude -p one-shot, run_compact sequential with error isolation, format_compact_report, save_compact_results)
 - `src/cclaw/utils.py` - Message splitting, Markdown to HTML conversion, logging setup, IME-compatible CLI input (`prompt_input`, `prompt_multiline`)
@@ -166,6 +167,16 @@ pytest
 - **Doctor**: `cclaw doctor` shows bridge process status, socket connectivity, and SDK version
 - **Files**: `bridge/server.mjs` (source) → `src/cclaw/bridge_data/server.mjs` (packaged) → `~/.cclaw/bridge/server.mjs` (runtime, auto-overwritten on start)
 - **SDK v2 preview**: `unstable_v2_createSession`/`unstable_v2_prompt` exist but do NOT support CLAUDE.md or Bash tools (alpha API, direct Anthropic API call). Will be reconsidered when v2 matures. See: https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview
+
+## QMD HTTP Daemon
+
+- **Purpose**: Provides persistent QMD MCP search server, avoiding ML model reload per message
+- **Architecture**: `qmd mcp --http --daemon` runs on port 8181, Claude Code connects via `type: "http"` MCP config
+- **Lifecycle**: `bot_manager.py` calls `_start_qmd_daemon()` before polling (only if any bot uses qmd skill), `_stop_qmd_daemon()` on shutdown
+- **Self-managed**: QMD has built-in daemon management (`--daemon` flag, `qmd mcp stop`), no Popen/pipe management needed
+- **Health check**: TCP connection to localhost:8181 to verify daemon is reachable
+- **Doctor**: `cclaw doctor` shows QMD CLI path, daemon status, collection count, document count
+- **Collection auto-setup**: `setup_qmd_conversations_collection()` registers `cclaw-conversations` collection pointing to `~/.cclaw/bots/` with `**/conversation-*.md` glob
 
 ## Bot-Level Long-Term Memory
 

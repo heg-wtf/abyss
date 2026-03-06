@@ -616,6 +616,14 @@ def skill_install(
         activate_skill(name)
         console.print(f"[green]All requirements met. Skill '{name}' activated.[/green]")
 
+        # QMD-specific: register conversation logs as a searchable collection
+        if name == "qmd":
+            from cclaw.skill import setup_qmd_conversations_collection
+
+            console.print("Registering conversation logs as QMD collection...")
+            if setup_qmd_conversations_collection():
+                console.print("[green]Collection 'cclaw-conversations' registered.[/green]")
+
 
 @skill_app.command("add")
 def skill_add() -> None:
@@ -776,6 +784,20 @@ def skill_setup(name: str) -> None:
     if not already_active:
         activate_skill(name)
     console.print(f"[green]Skill '{name}' activated.[/green]")
+
+    # QMD-specific: register conversation logs as a searchable collection
+    if name == "qmd":
+        from cclaw.skill import setup_qmd_conversations_collection
+
+        console.print("Registering conversation logs as QMD collection...")
+        if setup_qmd_conversations_collection():
+            console.print("[green]Collection 'cclaw-conversations' registered.[/green]")
+        else:
+            console.print(
+                "[yellow]Could not register collection. "
+                "Add manually: qmd collection add ~/.cclaw/bots "
+                '--name cclaw-conversations --mask "**/conversation-*.md"[/yellow]'
+            )
 
 
 @skill_app.command("test")

@@ -335,6 +335,47 @@ async def _check_bridge_health() -> bool:
         return False
 
 
+def _display_qmd_status() -> None:
+    """Display QMD CLI and daemon status."""
+    qmd_path = shutil.which("qmd")
+    if not qmd_path:
+        console.print("  [yellow]--[/yellow] QMD not installed (npm install -g @tobilu/qmd)")
+        return
+
+    try:
+        result = subprocess.run(
+            ["qmd", "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            import json
+
+            status = json.loads(result.stdout)
+            documents = status.get("totalDocuments", 0)
+            collections = status.get("collections", [])
+            has_vector = status.get("hasVectorIndex", False)
+            console.print(f"  [green]OK[/green] QMD CLI: {qmd_path}")
+            console.print(f"       Collections: {len(collections)}")
+            console.print(f"       Documents: {documents}")
+            console.print(f"       Vector index: {'yes' if has_vector else 'no'}")
+        else:
+            # Fallback: non-JSON status
+            console.print(f"  [green]OK[/green] QMD CLI: {qmd_path}")
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        console.print(f"  [green]OK[/green] QMD CLI: {qmd_path}")
+
+    # Daemon status
+    from cclaw.bot_manager import _qmd_health_check
+
+    daemon_running = asyncio.run(_qmd_health_check())
+    if daemon_running:
+        console.print("  [green]OK[/green] QMD daemon: running (port 8181)")
+    else:
+        console.print("  [yellow]--[/yellow] QMD daemon: not running (starts with cclaw start)")
+
+
 def run_doctor() -> None:
     """Run environment and configuration diagnostics."""
     console.print("[bold]cclaw doctor[/bold]\n")
@@ -383,3 +424,7 @@ def run_doctor() -> None:
     # Bridge status
     console.print("\n[bold]Bridge:[/bold]")
     _display_bridge_status()
+
+    # QMD status
+    console.print("\n[bold]QMD:[/bold]")
+    _display_qmd_status()

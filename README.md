@@ -106,6 +106,7 @@ cclaw has a **skill system** that extends your bot's capabilities with tools and
 | 📈 DART | Query Korean corporate disclosure (DART OpenAPI) via [dartcli](https://github.com/seapy/dartcli) | [Guide](docs/skills/DART.md) |
 | 🌐 Translate | Translate text and transcripts via [translatecli](https://github.com/seapy/translatecli) (Gemini-powered) | [Guide](docs/skills/TRANSLATE.md) |
 | 🏪 Daiso | Search Daiso Mall products via [daiso-cli](https://github.com/heg-wtf/daiso-cli) | [Guide](docs/skills/DAISO.md) |
+| 📚 QMD | Search markdown knowledge bases (BM25 + vector) via [QMD](https://github.com/tobi/qmd) MCP | [Guide](docs/skills/QMD.md) |
 
 ```bash
 cclaw skills builtins          # List available built-in skills

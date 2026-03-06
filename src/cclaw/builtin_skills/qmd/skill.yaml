@@ -1,0 +1,16 @@
+name: qmd
+emoji: "\U0001F4DA"
+description: "Search markdown knowledge bases via QMD (local BM25 + vector search)"
+type: mcp
+status: inactive
+required_commands:
+  - qmd
+install_hints:
+  qmd: "npm install -g @tobilu/qmd"
+allowed_tools:
+  - "mcp__qmd__search"
+  - "mcp__qmd__vector_search"
+  - "mcp__qmd__deep_search"
+  - "mcp__qmd__get"
+  - "mcp__qmd__multi_get"
+  - "mcp__qmd__status"

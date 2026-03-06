@@ -211,6 +211,17 @@ async def run_claude(
     return output
 
 
+QMD_MCP_SERVER = {"qmd": {"type": "http", "url": "http://localhost:8181/mcp"}}
+QMD_ALLOWED_TOOLS = [
+    "mcp__qmd__search",
+    "mcp__qmd__vector_search",
+    "mcp__qmd__deep_search",
+    "mcp__qmd__get",
+    "mcp__qmd__multi_get",
+    "mcp__qmd__status",
+]
+
+
 def _prepare_skill_config(
     working_directory: str,
     skill_names: list[str] | None,
@@ -219,34 +230,51 @@ def _prepare_skill_config(
 
     Writes .mcp.json and .claude/settings.json to the working directory.
     Returns (allowed_tools, environment_variables).
-    """
-    if not skill_names:
-        return None, None
 
+    Also auto-injects QMD MCP config if QMD CLI is available on the system,
+    regardless of whether the bot has the qmd skill attached.
+    """
     from cclaw.skill import (
         collect_skill_allowed_tools,
         collect_skill_environment_variables,
         merge_mcp_configs,
     )
 
-    mcp_config = merge_mcp_configs(skill_names)
+    mcp_config = None
+    allowed_tools: list[str] = []
+    environment_variables = None
+
+    # Process attached skills
+    if skill_names:
+        mcp_config = merge_mcp_configs(skill_names)
+
+        skill_environment_variables = collect_skill_environment_variables(skill_names)
+        if skill_environment_variables:
+            environment_variables = {**os.environ, **skill_environment_variables}
+
+        allowed_tools = collect_skill_allowed_tools(skill_names)
+
+    # Auto-inject QMD MCP if CLI is available (system-wide, all bots)
+    if shutil.which("qmd"):
+        if mcp_config:
+            mcp_config["mcpServers"].update(QMD_MCP_SERVER)
+        else:
+            mcp_config = {"mcpServers": dict(QMD_MCP_SERVER)}
+        for tool in QMD_ALLOWED_TOOLS:
+            if tool not in allowed_tools:
+                allowed_tools.append(tool)
+
+    # Write MCP config file
     if mcp_config:
         mcp_json_path = str(Path(working_directory) / ".mcp.json")
         with open(mcp_json_path, "w") as mcp_file:
             json.dump(mcp_config, mcp_file, indent=2)
 
-    skill_environment_variables = collect_skill_environment_variables(skill_names)
-    environment_variables = (
-        {**os.environ, **skill_environment_variables} if skill_environment_variables else None
-    )
-
-    allowed_tools = collect_skill_allowed_tools(skill_names) or None
-
     if allowed_tools:
         _write_session_settings(working_directory, allowed_tools)
-        logger.info("Allowed tools from skills: %s", allowed_tools)
+        logger.info("Allowed tools: %s", allowed_tools)
 
-    return allowed_tools, environment_variables
+    return allowed_tools or None, environment_variables
 
 
 def _extract_text_delta(data: dict[str, Any]) -> str | None:
