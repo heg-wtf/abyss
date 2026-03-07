@@ -83,7 +83,9 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     """
     allowed_users = bot_config.get("allowed_users", [])
     personality = bot_config.get("personality", "")
-    description = bot_config.get("description", "")
+    display_name = bot_config.get("display_name", "")
+    role = bot_config.get("role", bot_config.get("description", ""))
+    goal = bot_config.get("goal", "")
     claude_arguments = bot_config.get("claude_args", [])
     command_timeout = bot_config.get("command_timeout", 300)
     current_model = bot_config.get("model", DEFAULT_MODEL)
@@ -102,11 +104,16 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         if not await check_authorization(update):
             return
 
+        name_display = display_name or bot_name
         text = (
-            f"\U0001f916 *{bot_name}*\n\n"
+            f"\U0001f916 *{name_display}*\n\n"
             f"\U0001f3ad *Personality:* {personality}\n"
-            f"\U0001f4bc *Role:* {description}\n\n"
-            "\U0001f4ac Send me a message to start chatting!\n"
+            f"\U0001f4bc *Role:* {role}\n"
+        )
+        if goal:
+            text += f"\U0001f3af *Goal:* {goal}\n"
+        text += (
+            "\n\U0001f4ac Send me a message to start chatting!\n"
             "\U00002753 Type /help for available commands."
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
@@ -974,7 +981,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 enabled = job.get("enabled", True)
                 status_icon = "\u2705" if enabled else "\U0001f6d1"
                 schedule_display = job.get("schedule") or f"at: {job.get('at', 'N/A')}"
-                timezone_label = job.get("timezone", "UTC")
+                timezone_label = job.get("timezone", resolve_default_timezone())
                 next_time = next_run_time(job) if enabled else None
                 next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
                 message_preview = job.get("message", "")[:30]

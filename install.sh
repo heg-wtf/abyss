@@ -114,9 +114,10 @@ if command -v cclaw &>/dev/null; then
     ok "cclaw installed successfully!"
     echo ""
     info "Getting started:"
-    echo "   cclaw doctor   — check environment"
-    echo "   cclaw init     — create your first bot"
-    echo "   cclaw start    — run bots"
+    echo ""
+    echo "   ${BOLD}cclaw init${RESET}       — initial setup (timezone, language)"
+    echo "   ${BOLD}cclaw bot add${RESET}    — create your first bot"
+    echo "   ${BOLD}cclaw start${RESET}      — run bots"
     echo ""
 else
     warn "cclaw was installed but is not in your PATH."

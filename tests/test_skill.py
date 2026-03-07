@@ -383,7 +383,7 @@ def test_compose_claude_md_no_skills():
     result = compose_claude_md(
         bot_name="my-bot",
         personality="Friendly",
-        description="Helper",
+        role="Helper",
         skill_names=[],
     )
     assert "# my-bot" in result
@@ -398,7 +398,7 @@ def test_compose_claude_md_with_skills(setup_skill):
     result = compose_claude_md(
         bot_name="my-bot",
         personality="Friendly",
-        description="Helper",
+        role="Helper",
         skill_names=["test-skill"],
     )
     assert "Available Skills" in result
@@ -411,7 +411,7 @@ def test_compose_claude_md_nonexistent_skill():
     result = compose_claude_md(
         bot_name="my-bot",
         personality="Friendly",
-        description="Helper",
+        role="Helper",
         skill_names=["nonexistent"],
     )
     assert "Available Skills" not in result
@@ -426,7 +426,7 @@ def test_compose_claude_md_with_global_memory(temp_cclaw_home):
     result = compose_claude_md(
         bot_name="my-bot",
         personality="Friendly",
-        description="Helper",
+        role="Helper",
     )
     assert "## Global Memory (Read-Only)" in result
     assert "Timezone: Asia/Seoul" in result
@@ -438,7 +438,7 @@ def test_compose_claude_md_no_global_memory(temp_cclaw_home):
     result = compose_claude_md(
         bot_name="my-bot",
         personality="Friendly",
-        description="Helper",
+        role="Helper",
     )
     assert "Global Memory" not in result
 
@@ -455,7 +455,7 @@ def test_compose_claude_md_global_memory_before_bot_memory(temp_cclaw_home):
     result = compose_claude_md(
         bot_name="my-bot",
         personality="Friendly",
-        description="Helper",
+        role="Helper",
         bot_path=bot_path,
     )
     global_memory_index = result.index("Global Memory (Read-Only)")

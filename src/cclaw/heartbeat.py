@@ -85,14 +85,23 @@ def disable_heartbeat(bot_name: str) -> bool:
 def is_within_active_hours(active_hours: dict[str, str], now: datetime | None = None) -> bool:
     """Check if the current time is within the active hours range.
 
-    Uses local time. Supports overnight ranges (e.g. start=22:00, end=06:00).
+    Uses config.yaml timezone. Supports overnight ranges (e.g. start=22:00, end=06:00).
 
     Args:
         active_hours: Dict with 'start' and 'end' keys in HH:MM format.
-        now: Optional datetime for testing. Uses local time if None.
+        now: Optional datetime for testing. Uses config timezone if None.
     """
     if now is None:
-        now = datetime.now()
+        from zoneinfo import ZoneInfo
+
+        from cclaw.config import get_timezone
+
+        timezone_name = get_timezone()
+        try:
+            timezone_info = ZoneInfo(timezone_name)
+        except (KeyError, ValueError):
+            timezone_info = None
+        now = datetime.now(timezone_info)
 
     start_str = active_hours.get("start", "00:00")
     end_str = active_hours.get("end", "23:59")

@@ -241,11 +241,25 @@ def test_next_run_time_invalid_schedule():
 # --- Timezone tests ---
 
 
-def test_resolve_job_timezone_default():
-    """resolve_job_timezone returns UTC when no timezone specified."""
+def test_resolve_job_timezone_default_no_config(monkeypatch):
+    """resolve_job_timezone returns UTC when no timezone specified and no config."""
+    monkeypatch.setattr("cclaw.config.load_config", lambda: None)
     job = {"schedule": "0 9 * * *"}
     result = resolve_job_timezone(job)
     assert result == timezone.utc
+
+
+def test_resolve_job_timezone_falls_back_to_config(monkeypatch):
+    """resolve_job_timezone uses config timezone when job has no timezone."""
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        "cclaw.config.load_config",
+        lambda: {"timezone": "Asia/Tokyo"},
+    )
+    job = {"schedule": "0 9 * * *"}
+    result = resolve_job_timezone(job)
+    assert result == ZoneInfo("Asia/Tokyo")
 
 
 def test_resolve_job_timezone_named():
@@ -257,8 +271,22 @@ def test_resolve_job_timezone_named():
     assert result == ZoneInfo("Asia/Seoul")
 
 
-def test_resolve_job_timezone_invalid():
-    """resolve_job_timezone falls back to UTC for invalid timezone."""
+def test_resolve_job_timezone_invalid_falls_back_to_config(monkeypatch):
+    """resolve_job_timezone falls back to config timezone for invalid job timezone."""
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr(
+        "cclaw.config.load_config",
+        lambda: {"timezone": "Asia/Seoul"},
+    )
+    job = {"schedule": "0 9 * * *", "timezone": "Invalid/Timezone"}
+    result = resolve_job_timezone(job)
+    assert result == ZoneInfo("Asia/Seoul")
+
+
+def test_resolve_job_timezone_invalid_no_config(monkeypatch):
+    """resolve_job_timezone falls back to UTC when both job and config timezone are invalid."""
+    monkeypatch.setattr("cclaw.config.load_config", lambda: None)
     job = {"schedule": "0 9 * * *", "timezone": "Invalid/Timezone"}
     result = resolve_job_timezone(job)
     assert result == timezone.utc
@@ -275,8 +303,9 @@ def test_next_run_time_with_timezone():
     assert result.hour == 6  # 6 AM in KST, not UTC
 
 
-def test_next_run_time_utc_default():
-    """next_run_time uses UTC when no timezone specified."""
+def test_next_run_time_utc_default(monkeypatch):
+    """next_run_time uses UTC when no timezone specified and no config timezone."""
+    monkeypatch.setattr("cclaw.config.load_config", lambda: None)
     job = {"schedule": "0 9 * * *"}
     result = next_run_time(job)
     assert result is not None
@@ -637,31 +666,28 @@ def test_add_cron_job_keeps_absolute_at_unchanged(bot_with_cron):
 # --- resolve_default_timezone tests ---
 
 
-def test_resolve_default_timezone_from_global_memory(monkeypatch):
-    """resolve_default_timezone reads timezone from GLOBAL_MEMORY.md."""
+def test_resolve_default_timezone_from_config(monkeypatch):
+    """resolve_default_timezone reads timezone from config.yaml."""
     monkeypatch.setattr(
-        "cclaw.session.load_global_memory",
-        lambda: "- Timezone: Asia/Seoul\n- Language: Korean",
+        "cclaw.config.load_config",
+        lambda: {"timezone": "Asia/Seoul"},
     )
     assert resolve_default_timezone() == "Asia/Seoul"
 
 
-def test_resolve_default_timezone_no_global_memory(monkeypatch):
-    """resolve_default_timezone falls back when no global memory."""
-    monkeypatch.setattr("cclaw.session.load_global_memory", lambda: None)
-    result = resolve_default_timezone()
-    assert isinstance(result, str)
-    assert len(result) > 0
+def test_resolve_default_timezone_no_config(monkeypatch):
+    """resolve_default_timezone returns UTC when no config."""
+    monkeypatch.setattr("cclaw.config.load_config", lambda: None)
+    assert resolve_default_timezone() == "UTC"
 
 
-def test_resolve_default_timezone_no_timezone_in_memory(monkeypatch):
-    """resolve_default_timezone falls back when memory has no timezone."""
+def test_resolve_default_timezone_no_timezone_in_config(monkeypatch):
+    """resolve_default_timezone returns UTC when config has no timezone."""
     monkeypatch.setattr(
-        "cclaw.session.load_global_memory",
-        lambda: "- Language: Korean\n- Name: User",
+        "cclaw.config.load_config",
+        lambda: {"bots": [], "settings": {}},
     )
-    result = resolve_default_timezone()
-    assert isinstance(result, str)
+    assert resolve_default_timezone() == "UTC"
 
 
 # --- generate_unique_job_name tests ---

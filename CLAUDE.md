@@ -16,8 +16,8 @@ Personal AI assistant powered by Telegram + Claude Code. A CLI tool that runs lo
 uv sync                      # Install dependencies
 uv run cclaw                 # Show ASCII art banner
 uv run cclaw --help          # CLI help
-uv run cclaw doctor          # Environment check
-uv run cclaw init            # Onboarding
+uv run cclaw doctor          # Environment check (shows timezone)
+uv run cclaw init            # Initial setup (environment check + timezone + language)
 uv run cclaw start           # Run bots
 uv run cclaw bot list        # List bots (with model info)
 uv run cclaw bot model <name>       # Show current model
@@ -71,17 +71,17 @@ pytest
 ## Code Structure
 
 - `src/cclaw/cli.py` - Typer app entry point, ASCII art banner, all command definitions (skills, bot, cron, heartbeat, memory, global-memory subcommands)
-- `src/cclaw/config.py` - `~/.cclaw/` configuration management (YAML), model version mapping (`MODEL_VERSIONS`, `model_display_name()`)
-- `src/cclaw/onboarding.py` - Environment check, token validation, bot creation wizard
+- `src/cclaw/config.py` - `~/.cclaw/` configuration management (YAML), model version mapping (`MODEL_VERSIONS`, `model_display_name()`), timezone management (`get_timezone()` single source of truth, `detect_local_timezone()`), language management (`get_language()` single source of truth)
+- `src/cclaw/onboarding.py` - Environment check, timezone/language selection (`cclaw init`), token validation + bot creation wizard (`cclaw bot add`)
 - `src/cclaw/claude_runner.py` - `claude -p` subprocess execution (async, path resolution via `shutil.which`, process tracking + `cancel_all_processes()` for graceful shutdown, model selection, skill MCP/env injection via `_prepare_skill_config()`, streaming output, `--resume`/`--session-id` session continuity, bridge-aware wrappers `run_claude_with_bridge`/`run_claude_streaming_with_bridge`)
 - `src/cclaw/bridge.py` - Node.js bridge client (Unix socket JSONL protocol, bridge process lifecycle start/stop/health, pipe draining threads, `bridge_query`/`bridge_query_streaming` functions, `_bridge_directory()` auto-install from package data)
 - `src/cclaw/bridge_data/server.mjs` - Bridge server bundled with package (copied to `~/.cclaw/bridge/` at runtime)
 - `bridge/server.mjs` - Bridge server source (development copy, synced to bridge_data and runtime)
 - `src/cclaw/session.py` - Session directory/conversation log/workspace management, Claude session ID management (`get`/`save`/`clear_claude_session_id`), daily conversation rotation (`conversation-YYMMDD.md`, legacy `conversation.md` fallback), bot-level memory CRUD (`load_bot_memory`/`save_bot_memory`/`clear_bot_memory`), global memory CRUD (`load_global_memory`/`save_global_memory`/`clear_global_memory`), `collect_session_chat_ids()` for proactive message fallback
 - `src/cclaw/handlers.py` - Telegram handler factory (slash commands + messages + file receive/send + model change (with version display) + process cancel + /skills unified management (list/attach/detach/builtins) + /cron management (list/add natural language/run/remove/enable/disable) + /heartbeat management + /memory management + /compact token compaction + streaming response + /streaming toggle + session continuity (`_prepare_session_context`, `_call_with_resume_fallback`) + `set_bot_commands` command menu registration)
-- `src/cclaw/bot_manager.py` - Multi-bot polling, launchd daemon, per-bot error isolation, cron/heartbeat scheduler integration, QMD HTTP daemon lifecycle (`_start_qmd_daemon`/`_stop_qmd_daemon`/`_qmd_health_check`), graceful shutdown (`cancel_all_processes()` before `application.stop()`)
+- `src/cclaw/bot_manager.py` - Multi-bot polling, launchd daemon, per-bot error isolation, startup compact + CLAUDE.md regeneration (compact MD files then regenerate CLAUDE.md for every bot on start), cron/heartbeat scheduler integration, QMD HTTP daemon lifecycle (`_start_qmd_daemon`/`_stop_qmd_daemon`/`_qmd_health_check`), graceful shutdown (`cancel_all_processes()` before `application.stop()`)
 - `src/cclaw/heartbeat.py` - Heartbeat periodic situation awareness (config CRUD, active hours check, HEARTBEAT.md management, HEARTBEAT_OK detection, session chat ID fallback for result delivery, scheduler loop)
-- `src/cclaw/cron.py` - Cron schedule automation (cron.yaml CRUD, croniter-based schedule matching, per-job timezone support via `resolve_job_timezone()`, one-shot support with auto-disable, session chat ID fallback for result delivery, scheduler loop, natural language parsing via `parse_natural_language_schedule()` using Claude haiku one-shot, `resolve_default_timezone()` from GLOBAL_MEMORY.md/system/UTC fallback, `generate_unique_job_name()` with conflict resolution)
+- `src/cclaw/cron.py` - Cron schedule automation (cron.yaml CRUD, croniter-based schedule matching, per-job timezone support via `resolve_job_timezone()`, one-shot support with auto-disable, session chat ID fallback for result delivery, scheduler loop, natural language parsing via `parse_natural_language_schedule()` using Claude haiku one-shot, `resolve_default_timezone()` from config.yaml timezone, `generate_unique_job_name()` with conflict resolution)
 - `src/cclaw/skill.py` - Skill management (discovery/loading/creation/deletion/builtin installation, bot-skill linking, CLAUDE.md composition (global memory + memory instructions + Telegram formatting rules), MCP/env variable merging, builtin/custom origin detection, `setup_qmd_conversations_collection()` for auto-registering conversation logs)
 - `src/cclaw/builtin_skills/__init__.py` - Built-in skill registry (scans subdirectories for templates)
 - `src/cclaw/builtin_skills/imessage/` - iMessage built-in skill template (SKILL.md, skill.yaml)
@@ -101,7 +101,7 @@ pytest
 - `src/cclaw/builtin_skills/daiso/` - Daiso Mall built-in skill template (SKILL.md, skill.yaml, daiso-cli based product search)
 - `src/cclaw/builtin_skills/qmd/` - QMD markdown knowledge search built-in skill template (SKILL.md, skill.yaml, mcp.json, HTTP MCP daemon, BM25 + vector search)
 - `src/cclaw/backup.py` - Encrypted backup (AES-256 zip via pyzipper, file collection with pid/pycache exclusion)
-- `src/cclaw/token_compact.py` - Token compaction (estimate_token_count, collect_compact_targets for MEMORY.md/user SKILL.md/HEARTBEAT.md, compact_content via claude -p one-shot, run_compact sequential with error isolation, format_compact_report, save_compact_results)
+- `src/cclaw/token_compact.py` - Token compaction (estimate_token_count, collect_compact_targets for MEMORY.md/user SKILL.md/HEARTBEAT.md, compact_content via claude -p one-shot, run_compact sequential with error isolation, format_compact_report, save_compact_results). Auto-runs on `cclaw start` for every bot before CLAUDE.md regeneration
 - `src/cclaw/utils.py` - Message splitting, Markdown to HTML conversion, logging setup, IME-compatible CLI input (`prompt_input`, `prompt_multiline`)
 
 ## Code Style
@@ -189,7 +189,7 @@ pytest
 ## Global Memory
 
 - `GLOBAL_MEMORY.md` is stored at `~/.cclaw/GLOBAL_MEMORY.md`, shared across all bots (read-only for bots)
-- Stores timezone, user preferences, and other information all bots should reference
+- Stores user preferences and other information all bots should reference (timezone is managed in config.yaml, not here)
 - **CLAUDE.md injection**: `compose_claude_md()` inserts a "Global Memory (Read-Only)" section without the file path, preventing Claude from modifying it
 - **Bootstrap injection**: On new session bootstrap, global memory is injected before bot memory
 - **Management**: CLI only (`cclaw global-memory show|edit|clear`). Not editable via Telegram
@@ -199,11 +199,11 @@ pytest
 
 ```
 ~/.cclaw/
-├── config.yaml           # Global config (bot list, log_level, command_timeout)
+├── config.yaml           # Global config (timezone, language, bot list, log_level, command_timeout)
 ├── cclaw.pid             # Running PID
 ├── GLOBAL_MEMORY.md      # Global memory (shared across all bots, read-only for bots, CLI-managed)
 ├── bots/<name>/
-│   ├── bot.yaml          # Bot config (token, personality, role, allowed_users, model, streaming, skills, heartbeat)
+│   ├── bot.yaml          # Bot config (telegram_token, telegram_username, telegram_botname, display_name, personality, role, goal, allowed_users, claude_args, model, streaming, skills, heartbeat)
 │   ├── CLAUDE.md         # Bot system prompt (includes skills + memory instructions)
 │   ├── MEMORY.md         # Bot long-term memory (read/written by Claude Code, shared across all sessions)
 │   ├── cron.yaml         # Cron job config (schedule/at, timezone, message, skills, model)

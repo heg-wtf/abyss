@@ -65,12 +65,12 @@ pipx install .
 cclaw doctor                    # pip/pipx install
 uv run cclaw doctor             # uv
 
-# Initial setup (Telegram bot token required)
+# Initial setup (environment check + timezone + language)
 cclaw init
 
 # Bot management
+cclaw bot add                  # Create a bot (Telegram token required)
 cclaw bot list
-cclaw bot add
 cclaw bot remove <name>
 
 # Run bots
@@ -178,8 +178,8 @@ Use the `/send` command to retrieve workspace files back via Telegram.
 cclaw                          # Show ASCII art banner
 
 # Onboarding
-cclaw init                     # Initial setup
-cclaw doctor                   # Environment check
+cclaw init                     # Initial setup (environment check + timezone)
+cclaw doctor                   # Environment check (shows timezone)
 
 # Bot management
 cclaw bot list                 # List bots (with model info)
@@ -255,14 +255,14 @@ cclaw/
 │   └── server.mjs          # Node.js bridge server (development source)
 ├── src/cclaw/
 │   ├── cli.py              # Typer CLI entry point (ASCII art banner)
-│   ├── config.py           # Configuration load/save
-│   ├── onboarding.py       # Setup wizard
+│   ├── config.py           # Configuration load/save, timezone/language management
+│   ├── onboarding.py       # Setup wizard (init: timezone/language, bot add: Telegram + bot)
 │   ├── claude_runner.py    # Claude Code runner (subprocess + bridge, batch + streaming)
 │   ├── bridge.py           # Node.js bridge client (Unix socket, lifecycle management)
 │   ├── bridge_data/        # Bridge server bundled with package (server.mjs, package.json)
 │   ├── session.py          # Session directory management
 │   ├── handlers.py         # Telegram handler factory
-│   ├── bot_manager.py      # Multi-bot lifecycle
+│   ├── bot_manager.py      # Multi-bot lifecycle (compact + regenerate on start)
 │   ├── skill.py            # Skill management (create/attach/install/MCP/CLAUDE.md composition)
 │   ├── builtin_skills/     # Built-in skill templates (imessage, reminders, ...)
 │   │   ├── __init__.py     # Built-in skill registry
@@ -296,11 +296,11 @@ Configuration and session data are stored in `~/.cclaw/`. Override the path with
 
 ```
 ~/.cclaw/
-├── config.yaml
+├── config.yaml               # Global config (timezone, language, bot list, settings)
 ├── GLOBAL_MEMORY.md          # Global memory (shared across all bots, read-only)
 ├── bots/
 │   └── <bot-name>/
-│       ├── bot.yaml
+│       ├── bot.yaml              # telegram_token, display_name, personality, role, goal, model, streaming, skills, heartbeat
 │       ├── CLAUDE.md
 │       ├── MEMORY.md             # Bot long-term memory (shared across all sessions)
 │       ├── cron.yaml             # Cron job config (schedule, timezone, optional)

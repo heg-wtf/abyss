@@ -296,7 +296,8 @@ def _load_qmd_builtin_markdown() -> str | None:
 def compose_claude_md(
     bot_name: str,
     personality: str,
-    description: str,
+    role: str,
+    goal: str = "",
     skill_names: list[str] | None = None,
     bot_path: Path | None = None,
 ) -> str:
@@ -306,6 +307,10 @@ def compose_claude_md(
     When bot_path is provided, a Memory section is appended with instructions
     for the bot to save and retrieve long-term memories.
     """
+    from cclaw.config import get_language
+
+    language = get_language()
+
     sections = [
         f"# {bot_name}",
         "",
@@ -313,21 +318,29 @@ def compose_claude_md(
         personality,
         "",
         "## Role",
-        description,
-        "",
-        "## Rules",
-        "- Respond in Korean.",
-        "- Save generated files to the workspace/ directory.",
-        "- Always ask for confirmation before executing dangerous commands "
-        "(delete, restart, etc.).",
-        "- **절대로 Markdown 표(table)를 사용하지 마라.** "
-        "Telegram에서 표는 깨진다. "
-        "대신 이모지 + 한 줄씩 나열하라. "
-        "예시:\n"
-        "  🌡 최저 -2°C / 최고 7°C\n"
-        "  🌧 오전 한때 비 (5mm 미만)\n"
-        "  ☁️ 오후~밤 차차 맑아짐",
+        role,
     ]
+
+    if goal:
+        sections.extend(["", "## Goal", goal])
+
+    sections.extend(
+        [
+            "",
+            "## Rules",
+            f"- Respond in {language}.",
+            "- Save generated files to the workspace/ directory.",
+            "- Always ask for confirmation before executing dangerous commands "
+            "(delete, restart, etc.).",
+            "- **절대로 Markdown 표(table)를 사용하지 마라.** "
+            "Telegram에서 표는 깨진다. "
+            "대신 이모지 + 한 줄씩 나열하라. "
+            "예시:\n"
+            "  🌡 최저 -2°C / 최고 7°C\n"
+            "  🌧 오전 한때 비 (5mm 미만)\n"
+            "  ☁️ 오후~밤 차차 맑아짐",
+        ]
+    )
 
     from cclaw.session import load_global_memory
 
@@ -393,7 +406,8 @@ def regenerate_bot_claude_md(bot_name: str) -> None:
     content = compose_claude_md(
         bot_name=bot_name,
         personality=bot_config.get("personality", ""),
-        description=bot_config.get("description", ""),
+        role=bot_config.get("role", bot_config.get("description", "")),
+        goal=bot_config.get("goal", ""),
         skill_names=bot_config.get("skills", []),
         bot_path=directory,
     )

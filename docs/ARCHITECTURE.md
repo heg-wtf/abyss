@@ -62,7 +62,34 @@ Sessions are managed via directory structure without a database.
 - `conversation-YYMMDD.md`: Daily conversation log (UTC date rotation, markdown append). Legacy `conversation.md` supported as read fallback
 - `workspace/`: File storage for Claude Code outputs
 
-### 4. Multi-Bot Architecture
+### 4. Bot Configuration (bot.yaml)
+
+Each bot's configuration is stored in `~/.cclaw/bots/<name>/bot.yaml`.
+
+```yaml
+telegram_token: "123456:ABCDEF"    # Telegram Bot API token
+telegram_username: "@my_bot"       # Bot username (from Telegram API)
+telegram_botname: "My Bot"         # Bot display name (from Telegram API)
+display_name: "My Assistant"       # User-facing friendly name
+personality: "Friendly helper"     # Personality description (used in CLAUDE.md)
+role: "General assistant"          # What the bot does (used in CLAUDE.md)
+goal: "Help with daily tasks"     # Why the bot exists (used in CLAUDE.md, optional)
+allowed_users: []                  # Telegram user IDs (empty = allow all)
+claude_args: []                    # Extra CLI args for claude -p
+model: sonnet                      # Claude model (sonnet/opus/haiku, runtime-added)
+streaming: false                   # Streaming response mode
+skills:                            # Attached skill names (runtime-added)
+  - imessage
+  - reminders
+heartbeat:                         # Heartbeat config
+  enabled: false
+  interval_minutes: 30
+  active_hours:
+    start: "07:00"
+    end: "23:00"
+```
+
+### 5. Multi-Bot Architecture
 
 Multiple Telegram bots run simultaneously in a single process.
 
@@ -71,14 +98,14 @@ Multiple Telegram bots run simultaneously in a single process.
 - Per-bot independent configuration (token, personality, role, permissions, model)
 - Individual bot errors are isolated from other bots
 
-### 5. Per-Session Concurrency Control
+### 6. Per-Session Concurrency Control
 
 Sequential processing when multiple messages arrive in the same chat.
 
 - `asyncio.Lock` managed by `{bot_name}:{chat_id}` key
 - When lock is held, sends "Message queued" notification then waits (message queuing)
 
-### 6. Process Tracking
+### 7. Process Tracking
 
 Running Claude Code subprocesses are tracked per session.
 
@@ -86,7 +113,7 @@ Running Claude Code subprocesses are tracked per session.
 - `/cancel` command kills running process with SIGKILL
 - `returncode == -9` raises `asyncio.CancelledError`
 
-### 7. Model Selection
+### 8. Model Selection
 
 Per-bot Claude model configuration with runtime changes.
 
@@ -95,7 +122,7 @@ Per-bot Claude model configuration with runtime changes.
 - Also changeable via CLI `cclaw bot model <name> <model>`
 - Valid models: sonnet (4.5), opus (4.6), haiku (3.5) — `/model` shows version alongside name
 
-### 8. Skill System
+### 9. Skill System
 
 Extends bot capabilities by linking tools/knowledge. Skills are classified by origin:
 
@@ -112,14 +139,14 @@ Internally, skills have different tool configurations:
 - CLI skills: Environment variables auto-injected during subprocess execution
 - **Dual-layer permission defense**: `allowed_tools` in skill.yaml controls hard auto-approval (tools not listed are blocked in `-p` mode). SKILL.md provides soft guardrails for tools that are allowed but can be used destructively (e.g., `execute_sql` with DELETE statements)
 
-### 9. Cron Schedule Automation
+### 10. Cron Schedule Automation
 
 Automatically runs Claude Code at scheduled times and sends results via Telegram.
 
 - Job list defined in `cron.yaml` (schedule or at)
 - **Recurring jobs**: Standard cron expressions (`0 9 * * *` = daily at 9 AM)
 - **One-shot jobs**: ISO datetime or duration (`30m`, `2h`, `1d`) in `at` field. Relative durations are converted to absolute ISO datetime at `add_cron_job()` time
-- **Per-job timezone**: Optional `timezone` field (e.g., `Asia/Seoul`). Defaults to UTC. Cron expressions are evaluated in the job's timezone via `resolve_job_timezone()` using `zoneinfo.ZoneInfo`
+- **Per-job timezone**: Optional `timezone` field (e.g., `Asia/Seoul`). Falls back to `config.yaml` timezone, then UTC. Cron expressions are evaluated in the job's timezone via `resolve_job_timezone()` using `zoneinfo.ZoneInfo`
 - `croniter` library for cron expression validation and matching
 - Scheduler loop: checks current time against job schedules every 30 seconds
 - Duplicate prevention: records last run time in UTC, prevents re-execution within same minute
@@ -128,17 +155,17 @@ Automatically runs Claude Code at scheduled times and sends results via Telegram
 - One-shot jobs: auto-deleted after execution when `delete_after_run=true`, auto-disabled when `delete_after_run=false`
 - Inherits bot's skills/model settings, overridable at job level
 - **Natural language creation**: `/cron add <description>` in Telegram parses any language (Korean, English, Japanese, etc.) into cron jobs via Claude haiku one-shot (`parse_natural_language_schedule()`)
-- **Timezone auto-detection**: `resolve_default_timezone()` reads from GLOBAL_MEMORY.md → system local timezone → UTC fallback
+- **Timezone**: `resolve_default_timezone()` reads from `config.yaml` timezone (single source of truth, set during `cclaw init`)
 - **Unique naming**: `generate_unique_job_name()` appends `-2`, `-3` suffix on conflict
 - **Full Telegram CRUD**: `/cron list|add|run|remove|enable|disable`
 
-### 10. Heartbeat (Periodic Situation Awareness)
+### 11. Heartbeat (Periodic Situation Awareness)
 
 Proactive agent feature that periodically wakes Claude Code to run HEARTBEAT.md checklist and only sends Telegram messages when there's something to report.
 
 - Configured in `bot.yaml`'s `heartbeat` section (one per bot)
 - **interval_minutes**: Execution interval (default 30 minutes)
-- **active_hours**: Active time range (HH:MM, local time, midnight-crossing supported)
+- **active_hours**: Active time range (HH:MM, uses config.yaml timezone, midnight-crossing supported)
 - `HEARTBEAT.md`: User-editable checklist template
 - **HEARTBEAT_OK detection**: When response contains `HEARTBEAT_OK` marker, only logs without notification
 - Sends Telegram DM to all `allowed_users` when HEARTBEAT_OK is absent. Falls back to session chat IDs when `allowed_users` is empty
@@ -146,7 +173,7 @@ Proactive agent feature that periodically wakes Claude Code to run HEARTBEAT.md 
 - Scheduler loop re-reads `bot.yaml` every cycle for runtime config changes
 - Isolated working directory: Claude Code runs in `heartbeat_sessions/`
 
-### 11. Built-in Skill System
+### 12. Built-in Skill System
 
 Frequently used skills are bundled as templates inside the package, installable via `cclaw skills install`.
 
@@ -159,7 +186,7 @@ Frequently used skills are bundled as templates inside the package, installable 
 - `cclaw skills` command shows all skills with origin type (builtin/custom), including uninstalled builtins
 - Telegram `/skills` handler also shows origin type (builtin/custom) and uninstalled builtins
 
-### 12. QMD Auto-Injection (System-Wide Knowledge Search)
+### 13. QMD Auto-Injection (System-Wide Knowledge Search)
 
 QMD (local markdown search engine) is automatically available to all bots when the `qmd` CLI is installed — no skill attachment or installation needed.
 
@@ -171,7 +198,7 @@ QMD (local markdown search engine) is automatically available to all bots when t
 - **Collection auto-setup**: `_ensure_qmd_conversations_collection()` registers `cclaw-conversations` collection pointing to `~/.cclaw/bots/` with `**/conversation-*.md` glob on startup
 - **Test isolation**: `tests/conftest.py` autouse fixture patches `shutil.which` to return `None` for `"qmd"`, preventing auto-injection in tests. QMD-specific tests in `test_qmd.py` override with explicit mocking
 
-### 13. Session Continuity
+### 14. Session Continuity
 
 Each message runs `claude -p` as a new process, but maintains conversation context.
 
@@ -185,7 +212,7 @@ Each message runs `claude -p` as a new process, but maintains conversation conte
 - `_call_with_resume_fallback()`: Handles fallback on resume failure
 - Cron and heartbeat: one-shot executions with global memory + bot memory injected into prompt
 
-### 14. Bot-Level Long-Term Memory
+### 15. Bot-Level Long-Term Memory
 
 When user requests "remember this", the bot saves to `MEMORY.md` and injects it into the prompt on new session bootstrap for persistent memory.
 
@@ -196,12 +223,12 @@ When user requests "remember this", the bot saves to `MEMORY.md` and injects it 
 - Management: Telegram `/memory` (show), `/memory clear` (reset), CLI `cclaw memory show|edit|clear`
 - CRUD functions in `session.py`: `memory_file_path()`, `load_bot_memory()`, `save_bot_memory()`, `clear_bot_memory()`
 
-### 15. Global Memory
+### 16. Global Memory
 
 Shared read-only memory accessible by all bots, managed via CLI only.
 
 - `GLOBAL_MEMORY.md` stored at `~/.cclaw/GLOBAL_MEMORY.md`
-- Stores timezone, user preferences, and other information all bots should reference
+- Stores user preferences and other information all bots should reference (timezone is managed in config.yaml, not here)
 - **CLAUDE.md injection**: `compose_claude_md()` inserts a "Global Memory (Read-Only)" section without the file path, preventing Claude from modifying it. Placed before bot Memory section
 - **Bootstrap injection**: `_prepare_session_context()` and `_call_with_resume_fallback()` inject global memory before bot memory (global memory -> bot memory -> conversation history -> message)
 - **Cron/Heartbeat injection**: `execute_cron_job()` and `execute_heartbeat()` inject global memory + bot memory into prompt before execution
@@ -209,7 +236,7 @@ Shared read-only memory accessible by all bots, managed via CLI only.
 - Not editable via Telegram (no file path exposed, no Telegram command)
 - CRUD functions in `session.py`: `global_memory_file_path()`, `load_global_memory()`, `save_global_memory()`, `clear_global_memory()`
 
-### 16. Streaming Response
+### 17. Streaming Response
 
 Delivers Claude Code output to Telegram in real-time. User-toggleable on/off.
 
@@ -227,11 +254,12 @@ Delivers Claude Code output to Telegram in real-time. User-toggleable on/off.
   - `run_claude()`: Sends typing action every 4 seconds -> Markdown-to-HTML conversion on completion -> batch send
   - Same pattern as cron and heartbeat (Phase 3 approach)
 
-### 17. Token Compact
+### 18. Token Compact
 
 Compresses bot MD files (MEMORY.md, user-created SKILL.md, HEARTBEAT.md) via one-shot `claude -p` calls to reduce token costs.
 
 - **Targets**: MEMORY.md, user-created SKILL.md (builtins excluded via `is_builtin_skill()`), HEARTBEAT.md
+- **Auto-compact on start**: `bot_manager.py` runs compact on all targets then regenerates CLAUDE.md for every bot at startup. Compact runs first so regenerated CLAUDE.md includes compacted skill content
 - **Execution**: Sequential per-target with error isolation — individual failures don't stop remaining targets
 - **Working directory**: Each compaction runs in a `tempfile.TemporaryDirectory()` (no session state needed)
 - **Token estimation**: `chars // 4` heuristic for relative before/after comparison
@@ -239,7 +267,7 @@ Compresses bot MD files (MEMORY.md, user-created SKILL.md, HEARTBEAT.md) via one
 - **CLI**: `cclaw bot compact <name>` with `--yes/-y` skip confirmation
 - **Telegram**: `/compact` auto-saves on success
 
-### 18. Encrypted Backup
+### 19. Encrypted Backup
 
 Full backup of `~/.cclaw/` directory to an AES-256 encrypted zip file.
 
@@ -320,7 +348,8 @@ graph TD
     MODE -->|Yes| PLIST["Create launchd plist"]
     PLIST --> LOAD["launchctl load"]
 
-    FG --> BRIDGE["start_bridge()"]
+    FG --> COMPACT["compact + regenerate CLAUDE.md per bot"]
+    COMPACT --> BRIDGE["start_bridge()"]
     BRIDGE --> QMD["_start_qmd_daemon()"]
     QMD --> POLL["start_polling() per bot"]
     POLL --> CRON["cron/heartbeat schedulers"]
@@ -394,7 +423,8 @@ graph TD
 
 ```mermaid
 graph LR
-    INPUT["/cron add 매일 아침 9시 이메일 요약"] --> TZ["resolve_default_timezone()"]
+    INPUT["/cron add 매일 아침 9시 이메일 요약"] --> TZ["resolve_default_timezone()
+    (from config.yaml)"]
     TZ --> PARSE["parse_natural_language_schedule()
     via claude -p (haiku)"]
     PARSE --> JSON["JSON {type, schedule, message, name}"]

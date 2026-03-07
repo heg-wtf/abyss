@@ -16,9 +16,12 @@ from cclaw.config import (
     bot_directory,
     bot_exists,
     cclaw_home,
+    default_config,
+    detect_local_timezone,
     load_bot_config,
     load_config,
     save_bot_config,
+    save_config,
 )
 
 console = Console()
@@ -169,14 +172,98 @@ def prompt_bot_profile() -> dict:
             continue
         break
 
+    display_name = prompt_input("Display name (what you call this bot):")
     personality = prompt_multiline("Bot personality:")
-    description = prompt_multiline("Bot role/tasks:")
+    role = prompt_multiline("Bot role (what it does):")
+    goal = prompt_multiline("Bot goal (why it exists):")
 
     return {
         "name": name,
+        "display_name": display_name.strip(),
         "personality": personality,
-        "description": description,
+        "role": role,
+        "goal": goal,
     }
+
+
+def prompt_timezone() -> str:
+    """Prompt user for timezone selection. Returns IANA timezone string."""
+    from zoneinfo import ZoneInfo
+
+    from cclaw.utils import prompt_input
+
+    detected = detect_local_timezone()
+
+    console.print("\n[bold]Setting timezone.[/bold]\n")
+    console.print(f"  Detected local timezone: [cyan]{detected}[/cyan]")
+    console.print()
+
+    timezone_input = prompt_input(f"Timezone (e.g. Asia/Seoul, America/New_York) [{detected}]:")
+    timezone_input = timezone_input.strip()
+
+    if not timezone_input:
+        timezone_input = detected
+
+    try:
+        ZoneInfo(timezone_input)
+    except (KeyError, ValueError):
+        console.print(f"[red]Invalid timezone: {timezone_input}. Using {detected}.[/red]")
+        timezone_input = detected
+
+    console.print(f"  [green]OK[/green] Timezone: {timezone_input}")
+    return timezone_input
+
+
+SUPPORTED_LANGUAGES = [
+    "Korean",
+    "English",
+    "Japanese",
+    "Chinese",
+    "Spanish",
+    "French",
+    "German",
+    "Portuguese",
+    "Vietnamese",
+    "Thai",
+]
+
+
+def prompt_language() -> str:
+    """Prompt user for language selection. Returns language name string."""
+    from cclaw.utils import prompt_input
+
+    console.print("\n[bold]Setting response language.[/bold]\n")
+    for index, language in enumerate(SUPPORTED_LANGUAGES, 1):
+        console.print(f"  {index}. {language}")
+    console.print()
+
+    selection = prompt_input(f"Select language (1-{len(SUPPORTED_LANGUAGES)}) [1]:")
+    selection = selection.strip()
+
+    if not selection:
+        selected = SUPPORTED_LANGUAGES[0]
+    else:
+        try:
+            number = int(selection)
+            if 1 <= number <= len(SUPPORTED_LANGUAGES):
+                selected = SUPPORTED_LANGUAGES[number - 1]
+            else:
+                console.print(f"[red]Invalid selection. Using {SUPPORTED_LANGUAGES[0]}.[/red]")
+                selected = SUPPORTED_LANGUAGES[0]
+        except ValueError:
+            console.print(f"[red]Invalid input. Using {SUPPORTED_LANGUAGES[0]}.[/red]")
+            selected = SUPPORTED_LANGUAGES[0]
+
+    console.print(f"  [green]OK[/green] Language: {selected}")
+    return selected
+
+
+def save_init_config(timezone_name: str, language: str) -> None:
+    """Save timezone and language to config.yaml."""
+    config = load_config() or default_config()
+    config["timezone"] = timezone_name
+    config["language"] = language
+    save_config(config)
 
 
 def _is_daemon_running() -> bool:
@@ -205,8 +292,10 @@ def create_bot(token: str, bot_info: dict, profile: dict) -> None:
         "telegram_token": token,
         "telegram_username": bot_info["username"],
         "telegram_botname": bot_info["botname"],
-        "description": profile["description"],
+        "display_name": profile.get("display_name", ""),
         "personality": profile["personality"],
+        "role": profile["role"],
+        "goal": profile.get("goal", ""),
         "allowed_users": [],
         "claude_args": [],
         "streaming": False,
@@ -228,9 +317,10 @@ def create_bot(token: str, bot_info: dict, profile: dict) -> None:
     console.print(
         Panel(
             f"[green]OK[/green] {profile['name']} created!\n\n"
-            f"  Name:      {profile['name']}\n"
+            f"  Name:      {profile.get('display_name') or profile['name']}\n"
             f"  Personality: {profile['personality']}\n"
-            f"  Role:      {profile['description']}\n"
+            f"  Role:      {profile['role']}\n"
+            f"  Goal:      {profile.get('goal', '')}\n"
             f"  Path:      {home / 'bots' / profile['name']}\n"
             f"  Telegram:  {bot_info['username']}",
             title=profile["name"],
@@ -244,7 +334,7 @@ def create_bot(token: str, bot_info: dict, profile: dict) -> None:
 
 
 def run_onboarding() -> None:
-    """Run the full onboarding flow."""
+    """Run the full onboarding flow (environment check + timezone)."""
     console.print("[bold]Starting cclaw initial setup.[/bold]")
 
     checks = run_environment_checks()
@@ -253,9 +343,13 @@ def run_onboarding() -> None:
 
     console.print("\n[green]Environment check passed![/green]")
 
-    token, bot_info = prompt_telegram_token()
-    profile = prompt_bot_profile()
-    create_bot(token, bot_info, profile)
+    timezone_name = prompt_timezone()
+    language = prompt_language()
+    save_init_config(timezone_name, language)
+
+    console.print()
+    console.print("[green]Initial setup complete![/green]")
+    console.print("\n  Next step: [bold]cclaw bot add[/bold] to create your first bot.")
 
 
 def add_bot() -> None:
@@ -391,6 +485,8 @@ def run_doctor() -> None:
         return
 
     console.print("[green]OK[/green] config.yaml found")
+    console.print(f"  Timezone: {config.get('timezone', 'UTC')}")
+    console.print(f"  Language: {config.get('language', 'Korean')}")
     console.print(f"  Log level: {config.get('settings', {}).get('log_level', 'N/A')}")
 
     bots = config.get("bots", [])

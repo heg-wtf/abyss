@@ -10,7 +10,10 @@ from cclaw.config import (
     bot_exists,
     cclaw_home,
     default_config,
+    detect_local_timezone,
     generate_claude_md,
+    get_language,
+    get_timezone,
     load_bot_config,
     load_config,
     remove_bot_from_config,
@@ -66,7 +69,9 @@ def test_save_and_load_bot_config(temp_cclaw_home):
         "telegram_token": "fake-token",
         "telegram_username": "@test_bot",
         "telegram_botname": "Test Bot",
-        "description": "Test description",
+        "display_name": "My Bot",
+        "role": "Test role",
+        "goal": "Test goal",
         "personality": "Friendly helper",
         "allowed_users": [],
         "claude_args": [],
@@ -81,7 +86,8 @@ def test_save_and_load_bot_config(temp_cclaw_home):
     claude_md = (bot_directory("test-bot") / "CLAUDE.md").read_text()
     assert "# test-bot" in claude_md
     assert "Friendly helper" in claude_md
-    assert "Test description" in claude_md
+    assert "Test role" in claude_md
+    assert "Test goal" in claude_md
 
     sessions_directory = bot_directory("test-bot") / "sessions"
     assert sessions_directory.exists()
@@ -92,13 +98,27 @@ def test_load_bot_config_missing(temp_cclaw_home):
     assert load_bot_config("nonexistent") is None
 
 
-def test_generate_claude_md():
-    """generate_claude_md produces expected markdown."""
-    result = generate_claude_md("my-bot", "Careful and thorough", "Infrastructure management")
+def test_generate_claude_md(monkeypatch):
+    """generate_claude_md produces expected markdown with config language."""
+    monkeypatch.setattr("cclaw.config.load_config", lambda: {"language": "English"})
+    result = generate_claude_md(
+        "my-bot",
+        "Careful and thorough",
+        role="Infrastructure management",
+        goal="Keep servers alive",
+    )
     assert "# my-bot" in result
     assert "Careful and thorough" in result
     assert "Infrastructure management" in result
-    assert "Korean" in result
+    assert "Keep servers alive" in result
+    assert "Respond in English" in result
+
+
+def test_generate_claude_md_without_goal(monkeypatch):
+    """generate_claude_md omits Goal section when goal is empty."""
+    monkeypatch.setattr("cclaw.config.load_config", lambda: {"language": "Korean"})
+    result = generate_claude_md("my-bot", "Friendly", role="Helper")
+    assert "## Goal" not in result
 
 
 def test_add_and_remove_bot_from_config(temp_cclaw_home):
@@ -135,6 +155,8 @@ def test_default_config():
     assert "bots" in config
     assert "settings" in config
     assert config["settings"]["command_timeout"] == 300
+    assert config["timezone"] == "UTC"
+    assert config["language"] == "Korean"
 
 
 def test_valid_models():
@@ -162,7 +184,8 @@ def test_save_bot_config_with_skills(temp_cclaw_home):
     bot_config = {
         "telegram_token": "fake-token",
         "personality": "Friendly",
-        "description": "Helper",
+        "role": "Helper",
+        "goal": "",
         "allowed_users": [],
         "claude_args": [],
         "skills": ["test-skill"],
@@ -180,7 +203,8 @@ def test_save_bot_config_without_skills(temp_cclaw_home):
     bot_config = {
         "telegram_token": "fake-token",
         "personality": "Friendly",
-        "description": "Helper",
+        "role": "Helper",
+        "goal": "",
         "allowed_users": [],
         "claude_args": [],
     }
@@ -189,3 +213,71 @@ def test_save_bot_config_without_skills(temp_cclaw_home):
     claude_md = (bot_directory("no-skill-bot") / "CLAUDE.md").read_text()
     assert "Available Skills" not in claude_md
     assert "# no-skill-bot" in claude_md
+
+
+# --- Timezone tests ---
+
+
+def test_get_timezone_from_config(temp_cclaw_home):
+    """get_timezone reads timezone from config.yaml."""
+    config = default_config()
+    config["timezone"] = "Asia/Seoul"
+    save_config(config)
+    assert get_timezone() == "Asia/Seoul"
+
+
+def test_get_timezone_default_utc(temp_cclaw_home):
+    """get_timezone returns UTC when no config exists."""
+    assert get_timezone() == "UTC"
+
+
+def test_get_timezone_missing_key(temp_cclaw_home):
+    """get_timezone returns UTC when config has no timezone key."""
+    save_config({"bots": [], "settings": {}})
+    assert get_timezone() == "UTC"
+
+
+def test_get_timezone_invalid_value(temp_cclaw_home):
+    """get_timezone returns UTC when config has invalid timezone."""
+    config = default_config()
+    config["timezone"] = "Invalid/Timezone"
+    save_config(config)
+    assert get_timezone() == "UTC"
+
+
+def test_detect_local_timezone_returns_string():
+    """detect_local_timezone returns a non-empty string."""
+    result = detect_local_timezone()
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_detect_local_timezone_kst(monkeypatch):
+    """detect_local_timezone maps KST to Asia/Seoul."""
+    monkeypatch.setattr("cclaw.config.time", type("FakeTime", (), {"tzname": ("KST", "KDT")})())
+    # Need to also make os.readlink fail so it doesn't try /etc/localtime
+    monkeypatch.setattr("os.readlink", lambda _: (_ for _ in ()).throw(OSError()))
+    result = detect_local_timezone()
+    assert result == "Asia/Seoul"
+
+
+# --- Language tests ---
+
+
+def test_get_language_from_config(temp_cclaw_home):
+    """get_language reads language from config.yaml."""
+    config = default_config()
+    config["language"] = "English"
+    save_config(config)
+    assert get_language() == "English"
+
+
+def test_get_language_default_korean(temp_cclaw_home):
+    """get_language returns Korean when no config exists."""
+    assert get_language() == "Korean"
+
+
+def test_get_language_missing_key(temp_cclaw_home):
+    """get_language returns Korean when config has no language key."""
+    save_config({"bots": [], "settings": {}})
+    assert get_language() == "Korean"

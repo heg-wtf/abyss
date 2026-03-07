@@ -23,15 +23,27 @@ CRON_CHECK_INTERVAL_SECONDS = 30
 def resolve_job_timezone(job: dict[str, Any]) -> ZoneInfo | timezone:
     """Resolve the timezone for a cron job.
 
+    Priority: job-level timezone -> config.yaml timezone -> UTC.
     Returns ZoneInfo for named timezones (e.g., 'Asia/Seoul'),
-    or timezone.utc as default.
+    or timezone.utc as fallback.
     """
     timezone_name = job.get("timezone")
     if timezone_name:
         try:
             return ZoneInfo(timezone_name)
         except (KeyError, ValueError):
-            logger.warning("Invalid timezone '%s', falling back to UTC", timezone_name)
+            logger.warning("Invalid timezone '%s' in job, trying config timezone", timezone_name)
+
+    # Fall back to config.yaml timezone
+    from cclaw.config import get_timezone
+
+    config_timezone = get_timezone()
+    if config_timezone and config_timezone != "UTC":
+        try:
+            return ZoneInfo(config_timezone)
+        except (KeyError, ValueError):
+            logger.warning("Invalid config timezone '%s', falling back to UTC", config_timezone)
+
     return timezone.utc
 
 
@@ -172,41 +184,11 @@ CRON_PARSE_PROMPT = (
 def resolve_default_timezone() -> str:
     """Resolve the default timezone for cron job creation.
 
-    Priority: GLOBAL_MEMORY.md timezone -> system local -> UTC.
+    Uses config.yaml timezone as the single source of truth.
     """
-    from cclaw.session import load_global_memory
+    from cclaw.config import get_timezone
 
-    global_memory = load_global_memory()
-    if global_memory:
-        for line in global_memory.splitlines():
-            lower_line = line.lower().strip()
-            if "timezone" in lower_line or "time zone" in lower_line:
-                # Extract timezone like "Asia/Seoul" from the line
-                for word in line.split():
-                    if "/" in word and len(word) > 3:
-                        stripped = word.strip(":`\"'(),")
-                        try:
-                            ZoneInfo(stripped)
-                            return stripped
-                        except (KeyError, ValueError):
-                            continue
-
-    import time
-
-    local_tz_name = time.tzname[0]
-    # Map common abbreviations to IANA names
-    tz_abbreviation_map = {
-        "KST": "Asia/Seoul",
-        "JST": "Asia/Tokyo",
-        "CST": "America/Chicago",
-        "EST": "America/New_York",
-        "PST": "America/Los_Angeles",
-        "CET": "Europe/Berlin",
-    }
-    if local_tz_name in tz_abbreviation_map:
-        return tz_abbreviation_map[local_tz_name]
-
-    return "UTC"
+    return get_timezone()
 
 
 def generate_unique_job_name(

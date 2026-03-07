@@ -874,9 +874,13 @@ def cron_list(bot: str = typer.Argument(help="Bot name")) -> None:
     table.add_column("Next Run", style="green")
     table.add_column("Status", style="yellow")
 
+    from cclaw.config import get_timezone
+
+    config_timezone = get_timezone()
+
     for job in jobs:
         schedule_display = job.get("schedule") or f"at: {job.get('at', 'N/A')}"
-        timezone_label = job.get("timezone", "UTC")
+        timezone_label = job.get("timezone", config_timezone)
         enabled = job.get("enabled", True)
         status = "enabled" if enabled else "disabled"
         status_style = "green" if enabled else "red"
@@ -946,7 +950,12 @@ def cron_add(bot: str = typer.Argument(help="Bot name")) -> None:
             raise typer.Exit(1)
         job["schedule"] = schedule
 
-        timezone_input = prompt_input("Timezone (e.g. Asia/Seoul, UTC):", default="UTC")
+        from cclaw.config import get_timezone
+
+        default_timezone = get_timezone()
+        timezone_input = prompt_input(
+            f"Timezone (e.g. Asia/Seoul, UTC) [{default_timezone}]:", default=default_timezone
+        )
         job["timezone"] = timezone_input
 
     message = prompt_multiline("Message to send to Claude:")

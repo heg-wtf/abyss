@@ -70,11 +70,22 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
                 console.print(f"[yellow]Skipping {name}: no token configured.[/yellow]")
                 continue
 
-            # Regenerate CLAUDE.md if skills are attached (to pick up any changes)
-            if bot_config.get("skills"):
-                from cclaw.skill import regenerate_bot_claude_md
+            # Compact MD files then regenerate CLAUDE.md on every start
+            from cclaw.token_compact import (
+                collect_compact_targets,
+                run_compact,
+                save_compact_results,
+            )
 
-                regenerate_bot_claude_md(name)
+            targets = collect_compact_targets(name)
+            if targets:
+                console.print(f"  [cyan]COMPACT[/cyan] {name} ({len(targets)} target(s))")
+                results = await run_compact(name)
+                save_compact_results(results)
+
+            from cclaw.skill import regenerate_bot_claude_md
+
+            regenerate_bot_claude_md(name)
 
             bot_path = bot_directory(name)
             handlers = make_handlers(name, bot_path, bot_config)

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -73,7 +75,8 @@ def save_bot_config(name: str, bot_config: dict[str, Any]) -> None:
     claude_md_content = compose_claude_md(
         bot_name=name,
         personality=bot_config.get("personality", ""),
-        description=bot_config.get("description", ""),
+        role=bot_config.get("role", bot_config.get("description", "")),
+        goal=bot_config.get("goal", ""),
         skill_names=bot_config.get("skills", []),
         bot_path=directory,
     )
@@ -81,27 +84,38 @@ def save_bot_config(name: str, bot_config: dict[str, Any]) -> None:
         file.write(claude_md_content)
 
 
-def generate_claude_md(name: str, personality: str, description: str) -> str:
+def generate_claude_md(name: str, personality: str, role: str, goal: str = "") -> str:
     """Generate CLAUDE.md content for a bot."""
-    return f"""# {name}
+    language = get_language()
+    sections = f"""# {name}
 
 ## Personality
 {personality}
 
 ## Role
-{description}
+{role}
+"""
+    if goal:
+        sections += f"""
+## Goal
+{goal}
+"""
 
+    sections += f"""
 ## Rules
-- Respond in Korean.
+- Respond in {language}.
 - Save generated files to the workspace/ directory.
 - Always ask for confirmation before executing dangerous commands (delete, restart, etc.).
 """
+    return sections
 
 
 def default_config() -> dict[str, Any]:
     """Return a default config structure."""
     return {
         "bots": [],
+        "timezone": "UTC",
+        "language": "Korean",
         "settings": {
             "log_level": "INFO",
             "command_timeout": 300,
@@ -183,3 +197,81 @@ def bot_exists(name: str) -> bool:
     if not config or "bots" not in config:
         return False
     return any(b["name"] == name for b in config["bots"])
+
+
+# --- Timezone ---
+
+TIMEZONE_ABBREVIATION_MAP: dict[str, str] = {
+    "KST": "Asia/Seoul",
+    "JST": "Asia/Tokyo",
+    "CST": "America/Chicago",
+    "EST": "America/New_York",
+    "PST": "America/Los_Angeles",
+    "CET": "Europe/Berlin",
+    "GMT": "Europe/London",
+    "MST": "America/Denver",
+    "HST": "Pacific/Honolulu",
+    "AKST": "America/Anchorage",
+    "IST": "Asia/Kolkata",
+    "AEST": "Australia/Sydney",
+    "NZST": "Pacific/Auckland",
+}
+
+
+def detect_local_timezone() -> str:
+    """Detect the local system timezone as an IANA name.
+
+    Returns an IANA timezone string (e.g., 'Asia/Seoul').
+    Falls back to 'UTC' if detection fails.
+    """
+    local_abbreviation = time.tzname[0]
+    if local_abbreviation in TIMEZONE_ABBREVIATION_MAP:
+        return TIMEZONE_ABBREVIATION_MAP[local_abbreviation]
+
+    # Try reading /etc/localtime symlink (macOS/Linux)
+    try:
+        import os
+
+        localtime = os.readlink("/etc/localtime")
+        # e.g., /var/db/timezone/zoneinfo/Asia/Seoul
+        if "zoneinfo/" in localtime:
+            candidate = localtime.split("zoneinfo/", 1)[1]
+            ZoneInfo(candidate)  # validate
+            return candidate
+    except (OSError, KeyError, ValueError):
+        pass
+
+    return "UTC"
+
+
+def get_timezone() -> str:
+    """Return the timezone from config.yaml.
+
+    This is the single source of truth for timezone across all of cclaw.
+    Falls back to 'UTC' if config is not found or timezone is not set.
+    """
+    config = load_config()
+    if not config:
+        return "UTC"
+    timezone_name = config.get("timezone", "UTC")
+    # Validate
+    try:
+        ZoneInfo(timezone_name)
+        return timezone_name
+    except (KeyError, ValueError):
+        return "UTC"
+
+
+DEFAULT_LANGUAGE = "Korean"
+
+
+def get_language() -> str:
+    """Return the language from config.yaml.
+
+    This is the single source of truth for response language across all of cclaw.
+    Falls back to 'Korean' if config is not found or language is not set.
+    """
+    config = load_config()
+    if not config:
+        return DEFAULT_LANGUAGE
+    return config.get("language", DEFAULT_LANGUAGE)
