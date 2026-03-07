@@ -76,6 +76,18 @@ def stop() -> None:
 
 
 @app.command()
+def restart(
+    bot: str = typer.Option(None, help="Restart specific bot only"),
+    daemon: bool = typer.Option(False, help="Run as background daemon"),
+) -> None:
+    """Restart bot(s). Stops then starts."""
+    from cclaw.bot_manager import start_bots, stop_bots
+
+    stop_bots()
+    start_bots(bot_name=bot, daemon=daemon)
+
+
+@app.command()
 def status() -> None:
     """Show running status."""
     from cclaw.bot_manager import show_status

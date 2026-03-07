@@ -268,6 +268,12 @@ MCP skills define `mcpServers` configuration in `mcp.json` files.
 During `run_claude()`, `merge_mcp_configs()` merges all linked MCP skill configs
 and creates `.mcp.json` in the session directory. Claude Code auto-detects this file.
 
+### Default Allowed Tools
+
+When any skill defines `allowed_tools`, the `--allowedTools` flag activates a whitelist — only listed tools are auto-approved. This blocks basic tools (WebFetch, WebSearch, Bash) that aren't skill-specific but are essential for general operation.
+
+`DEFAULT_ALLOWED_TOOLS` in `claude_runner.py` solves this by always merging `WebFetch`, `WebSearch`, and `Bash` into the whitelist when it's active. Without this, attaching any tool-based skill would disable web access and shell execution.
+
 ### CLI Skill Environment Variables
 
 CLI skills store values in `skill.yaml`'s `environment_variable_values`.

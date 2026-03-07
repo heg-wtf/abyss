@@ -44,7 +44,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `cli.py` | Typer entry point, all subcommand definitions |
 | `config.py` | Config YAML CRUD, timezone (`get_timezone()`), language (`get_language()`), model mapping |
 | `onboarding.py` | `cclaw init` (env check + timezone + language), `cclaw bot add` (token + profile) |
-| `claude_runner.py` | `claude -p` subprocess (async), model/skill/MCP injection, streaming, `--resume` session continuity, bridge-aware wrappers |
+| `claude_runner.py` | `claude -p` subprocess (async), model/skill/MCP injection, `DEFAULT_ALLOWED_TOOLS` (WebFetch/WebSearch/Bash always allowed), streaming, `--resume` session continuity, bridge-aware wrappers |
 | `bridge.py` | Node.js bridge client (Unix socket JSONL), lifecycle start/stop, fallback to subprocess |
 | `session.py` | Session directories, conversation logs (`conversation-YYMMDD.md`), Claude session ID (`--resume`), memory CRUD (bot + global) |
 | `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity |

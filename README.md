@@ -233,6 +233,7 @@ cclaw heartbeat edit <bot>     # Edit HEARTBEAT.md ($EDITOR)
 cclaw start                    # Foreground
 cclaw start --daemon           # Background (launchd)
 cclaw stop                     # Stop daemon
+cclaw restart                  # Stop then start
 cclaw status                   # Show status
 
 # Logs

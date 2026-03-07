@@ -138,6 +138,7 @@ Internally, skills have different tool configurations:
 - MCP skills: Auto-generates `.mcp.json` in session directory. Environment variables injected via subprocess env
 - CLI skills: Environment variables auto-injected during subprocess execution
 - **Dual-layer permission defense**: `allowed_tools` in skill.yaml controls hard auto-approval (tools not listed are blocked in `-p` mode). SKILL.md provides soft guardrails for tools that are allowed but can be used destructively (e.g., `execute_sql` with DELETE statements)
+- **Default allowed tools**: When the `--allowedTools` whitelist is active, `DEFAULT_ALLOWED_TOOLS` (WebFetch, WebSearch, Bash) are always included to prevent basic capabilities from being blocked by skill-specific tool lists
 
 ### 10. Cron Schedule Automation
 

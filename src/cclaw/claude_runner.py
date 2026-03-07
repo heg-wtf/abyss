@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 300
 STREAMING_CURSOR = "\u258c"
 
+# Tools always allowed when --allowedTools whitelist is active.
+# Without these, basic capabilities (web access, shell) get blocked
+# when any skill defines allowed_tools.
+DEFAULT_ALLOWED_TOOLS = [
+    "WebFetch",
+    "WebSearch",
+    "Bash",
+]
+
 # Tracks running processes per session key (e.g. "botname:chat_id")
 _running_processes: dict[str, asyncio.subprocess.Process] = {}
 
@@ -270,7 +279,11 @@ def _prepare_skill_config(
         with open(mcp_json_path, "w") as mcp_file:
             json.dump(mcp_config, mcp_file, indent=2)
 
+    # Merge default tools when whitelist is active
     if allowed_tools:
+        for tool in DEFAULT_ALLOWED_TOOLS:
+            if tool not in allowed_tools:
+                allowed_tools.append(tool)
         _write_session_settings(working_directory, allowed_tools)
         logger.info("Allowed tools: %s", allowed_tools)
 

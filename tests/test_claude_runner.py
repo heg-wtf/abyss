@@ -339,7 +339,13 @@ async def test_run_claude_with_allowed_tools(tmp_path):
     call_args = mock_exec.call_args[0]
     assert "--allowedTools" in call_args
     allowed_index = list(call_args).index("--allowedTools")
-    assert call_args[allowed_index + 1] == "Bash(imsg:*),Read(*)"
+    allowed_tools_value = call_args[allowed_index + 1]
+    assert "Bash(imsg:*)" in allowed_tools_value
+    assert "Read(*)" in allowed_tools_value
+    # Default tools are always included when whitelist is active
+    assert "WebFetch" in allowed_tools_value
+    assert "WebSearch" in allowed_tools_value
+    assert "Bash" in allowed_tools_value
 
     # Verify .claude/settings.json was created
     settings_path = tmp_path / ".claude" / "settings.json"
@@ -348,6 +354,7 @@ async def test_run_claude_with_allowed_tools(tmp_path):
         settings = json.load(file)
     assert "Bash(imsg:*)" in settings["permissions"]["allow"]
     assert "Read(*)" in settings["permissions"]["allow"]
+    assert "WebFetch" in settings["permissions"]["allow"]
 
 
 def test_write_session_settings_creates_file(tmp_path):
