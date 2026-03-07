@@ -138,7 +138,15 @@ For each bot on `cclaw start`:
 - **Version bump commit**: `🔧 config: bump version to YYYY.MM.DD`
 - **Git tag**: `vYYYY.MM.DD` (e.g., `v2026.03.07`). Create after pushing the release commit
 - **Release notes**: Write in English
-- **Tweet draft**: Provide a 140-character tweet with emojis summarizing the release
+- **Tweet draft**: Multi-line format, one feature per line with emoji. Example:
+  ```
+  🚀 cclaw v2026.03.07
+
+  ⚡ Node.js bridge for faster Claude queries
+  📚 system-wide QMD search
+  🌏 timezone/language config
+  🗜️ startup auto-compact
+  ```
 
 ## Engineering Mindset
 
