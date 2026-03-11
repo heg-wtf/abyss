@@ -153,6 +153,17 @@ For each bot on `cclaw start`:
 - Planning is good, but never hesitate. Conclusions come only from execution, tests, and data
 - Always strive to build great products, hype products. We are engineers and influencers
 
+## ClawHouse (Web Dashboard)
+
+`clawhouse/` directory contains the Next.js web dashboard. Tech: Next.js 16 + shadcn/ui + Tailwind CSS + js-yaml.
+
+- Reads/writes `~/.cclaw/` directly via `lib/cclaw.ts` (no database)
+- Server components for data pages, client components for editors
+- API routes in `src/app/api/` as thin wrappers over `lib/cclaw.ts`
+- `cclaw dashboard` CLI command spawns the dev server on port 3847
+- Skills split: `BUILTIN_SKILL_NAMES` Set in `lib/cclaw.ts` classifies built-in vs custom
+- See **[docs/PLAN-26-0311-CLAWHOUSE.md](docs/PLAN-26-0311-CLAWHOUSE.md)** for full plan and implementation status
+
 ## Essential References
 
 Read these docs when working on related areas. They contain critical implementation details not duplicated here.

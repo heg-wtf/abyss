@@ -150,6 +150,40 @@ def backup() -> None:
     console.print("  Encryption: AES-256")
 
 
+@app.command()
+def dashboard(
+    port: int = typer.Option(3847, help="Port to run dashboard on"),
+) -> None:
+    """Launch Clawhouse web dashboard."""
+    import subprocess
+    import sys
+
+    from rich.console import Console
+
+    console = Console()
+    clawhouse_directory = Path(__file__).resolve().parent.parent.parent / "clawhouse"
+
+    if not clawhouse_directory.exists():
+        console.print("[red]Clawhouse directory not found.[/red]")
+        raise typer.Exit(1)
+
+    node_modules = clawhouse_directory / "node_modules"
+    if not node_modules.exists():
+        console.print("[yellow]Installing dependencies...[/yellow]")
+        subprocess.run(["npm", "install"], cwd=clawhouse_directory, check=True)
+
+    console.print(f"[green]Starting Clawhouse on http://localhost:{port}[/green]")
+    try:
+        subprocess.run(
+            ["npx", "next", "dev", "--port", str(port)],
+            cwd=clawhouse_directory,
+            check=True,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dashboard stopped.[/yellow]")
+        sys.exit(0)
+
+
 @bot_app.command("add")
 def bot_add() -> None:
     """Add a new bot."""

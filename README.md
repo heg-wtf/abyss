@@ -20,6 +20,7 @@ A multi-bot, file-based session system that runs locally on Mac.
 - [CLI Commands](#cli-commands)
 - [Project Structure](#project-structure)
 - [Runtime Data](#runtime-data)
+- [ClawHouse Dashboard](#clawhouse-dashboard)
 - [Testing](#testing)
 - [License](#license)
 
@@ -252,6 +253,7 @@ cclaw backup                   # Backup ~/.cclaw/ to AES-256 encrypted zip
 ```
 cclaw/
 ├── pyproject.toml
+├── clawhouse/              # ClawHouse web dashboard (Next.js)
 ├── bridge/
 │   └── server.mjs          # Node.js bridge server (development source)
 ├── src/cclaw/
@@ -290,6 +292,33 @@ cclaw/
 │   └── utils.py            # Utilities
 └── tests/
 ```
+
+## ClawHouse Dashboard
+
+ClawHouse is a web-based dashboard for managing `~/.cclaw/` configuration, bots, skills, cron jobs, sessions, and logs. No terminal required.
+
+```bash
+# Via cclaw CLI
+cclaw dashboard
+cclaw dashboard --port 8080
+
+# Or directly
+cd clawhouse && npx next dev --port 3847
+```
+
+| Feature | Description |
+|---------|-------------|
+| Dashboard | Bot cards, quick stats, disk usage, system status |
+| Bot Detail | Profile, cron jobs, sessions, memory editor |
+| Bot Editor | Edit bot.yaml fields (model, skills, personality, heartbeat) |
+| Skills | Built-in / Custom split, skill cards with usage info |
+| Settings | Global config editor, global memory editor |
+| Logs | Date picker, text filter, paginated viewer |
+| Conversations | Per-chat conversation viewer with date navigation |
+
+**Tech Stack**: Next.js 16 + shadcn/ui + Tailwind CSS + js-yaml. Reads `~/.cclaw/` directly (no database).
+
+See [docs/PLAN-26-0311-CLAWHOUSE.md](docs/PLAN-26-0311-CLAWHOUSE.md) for full plan.
 
 ## Runtime Data
 

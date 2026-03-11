@@ -1,0 +1,41 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  getBot,
+  updateBot,
+  getCronJobs,
+  getBotSessions,
+  getBotMemory,
+} from "@/lib/cclaw";
+
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ name: string }> },
+) {
+  const { name } = await params;
+  const bot = getBot(name);
+  if (!bot) {
+    return NextResponse.json({ error: "Bot not found" }, { status: 404 });
+  }
+
+  const cronJobs = getCronJobs(name);
+  const sessions = getBotSessions(name);
+  const memory = getBotMemory(name);
+
+  return NextResponse.json({
+    ...bot,
+    telegram_token: "***",
+    cronJobs,
+    sessions,
+    memory,
+  });
+}
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ name: string }> },
+) {
+  const { name } = await params;
+  const updates = await request.json();
+  updateBot(name, updates);
+  return NextResponse.json({ success: true });
+}
