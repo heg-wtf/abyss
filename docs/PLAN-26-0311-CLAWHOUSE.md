@@ -300,31 +300,31 @@ clawhouse/
 ## Implementation Phases
 
 ### Phase 1: Foundation (MVP)
-- [ ] Next.js project setup with shadcn/ui
-- [ ] ~/.cclaw filesystem reader library (`lib/cclaw.ts`)
-- [ ] Dashboard home with bot cards
-- [ ] Bot detail page (view only)
-- [ ] Settings page (view only)
-- [ ] System status indicator
+- [x] Next.js project setup with shadcn/ui
+- [x] ~/.cclaw filesystem reader library (`lib/cclaw.ts`)
+- [x] Dashboard home with bot cards
+- [x] Bot detail page (view only)
+- [x] Settings page (view only)
+- [x] System status indicator
 
 ### Phase 2: Read & Browse
-- [ ] Skill list and detail pages
-- [ ] Cron job viewer
-- [ ] Conversation history viewer
-- [ ] Log viewer with date picker
-- [ ] Global memory viewer
+- [x] Skill list and detail pages (Built-in / Custom split)
+- [x] Cron job viewer (in bot detail tab)
+- [x] Conversation history viewer (date picker, markdown render)
+- [x] Log viewer with date picker and filter
+- [x] Global memory viewer (in settings page)
 
 ### Phase 3: Edit & Manage
-- [ ] Bot config editor (bot.yaml)
-- [ ] Memory editor (MEMORY.md, GLOBAL_MEMORY.md)
-- [ ] Cron job CRUD
-- [ ] Settings editor (config.yaml)
+- [x] Bot config editor (bot.yaml)
+- [x] Memory editor (MEMORY.md, GLOBAL_MEMORY.md)
+- [x] Cron job CRUD (add/edit/remove/toggle)
+- [x] Settings editor (config.yaml)
 - [ ] Skill environment variable management
 
 ### Phase 4: Polish
-- [ ] Real-time status updates (polling or WebSocket)
+- [x] Real-time status updates (10s polling)
 - [ ] Responsive mobile layout
-- [ ] Dark/light theme
+- [x] Dark/light theme (next-themes, system default)
 - [ ] Search across conversations and logs
 - [ ] Export/backup functionality
 
@@ -339,11 +339,12 @@ clawhouse/
 ## Running
 
 ```bash
-# From cclaw project root
-cd clawhouse && npx next dev --port 3847
-
-# Or as cclaw command (future)
+# Via cclaw CLI (recommended)
 cclaw dashboard
+cclaw dashboard --port 8080
+
+# Or directly
+cd clawhouse && npx next dev --port 3847
 ```
 
 Port `3847` chosen as default (CLAW on phone keypad: C=2, L=5, A=2, W=9 → too long, just use 3847).
