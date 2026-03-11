@@ -29,3 +29,34 @@ jobs:
           python-version: "3.12"
       - run: uv sync
       - run: uv run pytest -v
+
+  clawhouse-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clawhouse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: clawhouse/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+
+  clawhouse-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clawhouse
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: clawhouse/package-lock.json
+      - run: npm ci
+      - run: npm test
