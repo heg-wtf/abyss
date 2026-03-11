@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: "🏠" },
@@ -85,10 +86,9 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="border-t p-3">
-        <div className="text-xs text-muted-foreground text-center">
-          cclaw dashboard
-        </div>
+      <div className="border-t p-3 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">cclaw dashboard</span>
+        <ThemeToggle />
       </div>
     </aside>
   );

@@ -15,7 +15,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { StatusBadge, ModelBadge } from "@/components/status-badge";
+import { ModelBadge } from "@/components/status-badge";
+import { LiveStatus } from "@/components/live-status";
 import { Separator } from "@/components/ui/separator";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,7 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold">Dashboard</h1>
           <p className="text-muted-foreground text-sm">cclaw system overview</p>
         </div>
-        <StatusBadge running={status.running} />
+        <LiveStatus initialRunning={status.running} />
       </div>
 
       <div className="grid grid-cols-4 gap-4">
