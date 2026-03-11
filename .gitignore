@@ -7,3 +7,4 @@ build/
 .env
 .pytest_cache/
 *.log
+.playwright-mcp/
