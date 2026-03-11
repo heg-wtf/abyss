@@ -162,16 +162,18 @@ def dashboard(
 
     console = Console()
 
-    # Try cwd first (user running from repo root), then source-relative fallback
+    # Try: cwd (repo root) → bundled package data → source-relative fallback
     candidates = [
         Path.cwd() / "clawhouse",
+        Path(__file__).resolve().parent / "clawhouse_data",
         Path(__file__).resolve().parent.parent.parent / "clawhouse",
     ]
     clawhouse_directory = next((c for c in candidates if c.exists()), None)
 
     if clawhouse_directory is None:
         console.print("[red]ClawHouse directory not found.[/red]")
-        console.print("[dim]Run this command from the cclaw repo root.[/dim]")
+        console.print("[dim]Run this command from the cclaw repo root,[/dim]")
+        console.print("[dim]or reinstall cclaw to bundle ClawHouse.[/dim]")
         raise typer.Exit(1)
 
     node_modules = clawhouse_directory / "node_modules"

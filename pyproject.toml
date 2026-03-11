@@ -23,6 +23,17 @@ build-backend = "hatchling.build"
 packages = ["src/cclaw"]
 artifacts = ["src/cclaw/bridge_data/*"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"clawhouse/src" = "cclaw/clawhouse_data/src"
+"clawhouse/public" = "cclaw/clawhouse_data/public"
+"clawhouse/package.json" = "cclaw/clawhouse_data/package.json"
+"clawhouse/package-lock.json" = "cclaw/clawhouse_data/package-lock.json"
+"clawhouse/tsconfig.json" = "cclaw/clawhouse_data/tsconfig.json"
+"clawhouse/next.config.ts" = "cclaw/clawhouse_data/next.config.ts"
+"clawhouse/postcss.config.mjs" = "cclaw/clawhouse_data/postcss.config.mjs"
+"clawhouse/components.json" = "cclaw/clawhouse_data/components.json"
+"clawhouse/eslint.config.mjs" = "cclaw/clawhouse_data/eslint.config.mjs"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
