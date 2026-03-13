@@ -30,7 +30,7 @@ wheels = [
 
 [[package]]
 name = "cclaw"
-version = "2026.3.12"
+version = "2026.3.13"
 source = { editable = "." }
 dependencies = [
     { name = "croniter" },

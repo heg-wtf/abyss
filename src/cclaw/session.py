@@ -43,11 +43,19 @@ def collect_session_chat_ids(bot_path: Path) -> list[int]:
     return chat_ids
 
 
-def ensure_session(bot_path: Path, chat_id: int) -> Path:
+def ensure_session(
+    bot_path: Path,
+    chat_id: int,
+    *,
+    bot_name: str | None = None,
+) -> Path:
     """Ensure a session directory exists with required files.
 
     Creates the session directory, copies the bot's CLAUDE.md into it,
     and creates the workspace subdirectory.
+
+    When bot_name is provided, checks if the chat_id belongs to a bound group
+    and regenerates the session CLAUDE.md with group context if so.
 
     Returns the session directory path.
     """
@@ -59,6 +67,30 @@ def ensure_session(bot_path: Path, chat_id: int) -> Path:
 
     session_claude_md = directory / "CLAUDE.md"
     bot_claude_md = bot_path / "CLAUDE.md"
+
+    if bot_name is not None:
+        # Check if this chat belongs to a bound group
+        from cclaw.group import find_group_by_chat_id
+
+        group_config = find_group_by_chat_id(chat_id)
+        if group_config is not None:
+            # Generate group-aware CLAUDE.md for this session
+            from cclaw.config import load_bot_config
+            from cclaw.skill import compose_claude_md
+
+            bot_config = load_bot_config(bot_name)
+            if bot_config:
+                content = compose_claude_md(
+                    bot_name=bot_name,
+                    personality=bot_config.get("personality", ""),
+                    role=bot_config.get("role", bot_config.get("description", "")),
+                    goal=bot_config.get("goal", ""),
+                    skill_names=bot_config.get("skills", []),
+                    bot_path=bot_path,
+                    group_context=group_config,
+                )
+                session_claude_md.write_text(content)
+                return directory
 
     if not session_claude_md.exists() and bot_claude_md.exists():
         shutil.copy2(bot_claude_md, session_claude_md)

@@ -39,7 +39,7 @@ def bot_config():
 def test_make_handlers_returns_handlers(bot_path, bot_config):
     """make_handlers returns a list of handlers."""
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    assert len(handlers) == 18
+    assert len(handlers) == 20
 
 
 def test_is_user_allowed_empty_list():
@@ -144,7 +144,7 @@ async def test_message_handler_calls_claude(bot_path, bot_config, mock_update):
     """Message handler forwards to Claude and replies."""
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Claude response"
@@ -298,7 +298,7 @@ async def test_message_handler_passes_model(bot_path, bot_config, mock_update):
     bot_config["model"] = "opus"
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -444,7 +444,7 @@ async def test_message_handler_passes_skill_names(bot_path, bot_config, mock_upd
     bot_config["skills"] = ["my-skill"]
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -460,7 +460,7 @@ async def test_message_handler_no_skill_names(bot_path, bot_config, mock_update)
     """Message handler passes None for skill_names when no skills attached."""
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -587,7 +587,7 @@ async def test_message_handler_non_streaming(bot_path, bot_config, mock_update):
     """Message handler uses run_claude (non-streaming) when streaming is off."""
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Non-streaming response"
@@ -605,7 +605,7 @@ async def test_streaming_uses_send_message_draft(bot_path, bot_config, mock_upda
     """Streaming mode uses sendMessageDraft for real-time draft updates."""
     bot_config["streaming"] = True
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     async def fake_streaming(**kwargs):
         on_text_chunk = kwargs.get("on_text_chunk")
@@ -636,7 +636,7 @@ async def test_streaming_draft_clears_before_final(bot_path, bot_config, mock_up
     """Draft is cleared with empty text before sending final message."""
     bot_config["streaming"] = True
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     async def fake_streaming(**kwargs):
         on_text_chunk = kwargs.get("on_text_chunk")
@@ -665,7 +665,7 @@ async def test_streaming_fallback_to_edit_message(bot_path, bot_config, mock_upd
     """Falls back to editMessageText when sendMessageDraft fails."""
     bot_config["streaming"] = True
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     async def fake_streaming(**kwargs):
         on_text_chunk = kwargs.get("on_text_chunk")
@@ -699,7 +699,7 @@ async def test_streaming_short_response_no_draft(bot_path, bot_config, mock_upda
     """Short responses below threshold don't trigger draft updates."""
     bot_config["streaming"] = True
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     async def fake_streaming(**kwargs):
         on_text_chunk = kwargs.get("on_text_chunk")
@@ -729,7 +729,7 @@ async def test_message_handler_first_message_bootstraps(bot_path, bot_config, mo
     """First message creates session_id and uses --session-id (not --resume)."""
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -764,7 +764,7 @@ async def test_message_handler_resume_session(bot_path, bot_config, mock_update)
 
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -788,7 +788,7 @@ async def test_message_handler_resume_fallback(bot_path, bot_config, mock_update
 
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     call_count = 0
 
@@ -838,7 +838,7 @@ async def test_message_handler_first_message_with_history(bot_path, bot_config, 
 
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -919,7 +919,7 @@ async def test_message_handler_bootstrap_includes_memory(bot_path, bot_config, m
 
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
@@ -948,7 +948,7 @@ async def test_message_handler_bootstrap_memory_and_history(bot_path, bot_config
 
     bot_config["streaming"] = False
     handlers = make_handlers("test-bot", bot_path, bot_config)
-    message_handler = handlers[17]
+    message_handler = handlers[19]
 
     with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"

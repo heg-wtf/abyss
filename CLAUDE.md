@@ -47,7 +47,8 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `claude_runner.py` | `claude -p` subprocess (async), model/skill/MCP injection, `DEFAULT_ALLOWED_TOOLS` (WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Agent always allowed), streaming, `--resume` session continuity, bridge-aware wrappers |
 | `bridge.py` | Node.js bridge client (Unix socket JSONL), lifecycle start/stop, fallback to subprocess |
 | `session.py` | Session directories, conversation logs (`conversation-YYMMDD.md`), Claude session ID (`--resume`), memory CRUD (bot + global) |
-| `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity |
+| `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity, group-aware routing |
+| `group.py` | Group CRUD (create/delete/list/bind/unbind), shared conversation log, shared workspace, role detection |
 | `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, bridge/QMD lifecycle, cron/heartbeat schedulers, graceful shutdown |
 | `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection |
 | `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support |
@@ -75,6 +76,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 4. QMD skill instructions (auto-injected when `qmd` CLI is available)
 5. Memory instructions (file path to MEMORY.md for Claude to read/write)
 6. Rules (response language from `config.yaml`, no tables, file save location)
+7. Group context (orchestrator: team roster + rules; member: role + shared conversation history)
 
 This is the only way to inject system instructions into `claude -p`, which auto-reads `CLAUDE.md` from its working directory.
 
@@ -105,6 +107,20 @@ For each bot on `cclaw start`:
 - Cron jobs: per-job timezone -> config timezone -> UTC
 - Heartbeat active hours: uses config timezone
 
+### Group Collaboration
+
+Multi-bot collaboration via Telegram groups using an orchestrator pattern:
+- One orchestrator per group manages missions, delegates to members via @mention
+- Members execute tasks and report back via @mention to orchestrator
+- `group.py`: Group CRUD, `find_group_by_chat_id()`, `bind_group()`, `log_to_shared_conversation()`, shared workspace
+- `handlers.py`: Group-aware message routing (orchestrator receives user msgs + member @mentions, members receive orchestrator @mentions)
+- `skill.py`: `compose_group_claude_md()` injects team roster for orchestrator, role context for members
+- `session.py`: `group_session_directory()` for per-chat group sessions
+- `/reset` in group: orchestrator resets all bots' sessions + clears shared conversation, preserves workspace
+- `/cancel` in group: orchestrator cancels all bots' running processes
+- `/bind <group>` and `/unbind`: associate Telegram chat with a group config
+- BotFather Group Privacy must be OFF for bots to receive group messages
+
 ### Telegram Message Rules
 
 - Markdown -> HTML via `markdown_to_telegram_html()` before sending
@@ -126,6 +142,10 @@ For each bot on `cclaw start`:
 │   ├── cron_sessions/<job>/  # Cron working directory
 │   ├── heartbeat_sessions/   # Heartbeat working directory (HEARTBEAT.md, workspace/)
 │   └── sessions/chat_<id>/   # Per-chat session (CLAUDE.md, conversation-YYMMDD.md, workspace/)
+├── groups/<name>/
+│   ├── group.yaml            # Group config (name, orchestrator, members, telegram_chat_id)
+│   ├── conversation/         # Shared conversation logs (YYMMDD.md, date-based)
+│   └── workspace/            # Shared workspace (persistent across resets)
 ├── bridge/                   # Node.js bridge (server.mjs, package.json, node_modules/)
 ├── skills/<name>/            # Skills (SKILL.md required, skill.yaml + mcp.json optional)
 └── logs/                     # Daily rotating logs
@@ -173,3 +193,4 @@ Read these docs when working on related areas. They contain critical implementat
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** -- System architecture, module dependency graph, Mermaid flow diagrams (message processing, cron, heartbeat, shutdown), bot.yaml schema, all 19 design decisions with rationale
 - **[docs/TECHNICAL-NOTES.md](docs/TECHNICAL-NOTES.md)** -- Deep implementation details per feature: Claude Code execution modes, bridge protocol/lifecycle, streaming event parsing, skill MCP config merging, cron scheduler behavior, session continuity (bootstrap/resume/fallback), memory save/load mechanism, QMD auto-injection, IME input handling, emoji width fixes
 - **[docs/SECURITY.md](docs/SECURITY.md)** -- Security audit: 33 findings (path traversal, token storage, rate limiting, env var injection, workspace limits). Check before adding file handling, user input, or subprocess code
+- **[docs/PLAN-26-0313-GROUP-MISSION.md](docs/PLAN-26-0313-GROUP-MISSION.md)** -- Group collaboration implementation plan: orchestrator pattern, shared conversation/workspace, CLAUDE.md composition, group-aware handlers

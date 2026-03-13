@@ -293,6 +293,87 @@ def _load_qmd_builtin_markdown() -> str | None:
     return skill_md.read_text(encoding="utf-8")
 
 
+def compose_group_context(bot_name: str, group_config: dict[str, Any]) -> str:
+    """Generate group context section for CLAUDE.md.
+
+    Produces different content depending on whether the bot is the orchestrator
+    or a member of the group.
+
+    Args:
+        bot_name: The bot's registered name.
+        group_config: The group's config dict (from group.yaml).
+
+    Returns:
+        Markdown string to append to CLAUDE.md.
+    """
+    from cclaw.group import get_my_role, shared_workspace_path
+
+    my_role = get_my_role(group_config, bot_name)
+    group_name = group_config["name"]
+
+    if my_role == "orchestrator":
+        lines = [
+            f"# Group: {group_name}",
+            "",
+            "You are the orchestrator of this group.",
+            "",
+            "## Team Members",
+        ]
+        for member_name in group_config.get("members", []):
+            member_config = load_bot_config(member_name)
+            if not member_config:
+                continue
+            username = member_config.get("telegram_username", "")
+            member_personality = member_config.get("personality", "")
+            member_role = member_config.get("role", "")
+            member_goal = member_config.get("goal", "")
+            lines.append(f"### {username}")
+            lines.append(f"- personality: {member_personality}")
+            lines.append(f"- role: {member_role}")
+            lines.append(f"- goal: {member_goal}")
+            lines.append("")
+
+        workspace = shared_workspace_path(group_name)
+        lines.extend(
+            [
+                "## Rules",
+                "1. If the mission is ambiguous, ask clarifying questions "
+                "BEFORE breaking it into tasks",
+                "2. Analyze the mission and break it into tasks",
+                "3. Delegate tasks to members via @mention",
+                "4. Reallocate on failure or direction change",
+                "5. Synthesize results and report to the user",
+                "",
+                "## Shared Workspace",
+                f"Results go to: {workspace}",
+            ]
+        )
+        return "\n".join(lines)
+
+    if my_role == "member":
+        orchestrator_name = group_config.get("orchestrator", "")
+        orchestrator_config = load_bot_config(orchestrator_name)
+        orchestrator_username = ""
+        if orchestrator_config:
+            orchestrator_username = orchestrator_config.get("telegram_username", "")
+
+        workspace = shared_workspace_path(group_name)
+        return "\n".join(
+            [
+                f"# Group: {group_name}",
+                "",
+                "You are a member of this group.",
+                "",
+                "## Rules",
+                "- Only respond when @mentioned",
+                f"- Report results to {orchestrator_username}",
+                f"- Save work to: {workspace}",
+            ]
+        )
+
+    return ""
+
+
 def compose_claude_md(
     bot_name: str,
     personality: str,
@@ -300,12 +381,15 @@ def compose_claude_md(
     goal: str = "",
     skill_names: list[str] | None = None,
     bot_path: Path | None = None,
+    group_context: dict[str, Any] | None = None,
 ) -> str:
     """Compose a full CLAUDE.md combining bot profile and skill content.
 
     When skill_names is empty or None, output is identical to generate_claude_md().
     When bot_path is provided, a Memory section is appended with instructions
     for the bot to save and retrieve long-term memories.
+    When group_context is provided (a group config dict), a group context section
+    is appended with orchestrator/member role instructions.
     """
     from cclaw.config import get_language
 
@@ -391,6 +475,14 @@ def compose_claude_md(
             sections.append(f"## {skill_name}")
             sections.append("")
             sections.append(markdown.strip())
+
+    if group_context is not None:
+        group_section = compose_group_context(bot_name, group_context)
+        if group_section:
+            sections.append("")
+            sections.append("---")
+            sections.append("")
+            sections.append(group_section)
 
     sections.append("")
     return "\n".join(sections)

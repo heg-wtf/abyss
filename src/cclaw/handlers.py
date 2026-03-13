@@ -34,6 +34,15 @@ from cclaw.config import (
     model_display_name,
     save_bot_config,
 )
+from cclaw.group import (
+    bind_group,
+    clear_shared_conversation,
+    find_group_by_chat_id,
+    get_my_role,
+    load_group_config,
+    log_to_shared_conversation,
+    unbind_group,
+)
 from cclaw.session import (
     clear_bot_memory,
     clear_claude_session_id,
@@ -76,6 +85,18 @@ def _is_user_allowed(user_id: int, allowed_users: list[int]) -> bool:
     return user_id in allowed_users
 
 
+def _is_mentioned(message: Any, bot_username: str) -> bool:
+    """Check if a bot is @mentioned in the message text.
+
+    Args:
+        message: Telegram message object.
+        bot_username: Bot username with @ prefix (e.g., "@coder_bot").
+    """
+    text = getattr(message, "text", None) or ""
+    username = bot_username.lstrip("@")
+    return f"@{username}" in text
+
+
 def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> list:
     """Create Telegram handlers for a bot.
 
@@ -91,6 +112,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     current_model = bot_config.get("model", DEFAULT_MODEL)
     streaming_enabled = bot_config.get("streaming", DEFAULT_STREAMING)
     attached_skills = bot_config.get("skills", [])
+    bot_username = bot_config.get("telegram_username", "")
 
     async def check_authorization(update: Update) -> bool:
         """Check if the user is authorized."""
@@ -145,13 +167,45 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         await update.effective_message.reply_text(text, parse_mode="Markdown")
 
     async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /reset command."""
+        """Handle /reset command.
+
+        In group mode, only the orchestrator handles /reset:
+        - Resets all bots' group sessions (orchestrator + members)
+        - Clears shared conversation log
+        - Preserves shared workspace files
+        In DM mode, resets only this bot's session.
+        """
         if not await check_authorization(update):
             return
 
         chat_id = update.effective_chat.id
-        reset_session(bot_path, chat_id)
-        message = "\U0001f504 Conversation reset. Workspace files preserved."
+        group_config = find_group_by_chat_id(chat_id)
+
+        if group_config is not None:
+            my_role = get_my_role(group_config, bot_name)
+            if my_role != "orchestrator":
+                return  # Only orchestrator handles group /reset
+
+            from cclaw.config import bot_directory as get_bot_directory
+
+            # Reset orchestrator's own session
+            reset_session(bot_path, chat_id)
+
+            # Reset all member bots' sessions for this chat_id
+            for member_name in group_config.get("members", []):
+                member_path = get_bot_directory(member_name)
+                reset_session(member_path, chat_id)
+
+            # Clear shared conversation log
+            clear_shared_conversation(group_config["name"])
+
+            message = (
+                "\U0001f504 Group session reset. Shared conversation cleared. Workspace preserved."
+            )
+        else:
+            reset_session(bot_path, chat_id)
+            message = "\U0001f504 Conversation reset. Workspace files preserved."
+
         await update.effective_message.reply_text(message)
 
     async def resetall_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -280,11 +334,44 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         )
 
     async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /cancel command - stop running Claude Code process."""
+        """Handle /cancel command - stop running Claude Code process.
+
+        In group mode, only the orchestrator handles /cancel:
+        - Cancels all bots' running processes for this group chat
+        - Does not affect DM processes
+        In DM mode, cancels only this bot's process.
+        """
         if not await check_authorization(update):
             return
 
         chat_id = update.effective_chat.id
+        group_config = find_group_by_chat_id(chat_id)
+
+        if group_config is not None:
+            my_role = get_my_role(group_config, bot_name)
+            if my_role != "orchestrator":
+                return  # Only orchestrator handles group /cancel
+
+            cancelled_bots: list[str] = []
+
+            # Cancel orchestrator's own process
+            orchestrator_key = f"{bot_name}:{chat_id}"
+            if is_process_running(orchestrator_key) and cancel_process(orchestrator_key):
+                cancelled_bots.append(bot_name)
+
+            # Cancel all member bots' processes
+            for member_name in group_config.get("members", []):
+                member_key = f"{member_name}:{chat_id}"
+                if is_process_running(member_key) and cancel_process(member_key):
+                    cancelled_bots.append(member_name)
+
+            if cancelled_bots:
+                names = ", ".join(cancelled_bots)
+                await update.effective_message.reply_text(f"\u26d4 Cancelled: {names}")
+            else:
+                await update.effective_message.reply_text("No running processes in group.")
+            return
+
         session_key = f"{bot_name}:{chat_id}"
 
         if not is_process_running(session_key):
@@ -648,11 +735,50 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 resume_session=False,
             )
 
-    async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle regular text messages - forward to Claude Code."""
-        if not await check_authorization(update):
-            return
+    def _should_handle_group_message(update: Update, group_config: dict[str, Any]) -> bool:
+        """Determine if this bot should process a group message.
 
+        Group branching rules:
+        - Orchestrator: handles user (non-bot) messages and member bot messages
+        - Member: only handles messages where it is @mentioned by a bot (not user)
+        - If the bot is not in the group, it should not handle the message
+
+        Returns True if this bot should process the message.
+        """
+        my_role = get_my_role(group_config, bot_name)
+        if my_role is None:
+            return False
+
+        from_user = update.effective_message.from_user
+        sender_is_bot = getattr(from_user, "is_bot", False)
+
+        if my_role == "orchestrator":
+            if not sender_is_bot:
+                # User (boss) message -> orchestrator handles
+                return True
+            # Bot message -> orchestrator checks if sender is a group member
+            sender_username = getattr(from_user, "username", "") or ""
+            members = group_config.get("members", [])
+            for member_name in members:
+                from cclaw.config import load_bot_config
+
+                member_config = load_bot_config(member_name)
+                if member_config:
+                    member_username = member_config.get("telegram_username", "").lstrip("@")
+                    if member_username and member_username == sender_username:
+                        return True
+            return False
+
+        if my_role == "member":
+            # Member only responds when @mentioned by a bot (orchestrator)
+            if sender_is_bot and _is_mentioned(update.effective_message, bot_username):
+                return True
+            return False
+
+        return False
+
+    async def _process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Core message processing logic — shared between individual and group modes."""
         chat_id = update.effective_chat.id
         user_message = update.effective_message.text
         lock_key = f"{bot_name}:{chat_id}"
@@ -664,7 +790,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             )
 
         async with lock:
-            session_dir = ensure_session(bot_path, chat_id)
+            session_dir = ensure_session(bot_path, chat_id, bot_name=bot_name)
             log_conversation(session_dir, "user", user_message)
 
             prompt, claude_session_id, resume_session = _prepare_session_context(
@@ -701,6 +827,52 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(response)
 
             log_conversation(session_dir, "assistant", response)
+
+            # Log assistant response to shared group conversation
+            group_config = find_group_by_chat_id(chat_id)
+            if group_config is not None:
+                log_to_shared_conversation(group_config["name"], f"@{bot_name}", response)
+
+    async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle regular text messages - forward to Claude Code.
+
+        Includes group branching logic:
+        - If the chat is bound to a group, apply role-based filtering
+        - Log all group messages to the shared conversation log
+        - Otherwise, process as individual (DM) message
+        """
+        chat_id = update.effective_chat.id
+        group_config = find_group_by_chat_id(chat_id)
+
+        if group_config is None:
+            # No group binding — standard individual message handling
+            if not await check_authorization(update):
+                return
+            await _process_message(update, context)
+            return
+
+        # --- Group mode ---
+        user_message = update.effective_message.text or ""
+        from_user = update.effective_message.from_user
+        sender_is_bot = getattr(from_user, "is_bot", False)
+
+        # In group mode, skip authorization for bot senders (orchestrator/member)
+        # so that bot-to-bot @mention delegation works with allowed_users
+        if not sender_is_bot and not await check_authorization(update):
+            return
+
+        # Log all group messages to shared conversation log
+        if sender_is_bot:
+            sender_display = f"@{getattr(from_user, 'username', 'unknown')}"
+        else:
+            sender_display = "user"
+        log_to_shared_conversation(group_config["name"], sender_display, user_message)
+
+        # Check if this bot should handle the message
+        if not _should_handle_group_message(update, group_config):
+            return
+
+        await _process_message(update, context)
 
     async def version_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /version command."""
@@ -1283,6 +1455,70 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         finally:
             typing_task.cancel()
 
+    async def bind_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /bind command — bind a group to a Telegram chat.
+
+        Only the orchestrator bot of the specified group processes this command.
+        Other bots in the group silently ignore it.
+        """
+        if not await check_authorization(update):
+            return
+
+        if not context.args:
+            await update.effective_message.reply_text(
+                "Usage: `/bind <group_name>`", parse_mode="Markdown"
+            )
+            return
+
+        group_name = context.args[0]
+        group_config = load_group_config(group_name)
+
+        if group_config is None:
+            await update.effective_message.reply_text(f"Group '{group_name}' not found.")
+            return
+
+        my_role = get_my_role(group_config, bot_name)
+        if my_role != "orchestrator":
+            # Not the orchestrator — silently ignore
+            return
+
+        chat_id = update.effective_chat.id
+        try:
+            bind_group(group_name, chat_id)
+        except ValueError as error:
+            await update.effective_message.reply_text(f"Bind failed: {error}")
+            return
+
+        # Build member list display
+        members_display = ", ".join(group_config.get("members", []))
+        await update.effective_message.reply_text(
+            f"Group '{group_name}' activated.\nOrchestrator: {bot_name}\nMembers: {members_display}"
+        )
+
+    async def unbind_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /unbind command — remove group binding from this chat.
+
+        Only the orchestrator of the bound group processes this command.
+        """
+        if not await check_authorization(update):
+            return
+
+        chat_id = update.effective_chat.id
+        group_config = find_group_by_chat_id(chat_id)
+
+        if group_config is None:
+            await update.effective_message.reply_text("No group is bound to this chat.")
+            return
+
+        my_role = get_my_role(group_config, bot_name)
+        if my_role != "orchestrator":
+            # Not the orchestrator — silently ignore
+            return
+
+        group_name = group_config["name"]
+        unbind_group(group_name)
+        await update.effective_message.reply_text(f"Group '{group_name}' unbound from this chat.")
+
     handlers = [
         CommandHandler("start", start_handler),
         CommandHandler("help", help_handler),
@@ -1300,6 +1536,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         CommandHandler("cron", cron_handler),
         CommandHandler("heartbeat", heartbeat_handler),
         CommandHandler("compact", compact_handler),
+        CommandHandler("bind", bind_handler),
+        CommandHandler("unbind", unbind_handler),
         MessageHandler(filters.PHOTO | filters.Document.ALL, file_handler),
         MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler),
     ]
@@ -1322,6 +1560,8 @@ BOT_COMMANDS = [
     BotCommand("compact", "\U0001f4e6 Compact MD files"),
     BotCommand("streaming", "\U0001f4e1 Toggle streaming mode"),
     BotCommand("cancel", "\u26d4 Stop running process"),
+    BotCommand("bind", "\U0001f517 Bind group to this chat"),
+    BotCommand("unbind", "\U0001f517 Unbind group from this chat"),
     BotCommand("version", "\U00002139 Show version"),
     BotCommand("help", "\U00002753 Show commands"),
 ]
