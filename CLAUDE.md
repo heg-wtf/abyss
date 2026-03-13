@@ -153,7 +153,9 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 
 ## Release
 
-- **Calendar versioning**: `YYYY.MM.DD` format (e.g., `2026.03.07`). Set in `pyproject.toml`
+- **Calendar versioning**: `YYYY.MM.DD` format (e.g., `2026.03.07`). **Two files must be updated together**:
+  - `pyproject.toml` → `version = "YYYY.MM.DD"`
+  - `src/cclaw/__init__.py` → `__version__ = "YYYY.MM.DD"`
 - **Version bump commit**: `🔧 config: bump version to YYYY.MM.DD`
 - **Git tag**: `vYYYY.MM.DD` (e.g., `v2026.03.07`). Create after pushing the release commit
 - **Release notes**: Write in English
