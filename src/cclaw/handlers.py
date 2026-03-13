@@ -828,6 +828,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             log_conversation(session_dir, "assistant", response)
 
+            # Log assistant response to shared group conversation
+            group_config = find_group_by_chat_id(chat_id)
+            if group_config is not None:
+                log_to_shared_conversation(group_config["name"], f"@{bot_name}", response)
+
     async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle regular text messages - forward to Claude Code.
 

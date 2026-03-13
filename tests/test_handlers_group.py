@@ -595,6 +595,57 @@ async def test_group_message_member_response_logged(temp_cclaw_home, dev_team_gr
     assert "@dev_lead_bot: @coder_bot Write a scraper." in conversation
 
 
+# --- Claude response logging ---
+
+
+@pytest.mark.asyncio
+async def test_group_claude_response_logged_to_shared_conversation(temp_cclaw_home, dev_team_group):
+    """Claude response is logged to shared conversation with @bot_name prefix."""
+    from cclaw.group import load_shared_conversation
+
+    handlers = _make_bot_handlers(temp_cclaw_home, "dev_lead")
+    msg_handler = handlers[MESSAGE_HANDLER_INDEX]
+
+    update = _mock_update_for_group(
+        chat_id=-12345, text="Implement group_status", is_bot=False, username="boss"
+    )
+
+    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+        mock_claude.return_value = "group_status command implemented successfully."
+        mock_context = MagicMock()
+        await msg_handler.callback(update, mock_context)
+
+    conversation = load_shared_conversation("dev_team")
+    assert "user: Implement group_status" in conversation
+    assert "@dev_lead: group_status command implemented successfully." in conversation
+
+
+@pytest.mark.asyncio
+async def test_group_claude_response_logged_for_member(temp_cclaw_home, dev_team_group):
+    """Member bot's Claude response is also logged to shared conversation."""
+    from cclaw.group import load_shared_conversation
+
+    handlers = _make_bot_handlers(temp_cclaw_home, "coder")
+    msg_handler = handlers[MESSAGE_HANDLER_INDEX]
+
+    # Orchestrator mentions coder
+    update = _mock_update_for_group(
+        chat_id=-12345,
+        text="@coder_bot Build a scraper.",
+        is_bot=True,
+        username="dev_lead_bot",
+        user_id=10001,
+    )
+
+    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+        mock_claude.return_value = "Scraper implementation complete."
+        mock_context = MagicMock()
+        await msg_handler.callback(update, mock_context)
+
+    conversation = load_shared_conversation("dev_team")
+    assert "@coder: Scraper implementation complete." in conversation
+
+
 # --- Infinite loop prevention ---
 
 

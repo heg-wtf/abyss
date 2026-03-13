@@ -1760,3 +1760,135 @@ def group_delete(name: str = typer.Argument(help="Group name")) -> None:
         raise typer.Exit(1)
 
     console.print(f"[green]Group '{name}' deleted.[/green]")
+
+
+@group_app.command("status")
+def group_status(
+    name: str | None = typer.Argument(default=None, help="Group name (omit to list all groups)"),
+) -> None:
+    """Show group status. Detailed if GROUP_NAME given; otherwise all."""
+    import os
+
+    from rich.console import Console
+    from rich.table import Table
+
+    from cclaw.config import cclaw_home
+    from cclaw.group import (
+        list_groups,
+        list_workspace_files,
+        load_group_config,
+        load_shared_conversation,
+    )
+
+    console = Console()
+
+    def _is_daemon_running() -> bool:
+        """Return True if the cclaw daemon/process is running."""
+        from pathlib import Path
+
+        pid_file = cclaw_home() / "cclaw.pid"
+        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.cclaw.daemon.plist"
+        if plist_path.exists():
+            return True
+        if pid_file.exists():
+            try:
+                pid = int(pid_file.read_text().strip())
+                os.kill(pid, 0)
+                return True
+            except (ValueError, ProcessLookupError, OSError):
+                return False
+        return False
+
+    def _bot_status_icon(bot_name: str, daemon_running: bool) -> str:
+        """Return 🟢 if daemon is running and bot is in config, else 🔴."""
+        from cclaw.config import bot_exists
+
+        if daemon_running and bot_exists(bot_name):
+            return "🟢"
+        return "🔴"
+
+    if name is not None:
+        # --- Detailed view for a single group ---
+        group_config = load_group_config(name)
+        if not group_config:
+            console.print(f"[red]Group '{name}' not found.[/red]")
+            raise typer.Exit(1)
+
+        daemon_running = _is_daemon_running()
+
+        chat_id = group_config.get("telegram_chat_id")
+        if chat_id:
+            telegram_status = f"[green]bound ({chat_id})[/green]"
+        else:
+            telegram_status = "[yellow]not bound[/yellow]"
+
+        console.print(f"[bold]Name:[/bold] [cyan]{group_config['name']}[/cyan]")
+        console.print(f"[bold]Telegram:[/bold] {telegram_status}")
+
+        orchestrator_name = group_config["orchestrator"]
+        orch_icon = _bot_status_icon(orchestrator_name, daemon_running)
+        console.print(
+            f"[bold]Orchestrator:[/bold] {orch_icon} [magenta]{orchestrator_name}[/magenta]"
+        )
+
+        members = group_config.get("members", [])
+        if members:
+            console.print("[bold]Members:[/bold]")
+            for member_name in members:
+                member_icon = _bot_status_icon(member_name, daemon_running)
+                console.print(f"  {member_icon} [white]{member_name}[/white]")
+        else:
+            console.print("[bold]Members:[/bold] [dim](none)[/dim]")
+
+        workspace_files = list_workspace_files(name)
+        console.print(f"[bold]Workspace files:[/bold] [cyan]{len(workspace_files)}[/cyan]")
+
+        console.print("[bold]Recent conversation:[/bold]")
+        conversation = load_shared_conversation(name, max_lines=5)
+        if conversation:
+            for line in conversation.strip().splitlines()[-5:]:
+                console.print(f"  [dim]{line}[/dim]")
+        else:
+            console.print("  [dim]No recent activity[/dim]")
+
+    else:
+        # --- Summary table for all groups ---
+        groups = list_groups()
+
+        if not groups:
+            console.print("[yellow]No groups configured. Run 'cclaw group create'.[/yellow]")
+            return
+
+        daemon_running = _is_daemon_running()
+
+        table = Table(title="Group Status")
+        table.add_column("Name", style="cyan")
+        table.add_column("Orchestrator", style="magenta")
+        table.add_column("Members", style="white")
+        table.add_column("Bots Running", justify="center")
+        table.add_column("Telegram", style="dim")
+
+        for group_config in groups:
+            group_name = group_config["name"]
+            orchestrator_name = group_config["orchestrator"]
+            members = group_config.get("members", [])
+            all_bots = [orchestrator_name, *members]
+
+            from cclaw.config import bot_exists
+
+            running_count = sum(1 for bot in all_bots if daemon_running and bot_exists(bot))
+            total_count = len(all_bots)
+            running_label = f"[green]{running_count}[/green]/[white]{total_count}[/white]"
+
+            chat_id = group_config.get("telegram_chat_id")
+            telegram_status = f"bound ({chat_id})" if chat_id else "not bound"
+
+            table.add_row(
+                group_name,
+                orchestrator_name,
+                ", ".join(members) if members else "[dim](none)[/dim]",
+                running_label,
+                telegram_status,
+            )
+
+        console.print(table)

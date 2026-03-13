@@ -14,6 +14,7 @@ A multi-bot, file-based session system that runs locally on Mac.
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Skills](#skills)
+- [Group Collaboration](#group-collaboration)
 - [Telegram Commands](#telegram-commands)
 - [File Handling](#file-handling)
 - [Tech Stack](#tech-stack)
@@ -115,6 +116,39 @@ cclaw skills install <name>    # Install a built-in skill
 cclaw skills setup <name>      # Activate (check requirements)
 ```
 
+## Group Collaboration
+
+cclaw supports **multi-bot collaboration** via Telegram groups. One orchestrator bot manages missions, delegating tasks to member bots via @mention.
+
+### Setup
+
+```bash
+# 1. Create a group (orchestrator + members must be registered bots)
+cclaw group create dev_team --orchestrator dev_lead --members coder,tester
+
+# 2. Add all bots to a Telegram group chat
+# 3. Disable Group Privacy in BotFather for each bot
+# 4. In the Telegram group, run:
+/bind dev_team
+
+# 5. Send a mission message in the group
+```
+
+### How It Works
+
+- **Orchestrator**: Receives user messages, breaks missions into tasks, delegates via @mention
+- **Members**: Execute delegated tasks, report results back via @mention to orchestrator
+- **Shared conversation**: All messages logged to date-based conversation files
+- **Shared workspace**: Persistent file workspace across all group members
+- `/reset` in group: Orchestrator resets all bots' sessions + clears shared conversation (workspace preserved)
+- `/cancel` in group: Orchestrator cancels all running processes
+
+```bash
+cclaw group list                # List all groups
+cclaw group show dev_team       # Show group details
+cclaw group delete dev_team     # Delete a group
+```
+
 ## Telegram Commands
 
 | Command | Description |
@@ -145,7 +179,9 @@ cclaw skills setup <name>      # Activate (check requirements)
 | `/heartbeat off` | Disable heartbeat |
 | `/heartbeat run` | Run heartbeat now |
 | `/compact` | Compact MD files to save tokens |
-| `/cancel` | Stop running process |
+| `/cancel` | Stop running process (group: cancel all bots) |
+| `/bind <group>` | Bind group to this chat |
+| `/unbind` | Unbind group from this chat |
 | `/version` | Version info |
 | `/help` | Show commands |
 
@@ -244,6 +280,12 @@ cclaw logs clean               # Delete logs older than 7 days
 cclaw logs clean -d 30         # Keep last 30 days
 cclaw logs clean --dry-run     # Preview without deleting
 
+# Group management
+cclaw group create <name> -o <orchestrator> -m <members>  # Create group
+cclaw group list               # List all groups
+cclaw group show <name>        # Show group details
+cclaw group delete <name>      # Delete a group
+
 # Backup
 cclaw backup                   # Backup ~/.cclaw/ to AES-256 encrypted zip
 ```
@@ -264,7 +306,8 @@ cclaw/
 │   ├── bridge.py           # Node.js bridge client (Unix socket, lifecycle management)
 │   ├── bridge_data/        # Bridge server bundled with package (server.mjs, package.json)
 │   ├── session.py          # Session directory management
-│   ├── handlers.py         # Telegram handler factory
+│   ├── handlers.py         # Telegram handler factory (group-aware)
+│   ├── group.py            # Group CRUD, shared conversation, workspace
 │   ├── bot_manager.py      # Multi-bot lifecycle (regenerate CLAUDE.md on start)
 │   ├── skill.py            # Skill management (create/attach/install/MCP/CLAUDE.md composition)
 │   ├── builtin_skills/     # Built-in skill templates (imessage, reminders, ...)
@@ -349,6 +392,11 @@ Configuration and session data are stored in `~/.cclaw/`. Override the path with
 │               ├── conversation-YYMMDD.md  # Daily conversation log (UTC date)
 │               ├── .claude_session_id      # Claude Code session ID (for --resume)
 │               └── workspace/
+├── groups/
+│   └── <group-name>/
+│       ├── group.yaml            # Group config (orchestrator, members, chat_id)
+│       ├── conversation/         # Shared conversation logs (YYMMDD.md)
+│       └── workspace/            # Shared workspace (persistent across resets)
 ├── bridge/
 │   ├── server.mjs            # Bridge server (auto-copied from package data)
 │   ├── package.json          # NPM package (@anthropic-ai/claude-agent-sdk)
