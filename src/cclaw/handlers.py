@@ -841,14 +841,13 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         - Log all group messages to the shared conversation log
         - Otherwise, process as individual (DM) message
         """
-        if not await check_authorization(update):
-            return
-
         chat_id = update.effective_chat.id
         group_config = find_group_by_chat_id(chat_id)
 
         if group_config is None:
             # No group binding — standard individual message handling
+            if not await check_authorization(update):
+                return
             await _process_message(update, context)
             return
 
@@ -856,6 +855,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         user_message = update.effective_message.text or ""
         from_user = update.effective_message.from_user
         sender_is_bot = getattr(from_user, "is_bot", False)
+
+        # In group mode, skip authorization for bot senders (orchestrator/member)
+        # so that bot-to-bot @mention delegation works with allowed_users
+        if not sender_is_bot and not await check_authorization(update):
+            return
 
         # Log all group messages to shared conversation log
         if sender_is_bot:

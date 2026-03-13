@@ -646,6 +646,72 @@ async def test_group_claude_response_logged_for_member(temp_cclaw_home, dev_team
     assert "@coder: Scraper implementation complete." in conversation
 
 
+# --- Bot authorization bypass in groups ---
+
+
+@pytest.mark.asyncio
+async def test_group_bot_message_bypasses_allowed_users(temp_cclaw_home, dev_team_group):
+    """Bot messages in group bypass allowed_users check."""
+    bot_directory = temp_cclaw_home / "bots" / "coder"
+    with open(bot_directory / "bot.yaml") as file:
+        bot_config = yaml.safe_load(file)
+    # Set allowed_users to only allow a specific human user
+    bot_config["allowed_users"] = [11111]
+    bot_config.setdefault("claude_args", [])
+    bot_config.setdefault("command_timeout", 30)
+    bot_config["streaming"] = False
+    handlers = make_handlers("coder", bot_directory, bot_config)
+    msg_handler = handlers[MESSAGE_HANDLER_INDEX]
+
+    # Orchestrator bot sends @coder_bot mention (bot user_id NOT in allowed_users)
+    update = _mock_update_for_group(
+        chat_id=-12345,
+        text="@coder_bot Write tests.",
+        is_bot=True,
+        username="dev_lead_bot",
+        user_id=10001,
+    )
+
+    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+        mock_claude.return_value = "Tests written."
+        mock_context = MagicMock()
+        await msg_handler.callback(update, mock_context)
+
+    # Bot message should be processed despite allowed_users restriction
+    mock_claude.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_group_unauthorized_human_still_blocked(temp_cclaw_home, dev_team_group):
+    """Human users not in allowed_users are still blocked in group mode."""
+    bot_directory = temp_cclaw_home / "bots" / "dev_lead"
+    with open(bot_directory / "bot.yaml") as file:
+        bot_config = yaml.safe_load(file)
+    bot_config["allowed_users"] = [11111]
+    bot_config.setdefault("claude_args", [])
+    bot_config.setdefault("command_timeout", 30)
+    bot_config["streaming"] = False
+    handlers = make_handlers("dev_lead", bot_directory, bot_config)
+    msg_handler = handlers[MESSAGE_HANDLER_INDEX]
+
+    # Human user (not in allowed_users) sends message in group
+    update = _mock_update_for_group(
+        chat_id=-12345,
+        text="Do something",
+        is_bot=False,
+        username="stranger",
+        user_id=99999,
+    )
+
+    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+        mock_context = MagicMock()
+        await msg_handler.callback(update, mock_context)
+
+    # Unauthorized human should be blocked
+    mock_claude.assert_not_called()
+    update.effective_message.reply_text.assert_called_with("Unauthorized.")
+
+
 # --- Infinite loop prevention ---
 
 
