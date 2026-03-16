@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cclaw — Personal AI Assistant powered by Telegram + Claude Code</title>
+  <meta name="description" content="cclaw is an open-source personal AI assistant that runs locally on your Mac. Multi-bot Telegram system with Claude Code delegation, skill plugins, cron automation, and a web dashboard.">
+  <meta name="keywords" content="cclaw, claude code, telegram bot, AI assistant, open source, local first, multi-bot, skill system, automation, Mac">
+  <meta name="author" content="HEG">
+  <meta name="robots" content="index, follow">
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="cclaw — Personal AI Assistant powered by Telegram + Claude Code">
+  <meta property="og:description" content="Open-source, local-first AI assistant. Multi-bot Telegram system with Claude Code, skills, cron, and a web dashboard.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://cclaw.heg.wtf">
+  <meta property="og:image" content="https://raw.githubusercontent.com/heg-wtf/cclaw/main/cclaw-logo.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="cclaw — Personal AI Assistant">
+  <meta name="twitter:description" content="Open-source Telegram + Claude Code personal AI assistant. Runs locally on Mac.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/heg-wtf/cclaw/main/cclaw-logo.png">
+
+  <link rel="canonical" href="https://cclaw.heg.wtf">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-hover: #1c2333;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-secondary: #8b949e;
+      --text-tertiary: #6e7681;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --purple: #bc8cff;
+      --orange: #d29922;
+      --pink: #f778ba;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+
+    /* Header */
+    header {
+      padding: 1.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    header .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .header-left img { width: 32px; height: 32px; border-radius: 6px; }
+    .header-left span {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 1.1rem;
+    }
+    .version-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 12px;
+      background: rgba(88, 166, 255, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.2);
+    }
+    .header-links { display: flex; gap: 1.25rem; align-items: center; }
+    .header-links a {
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .header-links a:hover { color: var(--text); }
+    .gh-star {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.3rem 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      transition: all 0.2s;
+    }
+    .gh-star:hover { border-color: var(--text-secondary); color: var(--text); }
+    .gh-star svg { width: 16px; height: 16px; }
+
+    /* Hero */
+    .hero {
+      padding: 5rem 0 4rem;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.85rem;
+      border-radius: 20px;
+      background: rgba(63, 185, 80, 0.1);
+      border: 1px solid rgba(63, 185, 80, 0.2);
+      color: var(--green);
+      font-size: 0.78rem;
+      font-weight: 500;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      font-weight: 600;
+      line-height: 1.2;
+      margin-bottom: 1rem;
+      letter-spacing: -0.02em;
+    }
+    .hero h1 .highlight { color: var(--accent); }
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--text-secondary);
+      max-width: 580px;
+      margin: 0 auto 2.5rem;
+      font-weight: 300;
+      line-height: 1.7;
+    }
+
+    /* Install box */
+    .install-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 1.25rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      position: relative;
+    }
+    .install-box:hover { border-color: var(--accent); }
+    .install-box .prompt { color: var(--green); user-select: none; }
+    .install-box .cmd { color: var(--text); }
+    .install-box .copy-icon {
+      color: var(--text-tertiary);
+      transition: color 0.2s;
+    }
+    .install-box:hover .copy-icon { color: var(--text-secondary); }
+    .install-box .copied-toast {
+      position: absolute;
+      top: -2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--green);
+      color: var(--bg);
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      opacity: 0;
+      transition: opacity 0.2s;
+      pointer-events: none;
+    }
+    .install-box .copied-toast.show { opacity: 1; }
+
+    /* Diagram */
+    .diagram {
+      margin: 4rem auto 0;
+      max-width: 640px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      line-height: 1.8;
+      color: var(--text-secondary);
+      text-align: left;
+      overflow-x: auto;
+    }
+    .diagram .c-accent { color: var(--accent); }
+    .diagram .c-green { color: var(--green); }
+    .diagram .c-purple { color: var(--purple); }
+    .diagram .c-orange { color: var(--orange); }
+    .diagram .c-pink { color: var(--pink); }
+
+    /* Features */
+    .features { padding: 5rem 0; }
+    .features h2 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      text-align: center;
+    }
+    .features .subtitle {
+      color: var(--text-secondary);
+      text-align: center;
+      margin-bottom: 3rem;
+      font-weight: 300;
+    }
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      transition: border-color 0.2s;
+    }
+    .feature-card:hover { border-color: var(--text-tertiary); }
+    .feature-card .icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .feature-card h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 0.4rem;
+    }
+    .feature-card p {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+
+    /* Skills */
+    .skills { padding: 0 0 5rem; }
+    .skills h2 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      text-align: center;
+    }
+    .skills .subtitle {
+      color: var(--text-secondary);
+      text-align: center;
+      margin-bottom: 2.5rem;
+      font-weight: 300;
+    }
+    .skill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      justify-content: center;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .skill-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      transition: all 0.2s;
+    }
+    .skill-tag:hover { border-color: var(--accent); color: var(--text); }
+    .skill-tag .emoji { font-size: 0.9rem; }
+
+    /* CLI Preview */
+    .cli-section { padding: 0 0 5rem; }
+    .cli-section h2 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      text-align: center;
+    }
+    .cli-section .subtitle {
+      color: var(--text-secondary);
+      text-align: center;
+      margin-bottom: 2.5rem;
+      font-weight: 300;
+    }
+    .cli-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem 2rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      line-height: 2;
+      overflow-x: auto;
+    }
+    .cli-block .comment { color: var(--text-tertiary); }
+    .cli-block .prompt { color: var(--green); }
+    .cli-block .flag { color: var(--orange); }
+    .cli-block .cmd { color: var(--accent); }
+
+    /* What's New */
+    .whats-new { padding: 0 0 5rem; }
+    .whats-new h2 {
+      font-size: 1.6rem;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      text-align: center;
+    }
+    .changelog {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .changelog-item {
+      display: flex;
+      gap: 1rem;
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .changelog-item:last-child { border-bottom: none; }
+    .changelog-ver {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      color: var(--accent);
+      white-space: nowrap;
+      min-width: 90px;
+    }
+    .changelog-desc { font-size: 0.88rem; color: var(--text-secondary); }
+    .changelog-desc strong { color: var(--text); font-weight: 500; }
+
+    /* Footer */
+    footer {
+      padding: 2rem 0;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .footer-links a { color: var(--text-secondary); font-size: 0.85rem; }
+    .footer-copy {
+      font-size: 0.78rem;
+      color: var(--text-tertiary);
+    }
+
+    @media (max-width: 640px) {
+      .hero { padding: 3rem 0 2.5rem; }
+      .diagram { font-size: 0.65rem; padding: 1.25rem; }
+      .header-links a:not(.gh-star) { display: none; }
+    }
+  </style>
+
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "cclaw",
+    "description": "Personal AI assistant powered by Telegram + Claude Code. Multi-bot, local-first, file-based system.",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS",
+    "url": "https://cclaw.heg.wtf",
+    "downloadUrl": "https://github.com/heg-wtf/cclaw",
+    "softwareVersion": "2026.03.16",
+    "author": {
+      "@type": "Organization",
+      "name": "HEG",
+      "url": "https://heg.wtf"
+    },
+    "license": "https://opensource.org/licenses/MIT",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <div class="header-left">
+        <img src="https://raw.githubusercontent.com/heg-wtf/cclaw/main/cclaw-logo.png" alt="cclaw logo">
+        <span>cclaw</span>
+        <span class="version-badge">v2026.03.16</span>
+      </div>
+      <div class="header-links">
+        <a href="#features">Features</a>
+        <a href="#skills">Skills</a>
+        <a href="https://github.com/heg-wtf/cclaw" target="_blank" rel="noopener" class="gh-star">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4"/></svg>
+        Open Source &middot; MIT License
+      </div>
+      <h1>Your personal AI,<br>right in <span class="highlight">Telegram</span></h1>
+      <p>
+        cclaw is a local-first, multi-bot AI assistant powered by Claude Code.
+        No servers. No databases. Just your Mac, Telegram, and Claude.
+      </p>
+
+      <div class="install-box" onclick="copyInstall()" id="installBox">
+        <span class="copied-toast" id="copiedToast">Copied!</span>
+        <span class="prompt">$</span>
+        <span class="cmd">curl -sSL https://raw.githubusercontent.com/heg-wtf/cclaw/main/install.sh | bash</span>
+        <svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+      </div>
+
+      <div class="diagram">
+<pre>
+<span class="c-accent">┌── Telegram ──┐</span>     <span class="c-green">┌── cclaw ──────────────────────┐</span>
+<span class="c-accent">│              │</span>     <span class="c-green">│                               │</span>
+<span class="c-accent">│  💬 Chat     │</span>────▶<span class="c-green">│  🤖 Multi-Bot Manager         │</span>
+<span class="c-accent">│  📎 Files    │</span>◀────<span class="c-green">│  📁 File-Based Sessions       │</span>
+<span class="c-accent">│  📷 Photos   │</span>     <span class="c-green">│  🧩 Skill System              │</span>
+<span class="c-accent">│              │</span>     <span class="c-green">│  ⏰ Cron Automation           │</span>
+<span class="c-accent">└──────────────┘</span>     <span class="c-green">│  💓 Heartbeat                 │</span>
+                     <span class="c-green">│  👥 Group Collaboration       │</span>
+                     <span class="c-green">│                               │</span>
+                     <span class="c-green">│  ┌───────────────────────┐   │</span>
+                     <span class="c-green">│  │ <span class="c-purple">Claude Code (SDK Pool)</span> │   │</span>
+                     <span class="c-green">│  │ <span class="c-orange">Persistent Sessions</span>   │   │</span>
+                     <span class="c-green">│  └───────────────────────┘   │</span>
+                     <span class="c-green">└───────────────────────────────┘</span>
+                                    │
+                     <span class="c-pink">┌── ClawHouse Dashboard ──┐</span>
+                     <span class="c-pink">│  🖥 Web UI (port 3847)   │</span>
+                     <span class="c-pink">└──────────────────────────┘</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="container">
+      <h2>Built for power users</h2>
+      <p class="subtitle">Everything runs locally. No cloud dependency.</p>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon">🏠</div>
+          <h3>Local First</h3>
+          <p>No server, no SSL, no public IP needed. Long Polling over Telegram. Your data stays on your Mac.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🤖</div>
+          <h3>Multi-Bot System</h3>
+          <p>Run multiple specialized bots simultaneously. Each with its own personality, skills, model, and memory.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🧩</div>
+          <h3>Skill Plugins</h3>
+          <p>18+ built-in skills. Create custom ones with markdown or integrate MCP servers, CLIs, and browser tools.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">⏰</div>
+          <h3>Cron Automation</h3>
+          <p>Schedule recurring tasks with natural language. Morning briefings, daily reports, periodic checks.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">👥</div>
+          <h3>Group Collaboration</h3>
+          <p>Multiple bots collaborate in Telegram groups with shared conversation context and workspace.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🖥</div>
+          <h3>ClawHouse Dashboard</h3>
+          <p>Web UI for managing bots, skills, cron jobs, sessions, memory, and logs. No terminal required.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">⚡</div>
+          <h3>SDK Client Pool</h3>
+          <p>Persistent Claude sessions via Python Agent SDK. Fast responses with session reuse, no cold starts.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">💓</div>
+          <h3>Heartbeat</h3>
+          <p>Periodic situation awareness. Bots proactively check tasks, reminders, and deliver updates autonomously.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">📁</div>
+          <h3>File-Based Architecture</h3>
+          <p>No database. Sessions are directories. Conversations are markdown. Everything is inspectable and portable.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="skills" id="skills">
+    <div class="container">
+      <h2>18+ Built-in Skills</h2>
+      <p class="subtitle">Install with <code style="background:var(--surface);padding:0.15rem 0.4rem;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:0.8rem;">cclaw skills install &lt;name&gt;</code></p>
+      <div class="skill-list">
+        <span class="skill-tag"><span class="emoji">💬</span> iMessage</span>
+        <span class="skill-tag"><span class="emoji">⏰</span> Reminders</span>
+        <span class="skill-tag"><span class="emoji">🗺</span> Naver Map</span>
+        <span class="skill-tag"><span class="emoji">🖼</span> Image Processing</span>
+        <span class="skill-tag"><span class="emoji">💰</span> Best Price</span>
+        <span class="skill-tag"><span class="emoji">🗄</span> Supabase</span>
+        <span class="skill-tag"><span class="emoji">📧</span> Gmail</span>
+        <span class="skill-tag"><span class="emoji">📅</span> Google Calendar</span>
+        <span class="skill-tag"><span class="emoji">🐦</span> Twitter / X</span>
+        <span class="skill-tag"><span class="emoji">📋</span> Jira</span>
+        <span class="skill-tag"><span class="emoji">🔍</span> Naver Search</span>
+        <span class="skill-tag"><span class="emoji">📍</span> Kakao Local</span>
+        <span class="skill-tag"><span class="emoji">📊</span> DART Disclosure</span>
+        <span class="skill-tag"><span class="emoji">🌐</span> Translate</span>
+        <span class="skill-tag"><span class="emoji">🏪</span> Daiso</span>
+        <span class="skill-tag"><span class="emoji">🧠</span> QMD Knowledge</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="cli-section">
+    <div class="container">
+      <h2>CLI First</h2>
+      <p class="subtitle">Everything from onboarding to deployment, in the terminal.</p>
+      <div class="cli-block">
+<span class="comment"># Setup</span>
+<span class="prompt">$</span> <span class="cmd">cclaw</span> init
+<span class="prompt">$</span> <span class="cmd">cclaw</span> bot add
+
+<span class="comment"># Run</span>
+<span class="prompt">$</span> <span class="cmd">cclaw</span> start <span class="flag">--daemon</span>
+<span class="prompt">$</span> <span class="cmd">cclaw</span> status
+
+<span class="comment"># Skills</span>
+<span class="prompt">$</span> <span class="cmd">cclaw</span> skills install supabase
+<span class="prompt">$</span> <span class="cmd">cclaw</span> skills install reminders
+
+<span class="comment"># Automation</span>
+<span class="prompt">$</span> <span class="cmd">cclaw</span> cron add my-bot
+<span class="prompt">$</span> <span class="cmd">cclaw</span> heartbeat enable my-bot
+
+<span class="comment"># Dashboard</span>
+<span class="prompt">$</span> <span class="cmd">cclaw</span> dashboard start <span class="flag">--daemon</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="whats-new" id="changelog">
+    <div class="container">
+      <h2>What's New</h2>
+      <div class="changelog">
+        <div class="changelog-item">
+          <span class="changelog-ver">v2026.03.16</span>
+          <span class="changelog-desc"><strong>SDK Client Pool</strong> — Persistent Claude sessions via Python Agent SDK. Removed Node.js bridge dependency.</span>
+        </div>
+        <div class="changelog-item">
+          <span class="changelog-ver">v2026.03.14</span>
+          <span class="changelog-desc"><strong>Group Collaboration</strong> — Multi-bot group chat with shared conversations, workspace, and orchestrator routing.</span>
+        </div>
+        <div class="changelog-item">
+          <span class="changelog-ver">v2026.03.12</span>
+          <span class="changelog-desc"><strong>ClawHouse Dashboard</strong> — Web UI for managing bots, skills, cron, sessions, memory, and logs.</span>
+        </div>
+        <div class="changelog-item">
+          <span class="changelog-ver">v2026.03.11</span>
+          <span class="changelog-desc"><strong>Dashboard CLI</strong> — Added start/stop/restart/status subcommands for ClawHouse management.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="footer-links">
+        <a href="https://github.com/heg-wtf/cclaw" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/heg-wtf/cclaw/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/heg-wtf/cclaw/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+        <a href="https://heg.wtf" target="_blank" rel="noopener">HEG</a>
+      </div>
+      <p class="footer-copy">MIT License &middot; Built by <a href="https://heg.wtf">HEG</a></p>
+    </div>
+  </footer>
+
+  <script>
+    function copyInstall() {
+      const cmd = 'curl -sSL https://raw.githubusercontent.com/heg-wtf/cclaw/main/install.sh | bash';
+      navigator.clipboard.writeText(cmd).then(() => {
+        const toast = document.getElementById('copiedToast');
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 1500);
+      });
+    }
+  </script>
+</body>
+</html>
