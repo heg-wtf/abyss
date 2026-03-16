@@ -93,14 +93,13 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
         console.print("[red]No valid bots to start.[/red]")
         return
 
-    # Start the Node.js bridge for persistent Claude Code sessions
-    from cclaw.bridge import start_bridge
+    # Check Python Agent SDK availability
+    from cclaw.sdk_client import is_sdk_available
 
-    bridge_started = await start_bridge()
-    if bridge_started:
-        console.print("  [green]BRIDGE[/green] Node.js bridge (persistent sessions)")
+    if is_sdk_available():
+        console.print("  [green]SDK[/green] Python Agent SDK (session continuity)")
     else:
-        console.print("  [yellow]BRIDGE[/yellow] Not available, using subprocess fallback")
+        console.print("  [yellow]SDK[/yellow] Not available, using subprocess fallback")
 
     # Start QMD HTTP daemon if QMD CLI is available (system-wide, all bots)
     if shutil.which("qmd"):
@@ -192,7 +191,12 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     finally:
         console.print("\nStopping bots...")
 
-        # Kill all running Claude Code subprocesses first
+        # Close SDK client pool first
+        from cclaw.sdk_client import close_pool
+
+        await close_pool()
+
+        # Kill all running Claude Code subprocesses
         from cclaw.claude_runner import cancel_all_processes
 
         killed = cancel_all_processes()
@@ -222,12 +226,6 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
 
         # Stop the QMD daemon
         _stop_qmd_daemon()
-
-        # Stop the bridge
-        from cclaw.bridge import stop_bridge
-
-        stop_bridge()
-        console.print("  Bridge stopped.")
 
         if pid_file.exists():
             pid_file.unlink()

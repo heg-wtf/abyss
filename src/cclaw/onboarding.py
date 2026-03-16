@@ -359,74 +359,22 @@ def add_bot() -> None:
     create_bot(token, bot_info, profile)
 
 
-def _display_bridge_status() -> None:
-    """Display bridge process and connection status."""
-    from cclaw.bridge import _bridge_log_path, _socket_path, is_bridge_running
+def _display_sdk_status() -> None:
+    """Display Python Agent SDK availability status."""
+    from cclaw.sdk_client import is_sdk_available
 
-    # Process status
-    if is_bridge_running():
-        console.print("  [green]OK[/green] Bridge process running")
+    if is_sdk_available():
+        try:
+            import claude_agent_sdk
+
+            version = getattr(claude_agent_sdk, "__version__", "unknown")
+            console.print(f"  [green]OK[/green] Python Agent SDK v{version}")
+        except Exception:
+            console.print("  [green]OK[/green] Python Agent SDK available")
     else:
-        console.print("  [yellow]--[/yellow] Bridge process not running (starts with cclaw start)")
-
-    # Socket status
-    from pathlib import Path
-
-    socket = Path(_socket_path())
-    if socket.exists():
-        health = asyncio.run(_check_bridge_health())
-        if health:
-            console.print(f"  [green]OK[/green] Bridge socket reachable ({_socket_path()})")
-        else:
-            console.print(
-                f"  [red]FAIL[/red] Bridge socket exists but not responding ({_socket_path()})"
-            )
-    else:
-        console.print(f"  [yellow]--[/yellow] Bridge socket not found ({_socket_path()})")
-
-    # Log file
-    log_path = Path(_bridge_log_path())
-    if log_path.exists():
-        size_kilobytes = log_path.stat().st_size / 1024
-        console.print(f"  [green]OK[/green] Bridge log: {log_path} ({size_kilobytes:.0f}KB)")
-    else:
-        console.print("  [yellow]--[/yellow] Bridge log not found")
-
-    # SDK check
-    bridge_directory = Path(_socket_path()).parent  # fallback
-    from cclaw.bridge import _bridge_directory
-
-    try:
-        bridge_directory = _bridge_directory()
-        package_json = (
-            bridge_directory
-            / "node_modules"
-            / "@anthropic-ai"
-            / "claude-agent-sdk"
-            / "package.json"
+        console.print(
+            "  [yellow]--[/yellow] Python Agent SDK not installed (pip install claude-agent-sdk)"
         )
-        if package_json.exists():
-            import json
-
-            sdk_info = json.loads(package_json.read_text())
-            console.print(f"  [green]OK[/green] Claude Agent SDK v{sdk_info.get('version', '?')}")
-        else:
-            console.print(
-                "  [yellow]--[/yellow] Claude Agent SDK not installed (run cclaw start to install)"
-            )
-    except Exception:
-        console.print("  [yellow]--[/yellow] Bridge directory not initialized")
-
-
-async def _check_bridge_health() -> bool:
-    """Try to connect to bridge and check health."""
-    try:
-        from cclaw.bridge import bridge_health
-
-        result = await bridge_health()
-        return result is not None
-    except Exception:
-        return False
 
 
 def _display_qmd_status() -> None:
@@ -517,9 +465,9 @@ def run_doctor() -> None:
         else:
             console.print("       Sessions: 0")
 
-    # Bridge status
-    console.print("\n[bold]Bridge:[/bold]")
-    _display_bridge_status()
+    # SDK status
+    console.print("\n[bold]SDK:[/bold]")
+    _display_sdk_status()
 
     # QMD status
     console.print("\n[bold]QMD:[/bold]")

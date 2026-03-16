@@ -2,7 +2,7 @@
 
 > **Date**: 2026-03-16
 > **Branch**: `feature/python-agent-sdk`
-> **Status**: Planning
+> **Status**: Implemented
 
 ## 배경
 

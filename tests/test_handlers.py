@@ -146,7 +146,7 @@ async def test_message_handler_calls_claude(bot_path, bot_config, mock_update):
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Claude response"
         mock_context = MagicMock()
         await message_handler.callback(mock_update, mock_context)
@@ -300,7 +300,7 @@ async def test_message_handler_passes_model(bot_path, bot_config, mock_update):
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         await message_handler.callback(mock_update, mock_context)
@@ -446,7 +446,7 @@ async def test_message_handler_passes_skill_names(bot_path, bot_config, mock_upd
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         await message_handler.callback(mock_update, mock_context)
@@ -462,7 +462,7 @@ async def test_message_handler_no_skill_names(bot_path, bot_config, mock_update)
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         await message_handler.callback(mock_update, mock_context)
@@ -589,7 +589,7 @@ async def test_message_handler_non_streaming(bot_path, bot_config, mock_update):
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Non-streaming response"
         mock_context = MagicMock()
         await message_handler.callback(mock_update, mock_context)
@@ -615,7 +615,7 @@ async def test_streaming_uses_send_message_draft(bot_path, bot_config, mock_upda
         return "Hello, this is a streaming response from Claude!"
 
     with patch(
-        "cclaw.handlers.run_claude_streaming_with_bridge", new_callable=AsyncMock
+        "cclaw.handlers.run_claude_streaming_with_sdk", new_callable=AsyncMock
     ) as mock_stream:
         mock_stream.side_effect = fake_streaming
         mock_context = MagicMock()
@@ -645,7 +645,7 @@ async def test_streaming_draft_clears_before_final(bot_path, bot_config, mock_up
         return "Draft streaming response text"
 
     with patch(
-        "cclaw.handlers.run_claude_streaming_with_bridge", new_callable=AsyncMock
+        "cclaw.handlers.run_claude_streaming_with_sdk", new_callable=AsyncMock
     ) as mock_stream:
         mock_stream.side_effect = fake_streaming
         mock_context = MagicMock()
@@ -674,7 +674,7 @@ async def test_streaming_fallback_to_edit_message(bot_path, bot_config, mock_upd
         return "Fallback streaming response text"
 
     with patch(
-        "cclaw.handlers.run_claude_streaming_with_bridge", new_callable=AsyncMock
+        "cclaw.handlers.run_claude_streaming_with_sdk", new_callable=AsyncMock
     ) as mock_stream:
         mock_stream.side_effect = fake_streaming
         mock_context = MagicMock()
@@ -708,7 +708,7 @@ async def test_streaming_short_response_no_draft(bot_path, bot_config, mock_upda
         return "Hi"
 
     with patch(
-        "cclaw.handlers.run_claude_streaming_with_bridge", new_callable=AsyncMock
+        "cclaw.handlers.run_claude_streaming_with_sdk", new_callable=AsyncMock
     ) as mock_stream:
         mock_stream.side_effect = fake_streaming
         mock_context = MagicMock()
@@ -731,7 +731,7 @@ async def test_message_handler_first_message_bootstraps(bot_path, bot_config, mo
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         mock_context.bot.edit_message_text = AsyncMock()
@@ -766,7 +766,7 @@ async def test_message_handler_resume_session(bot_path, bot_config, mock_update)
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         mock_context.bot.edit_message_text = AsyncMock()
@@ -801,7 +801,7 @@ async def test_message_handler_resume_fallback(bot_path, bot_config, mock_update
         # Second call (bootstrap) succeeds
         return "fallback response"
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.side_effect = side_effect
         mock_context = MagicMock()
         mock_context.bot.edit_message_text = AsyncMock()
@@ -840,7 +840,7 @@ async def test_message_handler_first_message_with_history(bot_path, bot_config, 
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         mock_context.bot.edit_message_text = AsyncMock()
@@ -921,7 +921,7 @@ async def test_message_handler_bootstrap_includes_memory(bot_path, bot_config, m
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         mock_context.bot.edit_message_text = AsyncMock()
@@ -950,7 +950,7 @@ async def test_message_handler_bootstrap_memory_and_history(bot_path, bot_config
     handlers = make_handlers("test-bot", bot_path, bot_config)
     message_handler = handlers[19]
 
-    with patch("cclaw.handlers.run_claude_with_bridge", new_callable=AsyncMock) as mock_claude:
+    with patch("cclaw.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "response"
         mock_context = MagicMock()
         mock_context.bot.edit_message_text = AsyncMock()

@@ -16,14 +16,14 @@ It attempts to split at line break boundaries, and truncates at the limit when n
 
 ## Claude Code Execution
 
-Three execution paths are supported:
+Two execution paths are supported, with SDK pool as the preferred mode:
 
-- **Bridge batch**: `bridge_query()` via Unix socket -> Claude Agent SDK `query()` (preferred, when bridge is running)
-- **Bridge streaming**: `bridge_query_streaming()` via Unix socket -> Claude Agent SDK `query()` with streaming
-- **Subprocess batch**: `claude -p "<message>" --output-format text` (fallback when bridge unavailable)
+- **SDK pool batch**: `run_claude_with_sdk()` -> `SDKClientPool.query()` -> `ClaudeSDKClient.query()` + `receive_response()` (preferred, persistent client)
+- **SDK pool streaming**: `run_claude_streaming_with_sdk()` -> `SDKClientPool.query_streaming()` -> same, with `on_text_chunk` callback
+- **Subprocess batch**: `claude -p "<message>" --output-format text` (fallback when SDK unavailable)
 - **Subprocess streaming**: `claude -p "<message>" --output-format stream-json --verbose --include-partial-messages`
 
-The working directory is set to the session directory via the subprocess `cwd` parameter (subprocess) or `cwd` field in JSONL request (bridge).
+The working directory is set to the session directory via `cwd` parameter (subprocess) or `ClaudeAgentOptions(cwd=...)` (SDK).
 
 - `shutil.which("claude")` resolves the full path to the Claude CLI. Works regardless of installation method (`uv run`, `pip install`, `pipx install`, etc.) by searching PATH. Raises `RuntimeError` with installation guidance if not found.
 - `--output-format text`: Text output (not JSON)
@@ -33,60 +33,69 @@ The working directory is set to the session directory via the subprocess `cwd` p
 
 ### Skill Config Preparation (`_prepare_skill_config`)
 
-Shared function that handles skill-related file setup for both subprocess and bridge execution paths:
+Shared function that handles skill-related file setup for both SDK pool and subprocess execution paths:
 
 - Writes `.mcp.json` to working directory (merged MCP configs from all attached skills)
 - Writes `.claude/settings.json` with `allowedTools` list
 - Collects environment variables from all attached skills
 - **QMD auto-injection**: When `shutil.which("qmd")` returns non-None, auto-appends QMD HTTP MCP server config and allowed tools regardless of skill attachment
 - Returns `(allowed_tools, environment_variables)` tuple
-- Used by `run_claude()`, `run_claude_streaming()`, `run_claude_with_bridge()`, `run_claude_streaming_with_bridge()`
+- Used by `run_claude()`, `run_claude_streaming()`, `run_claude_with_sdk()`, `run_claude_streaming_with_sdk()`
 
-## Node.js Bridge
+## Python Agent SDK Client Pool
 
-### Protocol
+### Pool Architecture
 
-JSONL over Unix socket (`/tmp/cclaw-bridge.sock`, configurable via `CCLAW_BRIDGE_SOCKET`).
+`SDKClientPool` in `sdk_client.py` maintains persistent `ClaudeSDKClient` instances keyed by session (`bot:chat_id`). This avoids spawning a new Claude Code process per message — subsequent messages reuse the same client (~1-2s faster).
 
-Request format:
-```json
-{"action": "query", "sessionKey": "...", "prompt": "...", "cwd": "...", "model": "...", "streaming": false}
+```
+handlers.py -> claude_runner.py -> get_pool() -> SDKClientPool
+                                                   ├── "bot1:chat_123" -> ClaudeSDKClient (persistent)
+                                                   ├── "bot1:chat_456" -> ClaudeSDKClient (persistent)
+                                                   └── "bot2:chat_789" -> ClaudeSDKClient (persistent)
 ```
 
-Response format:
-```json
-{"type": "result", "text": "...", "sessionId": "..."}
+### Pool Lifecycle
+
+1. `get_pool()` creates the singleton `SDKClientPool` on first use (lazy)
+2. First message for a session key: `_get_or_create_client()` creates `ClaudeSDKClient(options)`, calls `__aenter__()`, stores in `_clients` dict
+3. Subsequent messages: reuses existing client via `client.query(prompt)` + `client.receive_response()`
+4. `/reset`: `pool.close_session(key)` calls `__aexit__()` and removes from pool
+5. Shutdown: `close_pool()` calls `close_all()` which closes every client, then sets `_pool = None`
+
+### Session ID Persistence
+
+`run_claude_with_sdk()` and `run_claude_streaming_with_sdk()` accept `session_directory: Path | None`:
+- On client creation: loads saved session ID from `.claude_session_id` as `resume` option
+- After successful query: saves `result.session_id` back to `.claude_session_id`
+- On restart: pool creates a new client with the saved session ID, resuming the conversation
+
+### Interrupt (/cancel)
+
+`cancel_sdk_session(session_key)` in `claude_runner.py`:
+1. Checks if pool has a session for the key
+2. Calls `pool.interrupt(key)` which invokes `client.interrupt()`
+3. Returns `True` if interrupted, `False` if no session found
+4. `handlers.py` tries SDK interrupt first, falls back to subprocess `cancel_process()` (SIGKILL)
+
+### Fallback Strategy
+
+```
+Pool query attempt
+├─ Success → return text, save session_id
+├─ ConnectionError/OSError → log warning, fall through to subprocess
+└─ Other Exception → log warning, close broken session from pool, fall through to subprocess
+
+Subprocess fallback (identical to pre-pool behavior)
+├─ Success → return text
+└─ Error → propagate to handler
 ```
 
-Streaming responses send multiple `{"type": "text", "text": "..."}` lines followed by a final `{"type": "result", ...}`.
+### Resume Fallback in Handlers
 
-### Bridge Lifecycle
-
-1. `bot_manager.py` calls `start_bridge()` before starting bot polling
-2. Bridge spawns Node.js process running `server.mjs`
-3. Waits for `BRIDGE_READY` on stdout (up to 30 seconds)
-4. Background daemon threads drain stdout/stderr to prevent pipe buffer overflow
-5. On shutdown, `stop_bridge()` sends SIGTERM, waits 5 seconds, then SIGKILL if needed
-6. Socket file is cleaned up on shutdown
-
-### Bridge Auto-Install
-
-`_bridge_directory()` ensures `~/.cclaw/bridge/` exists with the latest files:
-- Copies `server.mjs` and `package.json` from bundled `bridge_data/` package
-- `server.mjs` is always overwritten to pick up fixes (not just when missing)
-- Runs `npm install --silent` if `node_modules/` doesn't exist
-
-### Session Retry in Bridge
-
-If a query fails with a session-related error (stale session ID), the bridge automatically retries without session options (`resume`/`sessionId`). This matches the subprocess fallback behavior in `_call_with_resume_fallback()`.
-
-### Bridge Health Check
-
-`cclaw doctor` shows bridge status including:
-- Process running state and PID
-- Socket file existence
-- SDK version (from `package.json`)
-- Health endpoint response (uptime)
+`_call_with_resume_fallback()` handles stale sessions:
+1. Calls `send_response()` with pool-backed runner
+2. On `RuntimeError` (stale session): clears `.claude_session_id`, closes pool session, retries with bootstrap prompt
 
 ## Logging (RichHandler)
 
@@ -110,17 +119,25 @@ Key detail: `logging.basicConfig()` is called with `force=True` to ensure it rep
 
 ## Process Tracking (/cancel)
 
-- Module-level `_running_processes` dictionary maps `{bot_name}:{chat_id}` to subprocess
+- `/cancel` first tries SDK pool interrupt via `cancel_sdk_session(session_key)` -> `pool.interrupt()` -> `client.interrupt()`
+- If no SDK session, falls back to subprocess: `_running_processes` dictionary maps `{bot_name}:{chat_id}` to subprocess
 - When `session_key` is passed to `run_claude()`, the process is automatically registered/deregistered
-- `/cancel` command calls `cancel_process()` which invokes `process.kill()` (SIGKILL)
+- Subprocess cancel calls `cancel_process()` which invokes `process.kill()` (SIGKILL)
 - When process is killed: `returncode == -9` -> raises `asyncio.CancelledError`
 - Handler catches `CancelledError` and sends "Execution was cancelled" message
+- In group mode: orchestrator tries SDK interrupt + subprocess cancel for all member bots
 
-## Graceful Shutdown (cancel_all_processes)
+## Graceful Shutdown
 
-`cancel_all_processes()` iterates `_running_processes` and kills all running subprocesses (`returncode is None`), then clears the registry.
+Shutdown sequence in `bot_manager.py`:
 
-Called first in `bot_manager.py`'s shutdown sequence (before `application.stop()`). Without this, `application.stop()` waits for running handler coroutines to complete, which blocks until the Claude subprocess finishes (up to `command_timeout`, default 300 seconds). By killing subprocesses first, the handlers complete immediately and shutdown proceeds without delay.
+1. `close_pool()`: Closes all persistent SDK clients (`__aexit__()` on each), clears pool singleton
+2. `cancel_all_processes()`: Iterates `_running_processes` and kills all running subprocesses (`returncode is None`), then clears the registry
+3. Cancel cron/heartbeat tasks
+4. Stop Telegram applications
+5. Stop QMD daemon, remove PID file
+
+Pool must be closed before killing subprocesses. Without this, `application.stop()` waits for running handler coroutines to complete, which blocks until the Claude subprocess finishes (up to `command_timeout`, default 300 seconds). By closing pool and killing subprocesses first, the handlers complete immediately and shutdown proceeds without delay.
 
 ## Session Lock and Message Queuing
 

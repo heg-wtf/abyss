@@ -22,9 +22,10 @@ from telegram.ext import (
 from cclaw.claude_runner import (
     STREAMING_CURSOR,
     cancel_process,
+    cancel_sdk_session,
     is_process_running,
-    run_claude_streaming_with_bridge,
-    run_claude_with_bridge,
+    run_claude_streaming_with_sdk,
+    run_claude_with_sdk,
 )
 from cclaw.config import (
     DEFAULT_MODEL,
@@ -181,6 +182,9 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         chat_id = update.effective_chat.id
         group_config = find_group_by_chat_id(chat_id)
 
+        # Close pool sessions so fresh clients are created after reset
+        from cclaw.sdk_client import get_pool, is_sdk_available
+
         if group_config is not None:
             my_role = get_my_role(group_config, bot_name)
             if my_role != "orchestrator":
@@ -190,11 +194,15 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             # Reset orchestrator's own session
             reset_session(bot_path, chat_id)
+            if is_sdk_available():
+                await get_pool().close_session(f"{bot_name}:{chat_id}")
 
             # Reset all member bots' sessions for this chat_id
             for member_name in group_config.get("members", []):
                 member_path = get_bot_directory(member_name)
                 reset_session(member_path, chat_id)
+                if is_sdk_available():
+                    await get_pool().close_session(f"{member_name}:{chat_id}")
 
             # Clear shared conversation log
             clear_shared_conversation(group_config["name"])
@@ -204,6 +212,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             )
         else:
             reset_session(bot_path, chat_id)
+            if is_sdk_available():
+                await get_pool().close_session(f"{bot_name}:{chat_id}")
             message = "\U0001f504 Conversation reset. Workspace files preserved."
 
         await update.effective_message.reply_text(message)
@@ -215,6 +225,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
         chat_id = update.effective_chat.id
         reset_all_session(bot_path, chat_id)
+        # Close pool session
+        from cclaw.sdk_client import get_pool, is_sdk_available
+
+        if is_sdk_available():
+            await get_pool().close_session(f"{bot_name}:{chat_id}")
         await update.effective_message.reply_text("\U0001f5d1 Session completely reset.")
 
     async def files_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -354,15 +369,19 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             cancelled_bots: list[str] = []
 
-            # Cancel orchestrator's own process
+            # Cancel orchestrator's own process (SDK first, then subprocess)
             orchestrator_key = f"{bot_name}:{chat_id}"
-            if is_process_running(orchestrator_key) and cancel_process(orchestrator_key):
+            if await cancel_sdk_session(orchestrator_key):
+                cancelled_bots.append(bot_name)
+            elif is_process_running(orchestrator_key) and cancel_process(orchestrator_key):
                 cancelled_bots.append(bot_name)
 
             # Cancel all member bots' processes
             for member_name in group_config.get("members", []):
                 member_key = f"{member_name}:{chat_id}"
-                if is_process_running(member_key) and cancel_process(member_key):
+                if await cancel_sdk_session(member_key):
+                    cancelled_bots.append(member_name)
+                elif is_process_running(member_key) and cancel_process(member_key):
                     cancelled_bots.append(member_name)
 
             if cancelled_bots:
@@ -373,6 +392,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             return
 
         session_key = f"{bot_name}:{chat_id}"
+
+        # Try SDK interrupt first, then subprocess fallback
+        sdk_cancelled = await cancel_sdk_session(session_key)
+        if sdk_cancelled:
+            await update.effective_message.reply_text("\u26d4 Execution cancelled.")
+            return
 
         if not is_process_running(session_key):
             await update.effective_message.reply_text("No running process to cancel.")
@@ -428,6 +453,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         lock_key: str,
         claude_session_id: str | None = None,
         resume_session: bool = False,
+        session_directory: Path | None = None,
     ) -> str:
         """Run Claude without streaming and send the response.
 
@@ -446,7 +472,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         typing_task = asyncio.create_task(send_typing_periodically())
 
         try:
-            response = await run_claude_with_bridge(
+            response = await run_claude_with_sdk(
                 working_directory=working_directory,
                 message=prompt,
                 extra_arguments=claude_arguments if claude_arguments else None,
@@ -456,6 +482,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 skill_names=attached_skills if attached_skills else None,
                 claude_session_id=claude_session_id,
                 resume_session=resume_session,
+                session_directory=session_directory,
             )
         finally:
             typing_task.cancel()
@@ -478,6 +505,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         lock_key: str,
         claude_session_id: str | None = None,
         resume_session: bool = False,
+        session_directory: Path | None = None,
     ) -> str:
         """Run Claude with streaming via sendMessageDraft and send final response.
 
@@ -558,7 +586,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 logger.debug("Stream fallback edit failed: %s", edit_error)
                 stream_stopped = True
 
-        response = await run_claude_streaming_with_bridge(
+        response = await run_claude_streaming_with_sdk(
             working_directory=working_directory,
             message=prompt,
             on_text_chunk=on_text_chunk,
@@ -569,6 +597,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             skill_names=attached_skills if attached_skills else None,
             claude_session_id=claude_session_id,
             resume_session=resume_session,
+            session_directory=session_directory,
         )
 
         # Clear the draft by sending an empty draft before final message
@@ -685,6 +714,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 lock_key=lock_key,
                 claude_session_id=claude_session_id,
                 resume_session=resume_session,
+                session_directory=session_dir,
             )
         except RuntimeError:
             if not resume_session:
@@ -695,6 +725,14 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 claude_session_id,
             )
             clear_claude_session_id(session_dir)
+
+            # Close broken pool session so a fresh client is created
+            from cclaw.sdk_client import get_pool, is_sdk_available
+
+            if is_sdk_available():
+                pool = get_pool()
+                await pool.close_session(lock_key)
+
             new_session_id = str(uuid.uuid4())
 
             from cclaw.session import load_global_memory
@@ -733,6 +771,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 lock_key=lock_key,
                 claude_session_id=new_session_id,
                 resume_session=False,
+                session_directory=session_dir,
             )
 
     def _should_handle_group_message(update: Update, group_config: dict[str, Any]) -> bool:

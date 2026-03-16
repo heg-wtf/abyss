@@ -1,10 +1,10 @@
 """Claude Code subprocess runner.
 
 Supports two execution modes:
-- Bridge mode: Uses Node.js bridge for persistent sessions (faster, no process spawn per message)
-- Subprocess mode: Direct `claude -p` invocation (fallback when bridge is unavailable)
+- SDK mode: Uses Python Agent SDK for session continuity (faster, no process spawn per resume)
+- Subprocess mode: Direct `claude -p` invocation (fallback when SDK is unavailable)
 
-The bridge is tried first; on failure (bridge down, error), falls back to subprocess automatically.
+The SDK is tried first for resumed sessions; on failure, falls back to subprocess automatically.
 """
 
 from __future__ import annotations
@@ -511,10 +511,10 @@ async def run_claude_streaming(
     return final_text.strip()
 
 
-# ─── Bridge-aware wrappers ──────────────────────────────────────────────────
+# ─── SDK-aware wrappers ─────────────────────────────────────────────────────
 
 
-async def run_claude_with_bridge(
+async def run_claude_with_sdk(
     working_directory: str,
     message: str,
     extra_arguments: list[str] | None = None,
@@ -524,36 +524,61 @@ async def run_claude_with_bridge(
     skill_names: list[str] | None = None,
     claude_session_id: str | None = None,
     resume_session: bool = False,
+    session_directory: Path | None = None,
 ) -> str:
-    """Run Claude Code, trying the bridge first, falling back to subprocess.
+    """Run Claude Code, trying the SDK pool first, falling back to subprocess.
 
-    Same interface as run_claude() but attempts the bridge for faster execution.
-    If the bridge is unavailable or fails, transparently falls back to subprocess.
+    Uses the persistent SDK pool for all messages when available. The pool keeps
+    a ``ClaudeSDKClient`` per session_key, avoiding process re-spawn on follow-up
+    messages. Falls back to subprocess when the SDK is unavailable or on error.
+
+    Args:
+        session_directory: If provided, session_id is auto-loaded/saved from
+            ``.claude_session_id`` in this directory.
     """
-    from cclaw.bridge import bridge_query, is_bridge_running
+    from cclaw.sdk_client import get_pool, is_sdk_available
+    from cclaw.session import get_claude_session_id, save_claude_session_id
 
-    if session_key and is_bridge_running():
+    if session_key and is_sdk_available():
         try:
             allowed_tools, environment_variables = _prepare_skill_config(
                 working_directory, skill_names
             )
-            logger.info("Running claude via bridge for %s: %s", session_key, message[:100])
+            pool = get_pool()
 
-            return await bridge_query(
+            # Load saved session_id for resume (only when creating a new client)
+            saved_session_id = (
+                get_claude_session_id(session_directory)
+                if session_directory and not pool.has_session(session_key)
+                else None
+            )
+
+            logger.info("Running claude via SDK pool for %s: %s", session_key, message[:100])
+
+            result = await pool.query(
                 session_key=session_key,
                 prompt=message,
                 working_directory=working_directory,
                 model=model,
-                session_id=claude_session_id,
-                resume_session=resume_session,
                 allowed_tools=allowed_tools,
                 environment_variables=environment_variables,
+                resume_session_id=saved_session_id,
                 timeout=timeout,
             )
+
+            if session_directory and result.session_id:
+                save_claude_session_id(session_directory, result.session_id)
+
+            return result.text
         except (ConnectionError, OSError) as error:
-            logger.warning("Bridge unavailable, falling back to subprocess: %s", error)
+            logger.warning("SDK pool unavailable, falling back to subprocess: %s", error)
         except Exception as error:
-            logger.warning("Bridge query failed, falling back to subprocess: %s", error)
+            logger.warning("SDK pool query failed, falling back to subprocess: %s", error)
+            # Remove broken session from pool
+            from cclaw.sdk_client import get_pool as _get_pool
+
+            pool = _get_pool()
+            await pool.close_session(session_key)
 
     # Fallback to direct subprocess
     return await run_claude(
@@ -569,7 +594,7 @@ async def run_claude_with_bridge(
     )
 
 
-async def run_claude_streaming_with_bridge(
+async def run_claude_streaming_with_sdk(
     working_directory: str,
     message: str,
     on_text_chunk: Callable[[str], Any] | None = None,
@@ -580,39 +605,66 @@ async def run_claude_streaming_with_bridge(
     skill_names: list[str] | None = None,
     claude_session_id: str | None = None,
     resume_session: bool = False,
+    session_directory: Path | None = None,
 ) -> str:
-    """Run Claude Code with streaming, trying bridge first.
+    """Run Claude Code with streaming, trying SDK pool first.
 
-    Same interface as run_claude_streaming() but attempts the bridge for
-    persistent sessions. Falls back to subprocess streaming if bridge fails.
+    Uses the persistent SDK pool for streaming. Falls back to subprocess
+    streaming when the SDK is unavailable or on error.
+
+    Args:
+        session_directory: If provided, session_id is auto-loaded/saved from
+            ``.claude_session_id`` in this directory.
     """
-    from cclaw.bridge import bridge_query_streaming, is_bridge_running
+    from cclaw.sdk_client import get_pool, is_sdk_available
+    from cclaw.session import get_claude_session_id, save_claude_session_id
 
-    if session_key and is_bridge_running():
+    if session_key and is_sdk_available():
         try:
             allowed_tools, environment_variables = _prepare_skill_config(
                 working_directory, skill_names
             )
-            logger.info(
-                "Running claude (streaming) via bridge for %s: %s", session_key, message[:100]
+            pool = get_pool()
+
+            saved_session_id = (
+                get_claude_session_id(session_directory)
+                if session_directory and not pool.has_session(session_key)
+                else None
             )
 
-            return await bridge_query_streaming(
+            logger.info(
+                "Running claude (streaming) via SDK pool for %s: %s",
+                session_key,
+                message[:100],
+            )
+
+            result = await pool.query_streaming(
                 session_key=session_key,
                 prompt=message,
-                working_directory=working_directory,
                 on_text_chunk=on_text_chunk,
+                working_directory=working_directory,
                 model=model,
-                session_id=claude_session_id,
-                resume_session=resume_session,
                 allowed_tools=allowed_tools,
                 environment_variables=environment_variables,
+                resume_session_id=saved_session_id,
                 timeout=timeout,
             )
+
+            if session_directory and result.session_id:
+                save_claude_session_id(session_directory, result.session_id)
+
+            return result.text
         except (ConnectionError, OSError) as error:
-            logger.warning("Bridge unavailable (streaming), falling back to subprocess: %s", error)
+            logger.warning(
+                "SDK pool unavailable (streaming), falling back to subprocess: %s",
+                error,
+            )
         except Exception as error:
-            logger.warning("Bridge streaming failed, falling back to subprocess: %s", error)
+            logger.warning("SDK pool streaming failed, falling back to subprocess: %s", error)
+            from cclaw.sdk_client import get_pool as _get_pool
+
+            pool = _get_pool()
+            await pool.close_session(session_key)
 
     # Fallback to direct subprocess streaming
     return await run_claude_streaming(
@@ -627,3 +679,20 @@ async def run_claude_streaming_with_bridge(
         claude_session_id=claude_session_id,
         resume_session=resume_session,
     )
+
+
+async def cancel_sdk_session(session_key: str) -> bool:
+    """Interrupt a running SDK pool session.
+
+    Returns True if a session was found and interrupted, False otherwise.
+    """
+    from cclaw.sdk_client import get_pool, is_sdk_available
+
+    if not is_sdk_available():
+        return False
+
+    pool = get_pool()
+    if not pool.has_session(session_key):
+        return False
+
+    return await pool.interrupt(session_key)

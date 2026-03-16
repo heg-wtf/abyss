@@ -877,3 +877,226 @@ def test_cancel_all_processes_empty():
     _running_processes.clear()
     killed = cancel_all_processes()
     assert killed == 0
+
+
+# --- SDK-aware runner tests ---
+
+
+class TestSDKAwareRunner:
+    @pytest.mark.asyncio
+    async def test_run_with_sdk_pool_success(self, tmp_path):
+        """Uses SDK pool when available."""
+        from cclaw.claude_runner import run_claude_with_sdk
+        from cclaw.sdk_client import SDKClientPool, SDKQueryResult
+
+        mock_result = SDKQueryResult(text="pool response", session_id="sess-1")
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+        mock_pool.query = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+        ):
+            result = await run_claude_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+            )
+
+        assert result == "pool response"
+        mock_pool.query.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_with_sdk_pool_saves_session_id(self, tmp_path):
+        """Pool result session_id is saved to session_directory."""
+        from cclaw.claude_runner import run_claude_with_sdk
+        from cclaw.sdk_client import SDKClientPool, SDKQueryResult
+
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        mock_result = SDKQueryResult(text="ok", session_id="new-sess-123")
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+        mock_pool.query = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+        ):
+            await run_claude_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+                session_directory=session_dir,
+            )
+
+        saved_id = (session_dir / ".claude_session_id").read_text().strip()
+        assert saved_id == "new-sess-123"
+
+    @pytest.mark.asyncio
+    async def test_run_with_sdk_fallback_when_unavailable(self, tmp_path):
+        """Falls back to subprocess when SDK is not available."""
+        from cclaw.claude_runner import run_claude_with_sdk
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=False),
+            patch("cclaw.claude_runner.run_claude", new_callable=AsyncMock) as mock_run,
+        ):
+            mock_run.return_value = "subprocess response"
+            result = await run_claude_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+                claude_session_id="sess-1",
+                resume_session=True,
+            )
+
+        assert result == "subprocess response"
+        mock_run.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_with_sdk_pool_error_falls_back(self, tmp_path):
+        """Falls back to subprocess when pool query fails."""
+        from cclaw.claude_runner import run_claude_with_sdk
+        from cclaw.sdk_client import SDKClientPool
+
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+        mock_pool.query = AsyncMock(side_effect=RuntimeError("pool error"))
+        mock_pool.close_session = AsyncMock()
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+            patch("cclaw.claude_runner.run_claude", new_callable=AsyncMock) as mock_run,
+        ):
+            mock_run.return_value = "fallback response"
+            result = await run_claude_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+            )
+
+        assert result == "fallback response"
+        mock_run.assert_called_once()
+        mock_pool.close_session.assert_called_once_with("bot1:chat_1")
+
+    @pytest.mark.asyncio
+    async def test_run_with_sdk_no_session_key_uses_subprocess(self, tmp_path):
+        """Uses subprocess when no session_key."""
+        from cclaw.claude_runner import run_claude_with_sdk
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.claude_runner.run_claude", new_callable=AsyncMock) as mock_run,
+        ):
+            mock_run.return_value = "subprocess response"
+            result = await run_claude_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key=None,
+            )
+
+        assert result == "subprocess response"
+
+    @pytest.mark.asyncio
+    async def test_run_streaming_with_sdk_pool_success(self, tmp_path):
+        """Uses SDK pool streaming when available."""
+        from cclaw.claude_runner import run_claude_streaming_with_sdk
+        from cclaw.sdk_client import SDKClientPool, SDKQueryResult
+
+        mock_result = SDKQueryResult(text="streamed", session_id="sess-2")
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+        mock_pool.query_streaming = AsyncMock(return_value=mock_result)
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+        ):
+            result = await run_claude_streaming_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+            )
+
+        assert result == "streamed"
+        mock_pool.query_streaming.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_streaming_with_sdk_fallback(self, tmp_path):
+        """Falls back to subprocess streaming when pool fails."""
+        from cclaw.claude_runner import run_claude_streaming_with_sdk
+        from cclaw.sdk_client import SDKClientPool
+
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+        mock_pool.query_streaming = AsyncMock(side_effect=ConnectionError("pool down"))
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+            patch(
+                "cclaw.claude_runner.run_claude_streaming",
+                new_callable=AsyncMock,
+            ) as mock_stream,
+        ):
+            mock_stream.return_value = "subprocess streamed"
+            result = await run_claude_streaming_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+            )
+
+        assert result == "subprocess streamed"
+        mock_stream.assert_called_once()
+
+
+# --- cancel_sdk_session tests ---
+
+
+class TestCancelSDKSession:
+    @pytest.mark.asyncio
+    async def test_cancel_sdk_session_success(self):
+        from cclaw.claude_runner import cancel_sdk_session
+        from cclaw.sdk_client import SDKClientPool
+
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = True
+        mock_pool.interrupt = AsyncMock(return_value=True)
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+        ):
+            result = await cancel_sdk_session("bot:1")
+
+        assert result is True
+        mock_pool.interrupt.assert_called_once_with("bot:1")
+
+    @pytest.mark.asyncio
+    async def test_cancel_sdk_session_no_session(self):
+        from cclaw.claude_runner import cancel_sdk_session
+        from cclaw.sdk_client import SDKClientPool
+
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+
+        with (
+            patch("cclaw.sdk_client.is_sdk_available", return_value=True),
+            patch("cclaw.sdk_client.get_pool", return_value=mock_pool),
+        ):
+            result = await cancel_sdk_session("bot:999")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_cancel_sdk_session_sdk_unavailable(self):
+        from cclaw.claude_runner import cancel_sdk_session
+
+        with patch("cclaw.sdk_client.is_sdk_available", return_value=False):
+            result = await cancel_sdk_session("bot:1")
+
+        assert result is False

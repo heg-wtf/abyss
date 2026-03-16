@@ -35,7 +35,6 @@ A multi-bot, file-based session system that runs locally on Mac.
 ## Requirements
 
 - Python >= 3.11
-- Node.js (Claude Code runtime)
 - [Claude Code CLI](https://www.npmjs.com/package/@anthropic-ai/claude-code)
 - [uv](https://docs.astral.sh/uv/)
 
@@ -204,7 +203,7 @@ Use the `/send` command to retrieve workspace files back via Telegram.
 | Cron Scheduler | croniter |
 | Encrypted Backup | pyzipper (AES-256) |
 | AI Engine | Claude Code CLI (`claude -p`, streaming) |
-| AI Bridge | Node.js + Claude Agent SDK (optional, Unix socket) |
+| AI SDK | Python Agent SDK (`claude-agent-sdk`, persistent session pool) |
 | Logging | Rich (RichHandler, colorized console) |
 | Process Manager | launchd (macOS) |
 
@@ -296,15 +295,12 @@ cclaw backup                   # Backup ~/.cclaw/ to AES-256 encrypted zip
 cclaw/
 ├── pyproject.toml
 ├── clawhouse/              # ClawHouse web dashboard (Next.js)
-├── bridge/
-│   └── server.mjs          # Node.js bridge server (development source)
 ├── src/cclaw/
 │   ├── cli.py              # Typer CLI entry point (ASCII art banner)
 │   ├── config.py           # Configuration load/save, timezone/language management
 │   ├── onboarding.py       # Setup wizard (init: timezone/language, bot add: Telegram + bot)
-│   ├── claude_runner.py    # Claude Code runner (subprocess + bridge, batch + streaming)
-│   ├── bridge.py           # Node.js bridge client (Unix socket, lifecycle management)
-│   ├── bridge_data/        # Bridge server bundled with package (server.mjs, package.json)
+│   ├── claude_runner.py    # Claude Code runner (SDK pool + subprocess fallback)
+│   ├── sdk_client.py       # Python Agent SDK client pool (persistent sessions)
 │   ├── session.py          # Session directory management
 │   ├── handlers.py         # Telegram handler factory (group-aware)
 │   ├── group.py            # Group CRUD, shared conversation, workspace

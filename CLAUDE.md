@@ -6,7 +6,7 @@ Personal AI assistant: Telegram + Claude Code. Runs locally on Mac.
 
 - Python >= 3.11, uv package manager
 - Typer (CLI), Rich (output), python-telegram-bot v21+ (async), PyYAML (config), croniter (cron)
-- Runs Claude Code CLI as subprocess (`claude -p`), optionally via Node.js bridge (Agent SDK)
+- Runs Claude Code CLI as subprocess (`claude -p`), with Python Agent SDK for session continuity
 
 ## Dev Commands
 
@@ -44,12 +44,12 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `cli.py` | Typer entry point, all subcommand definitions |
 | `config.py` | Config YAML CRUD, timezone (`get_timezone()`), language (`get_language()`), model mapping |
 | `onboarding.py` | `cclaw init` (env check + timezone + language), `cclaw bot add` (token + profile) |
-| `claude_runner.py` | `claude -p` subprocess (async), model/skill/MCP injection, `DEFAULT_ALLOWED_TOOLS` (WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Agent always allowed), streaming, `--resume` session continuity, bridge-aware wrappers |
-| `bridge.py` | Node.js bridge client (Unix socket JSONL), lifecycle start/stop, fallback to subprocess |
+| `claude_runner.py` | `claude -p` subprocess (async), model/skill/MCP injection, `DEFAULT_ALLOWED_TOOLS` (WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Agent always allowed), streaming, `--resume` session continuity, SDK-aware wrappers |
+| `sdk_client.py` | Python Agent SDK client (`claude-agent-sdk`), `SDKClientPool` (persistent `ClaudeSDKClient` per session, avoids process re-spawn), `get_pool()` / `close_pool()` singleton, legacy `sdk_query()` / `sdk_query_streaming()` |
 | `session.py` | Session directories, conversation logs (`conversation-YYMMDD.md`), Claude session ID (`--resume`), memory CRUD (bot + global) |
 | `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity, group-aware routing |
 | `group.py` | Group CRUD (create/delete/list/bind/unbind), shared conversation log, shared workspace, role detection |
-| `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, bridge/QMD lifecycle, cron/heartbeat schedulers, graceful shutdown |
+| `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, graceful shutdown |
 | `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection |
 | `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support |
 | `heartbeat.py` | Periodic situation awareness, active hours check, HEARTBEAT_OK detection |
@@ -60,10 +60,6 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 ### Built-in Skills
 
 `src/cclaw/builtin_skills/` contains skill templates (SKILL.md + skill.yaml + optional mcp.json). Each subdirectory is one skill. `__init__.py` scans subdirectories as a registry. All follow the same pattern -- adding a new builtin means creating a new subdirectory.
-
-### Bridge
-
-`bridge/server.mjs` (source) -> `src/cclaw/bridge_data/server.mjs` (packaged) -> `~/.cclaw/bridge/server.mjs` (runtime, auto-overwritten on start).
 
 ## Key Architecture Patterns
 
@@ -82,16 +78,19 @@ This is the only way to inject system instructions into `claude -p`, which auto-
 
 ### Session Continuity
 
-- First message: `--session-id <uuid>` with bootstrap prompt (global memory -> bot memory -> conversation history -> message)
-- Subsequent: `--resume <session_id>`
-- Fallback: if resume fails, clears session ID and retries with bootstrap
+- **SDK Pool mode (preferred)**: `SDKClientPool` keeps a persistent `ClaudeSDKClient` per session key (`bot:chat_id`). First message creates the client, subsequent messages reuse it (no process re-spawn, 1-2s faster). Pool auto-loads/saves `session_id` from `.claude_session_id` via `session_directory` param.
+- **Subprocess fallback**: `--session-id <uuid>` for first message, `--resume <session_id>` for subsequent. Used when SDK is unavailable or pool query fails.
+- Fallback: if resume fails, clears session ID, closes pool session, and retries with bootstrap
+- `/cancel` tries `pool.interrupt()` first, then `cancel_process()` subprocess fallback
+- `/reset` closes pool session so fresh client is created
 - Session ID stored in `sessions/chat_<id>/.claude_session_id`
+- Shutdown: `close_pool()` closes all persistent clients before killing subprocesses
 
 ### Startup Sequence
 
 For each bot on `cclaw start`:
 1. Regenerate CLAUDE.md (picks up config/skill changes)
-2. Start bridge, QMD daemon, then polling
+2. Check SDK availability, start QMD daemon, then polling
 
 ### Streaming
 
@@ -146,7 +145,6 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 │   ├── group.yaml            # Group config (name, orchestrator, members, telegram_chat_id)
 │   ├── conversation/         # Shared conversation logs (YYMMDD.md, date-based)
 │   └── workspace/            # Shared workspace (persistent across resets)
-├── bridge/                   # Node.js bridge (server.mjs, package.json, node_modules/)
 ├── skills/<name>/            # Skills (SKILL.md required, skill.yaml + mcp.json optional)
 └── logs/                     # Daily rotating logs
 ```
@@ -193,6 +191,6 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 Read these docs when working on related areas. They contain critical implementation details not duplicated here.
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** -- System architecture, module dependency graph, Mermaid flow diagrams (message processing, cron, heartbeat, group routing, shutdown), bot.yaml schema, all 20 design decisions with rationale
-- **[docs/TECHNICAL-NOTES.md](docs/TECHNICAL-NOTES.md)** -- Deep implementation details per feature: Claude Code execution modes, bridge protocol/lifecycle, streaming event parsing, skill MCP config merging, cron scheduler behavior, session continuity (bootstrap/resume/fallback), memory save/load mechanism, QMD auto-injection, group collaboration (orchestrator pattern, auth bypass, shared conversation), IME input handling, emoji width fixes
+- **[docs/TECHNICAL-NOTES.md](docs/TECHNICAL-NOTES.md)** -- Deep implementation details per feature: Claude Code execution modes, Python Agent SDK integration, streaming event parsing, skill MCP config merging, cron scheduler behavior, session continuity (bootstrap/resume/fallback), memory save/load mechanism, QMD auto-injection, group collaboration (orchestrator pattern, auth bypass, shared conversation), IME input handling, emoji width fixes
 - **[docs/SECURITY.md](docs/SECURITY.md)** -- Security audit: 35 findings (path traversal, token storage, rate limiting, env var injection, workspace limits). Check before adding file handling, user input, or subprocess code
 - **[docs/PLAN-26-0313-GROUP-MISSION.md](docs/PLAN-26-0313-GROUP-MISSION.md)** -- Group collaboration implementation plan: orchestrator pattern, shared conversation/workspace, CLAUDE.md composition, group-aware handlers

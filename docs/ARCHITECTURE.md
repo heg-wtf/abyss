@@ -19,14 +19,13 @@ graph LR
 
 ```mermaid
 graph LR
-    CR[claude_runner.py] -->|1. Bridge| B[bridge.py]
-    B -->|Unix Socket JSONL| NJ[Node.js server.mjs]
-    NJ --> SDK["Claude Agent SDK query()"]
+    CR[claude_runner.py] -->|1. SDK Pool| POOL[SDKClientPool]
+    POOL -->|Persistent client| SDK["ClaudeSDKClient.query()"]
 
     CR -->|2. Subprocess| SUB["claude -p"]
     SUB --> CC[Claude Code]
 
-    style B fill:#2d6,color:#fff
+    style POOL fill:#2d6,color:#fff
     style SUB fill:#d62,color:#fff
 ```
 
@@ -41,19 +40,17 @@ Instead of calling the LLM API directly, we run the `claude -p` CLI as a subproc
 - Sets session directory as working directory via subprocess `cwd` parameter
 - Model selection via `--model` flag (sonnet/opus/haiku)
 
-### 2. Node.js Bridge (Claude Agent SDK)
+### 2. Python Agent SDK Client Pool
 
-A long-lived Node.js process runs Claude Code queries via the Agent SDK's v1 `query()` function, communicating with Python over a Unix socket using JSONL protocol.
+`SDKClientPool` in `sdk_client.py` keeps persistent `ClaudeSDKClient` instances per session key (`bot:chat_id`), avoiding process re-spawn on follow-up messages.
 
-- **Purpose**: Avoids spawning a new `claude` process per message. The bridge keeps a single Node.js runtime alive
-- **Architecture**: `bridge.py` (Python client) <-> Unix socket (`/tmp/cclaw-bridge.sock`) <-> `server.mjs` (Node.js server) <-> `@anthropic-ai/claude-agent-sdk` `query()`
-- **Lifecycle**: `bot_manager.py` calls `start_bridge()` before polling, `stop_bridge()` on shutdown
-- **Auto-install**: `_bridge_directory()` copies bundled `bridge_data/` files to `~/.cclaw/bridge/` and runs `npm install` on first start. `server.mjs` is always overwritten to pick up fixes
-- **Fallback**: If bridge is unavailable (not started, connection error), `claude_runner.py` transparently falls back to `claude -p` subprocess execution
-- **Session retry**: If a stale session ID causes an error, bridge automatically retries without session options
-- **Pipe draining**: Background daemon threads drain stdout/stderr to prevent buffer overflow
-- **Doctor**: `cclaw doctor` shows bridge process status, socket connectivity, and SDK version
-- **SDK v2 note**: `unstable_v2_createSession`/`unstable_v2_prompt` exist but do NOT support CLAUDE.md or Bash tools (alpha API). Will be reconsidered when v2 matures. See: https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview
+- **Purpose**: First message creates a `ClaudeSDKClient`; subsequent messages reuse the same process (~1-2s faster per message)
+- **Architecture**: `claude_runner.py` -> `get_pool()` -> `SDKClientPool._get_or_create_client()` -> `ClaudeSDKClient.query()` + `receive_response()`
+- **Lifecycle**: Pool is a module-level singleton created on first use. `bot_manager.py` calls `close_pool()` on shutdown before killing subprocesses
+- **Session persistence**: `session_directory` parameter enables auto-load/save of `.claude_session_id`. When creating a new client, the saved session ID is used as `resume` option
+- **Interrupt**: `/cancel` calls `pool.interrupt()` (sends interrupt to persistent client) before falling back to subprocess `kill()`
+- **Reset**: `/reset` calls `pool.close_session()` to dispose the persistent client, ensuring a fresh client is created on next message
+- **Fallback**: If SDK is unavailable (`claude-agent-sdk` not installed) or pool query fails (ConnectionError, RuntimeError), transparently falls back to `claude -p` subprocess execution. Broken sessions are auto-removed from pool
 
 ### 3. File-Based Sessions
 
