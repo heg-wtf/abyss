@@ -217,10 +217,16 @@
       border: 1px solid rgba(88, 166, 255, 0.2);
       min-width: 140px;
     }
+    .diag-cclaw-group {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
     .diag-cclaw {
       background: rgba(63, 185, 80, 0.06);
       border: 1px solid rgba(63, 185, 80, 0.2);
-      flex: 1;
+      width: 100%;
     }
     .diag-dashboard {
       background: rgba(247, 120, 186, 0.06);
@@ -505,24 +511,26 @@
             <div class="diag-item">📷 Photos</div>
           </div>
           <div class="diag-arrow">⟷</div>
-          <div class="diag-box diag-cclaw">
-            <div class="diag-label">cclaw</div>
-            <div class="diag-item">🤖 Multi-Bot Manager</div>
-            <div class="diag-item">📁 File-Based Sessions</div>
-            <div class="diag-item">🧩 Skill System</div>
-            <div class="diag-item">⏰ Cron Automation</div>
-            <div class="diag-item">💓 Heartbeat</div>
-            <div class="diag-item">👥 Group Collaboration</div>
-            <div class="diag-inner">
-              <span class="c-purple">Claude Code (SDK Pool)</span><br>
-              <span class="c-orange">Persistent Sessions</span>
+          <div class="diag-cclaw-group">
+            <div class="diag-box diag-cclaw">
+              <div class="diag-label">cclaw</div>
+              <div class="diag-item">🤖 Multi-Bot Manager</div>
+              <div class="diag-item">📁 File-Based Sessions</div>
+              <div class="diag-item">🧩 Skill System</div>
+              <div class="diag-item">⏰ Cron Automation</div>
+              <div class="diag-item">💓 Heartbeat</div>
+              <div class="diag-item">👥 Group Collaboration</div>
+              <div class="diag-inner">
+                <span class="c-purple">Claude Code (SDK Pool)</span><br>
+                <span class="c-orange">Persistent Sessions</span>
+              </div>
+            </div>
+            <div class="diag-connector">│</div>
+            <div class="diag-box diag-dashboard">
+              <div class="diag-label">ClawHouse Dashboard</div>
+              <div class="diag-item">🖥 Web UI (port 3847)</div>
             </div>
           </div>
-        </div>
-        <div class="diag-connector">│</div>
-        <div class="diag-box diag-dashboard">
-          <div class="diag-label">ClawHouse Dashboard</div>
-          <div class="diag-item">🖥 Web UI (port 3847)</div>
         </div>
       </div>
     </div>
