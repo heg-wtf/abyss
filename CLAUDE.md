@@ -50,7 +50,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity, group-aware routing |
 | `group.py` | Group CRUD (create/delete/list/bind/unbind), shared conversation log, shared workspace, role detection |
 | `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, graceful shutdown |
-| `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection |
+| `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection, `import_skill_from_github()` / `parse_github_url()` (GitHub import) |
 | `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support |
 | `heartbeat.py` | Periodic situation awareness, active hours check, HEARTBEAT_OK detection |
 | `token_compact.py` | Compress MEMORY.md/SKILL.md/HEARTBEAT.md via `claude -p` one-shot |

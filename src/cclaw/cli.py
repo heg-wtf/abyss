@@ -825,6 +825,49 @@ def skill_install(
                 console.print("[green]Collection 'cclaw-conversations' registered.[/green]")
 
 
+@skill_app.command("import")
+def skill_import(
+    url: str = typer.Argument(..., help="GitHub repository URL"),
+    skill: str = typer.Option(None, "--skill", help="Skill name override (or subdirectory)"),
+) -> None:
+    """Import a skill from a GitHub repository."""
+    from rich.console import Console
+
+    from cclaw.skill import (
+        activate_skill,
+        check_skill_requirements,
+        import_skill_from_github,
+    )
+
+    console = Console()
+
+    try:
+        directory = import_skill_from_github(url, name=skill)
+    except ValueError as error:
+        console.print(f"[red]Import failed: {error}[/red]")
+        raise typer.Exit(1)
+    except FileExistsError as error:
+        console.print(f"[yellow]{error}[/yellow]")
+        raise typer.Exit(1)
+
+    skill_name = directory.name
+    console.print(f"[green]Skill '{skill_name}' imported to {directory}[/green]")
+
+    errors = check_skill_requirements(skill_name)
+    if errors:
+        console.print("[yellow]Requirements not met (skill remains inactive):[/yellow]")
+        for error in errors:
+            console.print(f"  [yellow]- {error}[/yellow]")
+        console.print(
+            f"Install the missing tools and run: [cyan]cclaw skills setup {skill_name}[/cyan]"
+        )
+    else:
+        activate_skill(skill_name)
+        console.print(f"[green]All requirements met. Skill '{skill_name}' activated.[/green]")
+
+    console.print(f"\nAttach to a bot: [cyan]cclaw bot skill <bot-name> {skill_name}[/cyan]")
+
+
 @skill_app.command("add")
 def skill_add() -> None:
     """Create a new skill interactively."""

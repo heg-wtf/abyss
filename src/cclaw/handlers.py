@@ -1142,9 +1142,51 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             attached_skills = bot_config.get("skills", [])
             await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' detached.")
 
+        elif subcommand == "import":
+            if len(context.args) < 2:
+                await update.effective_message.reply_text(
+                    "Usage: `/skills import <github-url>`", parse_mode="Markdown"
+                )
+                return
+
+            from cclaw.skill import (
+                activate_skill,
+                attach_skill_to_bot,
+                check_skill_requirements,
+                import_skill_from_github,
+                parse_github_url,
+            )
+
+            github_url = context.args[1]
+            name_override = context.args[2] if len(context.args) > 2 else None
+
+            try:
+                directory = import_skill_from_github(github_url, name=name_override)
+                skill_name = directory.name
+                errors = check_skill_requirements(skill_name)
+                if not errors:
+                    activate_skill(skill_name)
+            except ValueError as error:
+                await update.effective_message.reply_text(f"\u274c Import failed: {error}")
+                return
+            except FileExistsError:
+                components = parse_github_url(github_url)
+                skill_name = name_override or components["repo"]
+
+            if skill_name not in attached_skills:
+                attach_skill_to_bot(bot_name, skill_name)
+                bot_config.setdefault("skills", [])
+                if skill_name not in bot_config["skills"]:
+                    bot_config["skills"].append(skill_name)
+                attached_skills = bot_config["skills"]
+
+            await update.effective_message.reply_text(
+                f"\U0001f9e9 Skill '{skill_name}' imported and attached."
+            )
+
         else:
             await update.effective_message.reply_text(
-                "Unknown subcommand. Use: list, attach, detach",
+                "Unknown subcommand. Use: list, attach, detach, import",
             )
 
     async def cron_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

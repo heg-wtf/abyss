@@ -586,6 +586,108 @@ def install_builtin_skill(name: str) -> Path:
     return target
 
 
+def parse_github_url(url: str) -> dict[str, str]:
+    """Parse a GitHub repository URL into components.
+
+    Supports:
+      https://github.com/owner/repo
+      https://github.com/owner/repo/tree/branch/subdir
+
+    Returns a dict with keys: owner, repo, branch, subdir.
+
+    Raises:
+        ValueError: If the URL is not a valid GitHub repository URL.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.netloc not in ("github.com", "www.github.com"):
+        raise ValueError(f"Not a GitHub URL: {url}")
+
+    parts = parsed.path.strip("/").split("/")
+    if len(parts) < 2:
+        raise ValueError(f"Invalid GitHub URL (expected owner/repo): {url}")
+
+    result: dict[str, str] = {
+        "owner": parts[0],
+        "repo": parts[1],
+        "branch": "main",
+        "subdir": "",
+    }
+
+    # https://github.com/owner/repo/tree/branch[/subdir...]
+    if len(parts) > 3 and parts[2] == "tree":
+        result["branch"] = parts[3]
+        result["subdir"] = "/".join(parts[4:]) if len(parts) > 4 else ""
+
+    return result
+
+
+def import_skill_from_github(url: str, name: str | None = None) -> Path:
+    """Download and install a skill from a GitHub repository.
+
+    Downloads SKILL.md (required) and optionally skill.yaml and mcp.json
+    from the repository root or a subdirectory.
+
+    Args:
+        url: GitHub repository URL.
+        name: Skill name override. Defaults to the subdirectory or repo name.
+
+    Raises:
+        ValueError: If the URL is invalid or SKILL.md is not found in the repo.
+        FileExistsError: If the skill is already installed.
+
+    Returns:
+        The path to the installed skill directory.
+    """
+    import urllib.error
+    import urllib.request
+
+    components = parse_github_url(url)
+    owner = components["owner"]
+    repo = components["repo"]
+    branch = components["branch"]
+    subdir = components["subdir"]
+
+    skill_name = name or (subdir.split("/")[-1] if subdir else repo)
+
+    target = skill_directory(skill_name)
+    if target.exists():
+        raise FileExistsError(f"Skill '{skill_name}' is already installed at {target}")
+
+    def raw_base(branch_name: str) -> str:
+        base = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch_name}"
+        return f"{base}/{subdir}" if subdir else base
+
+    def fetch(raw_url: str) -> str | None:
+        try:
+            with urllib.request.urlopen(raw_url) as response:  # noqa: S310
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError:
+            return None
+
+    # Try main branch first, then master as fallback for SKILL.md
+    skill_md_content = fetch(f"{raw_base(branch)}/SKILL.md")
+    if skill_md_content is None and branch == "main":
+        skill_md_content = fetch(f"{raw_base('master')}/SKILL.md")
+        if skill_md_content is not None:
+            branch = "master"
+
+    if skill_md_content is None:
+        raise ValueError(f"SKILL.md not found in {url}")
+
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text(skill_md_content, encoding="utf-8")
+
+    for optional_file in ("skill.yaml", "mcp.json"):
+        content = fetch(f"{raw_base(branch)}/{optional_file}")
+        if content is not None:
+            (target / optional_file).write_text(content, encoding="utf-8")
+
+    logger.info("Imported skill '%s' from %s to %s", skill_name, url, target)
+    return target
+
+
 def setup_qmd_conversations_collection() -> bool:
     """Register cclaw conversation logs as a QMD collection.
 

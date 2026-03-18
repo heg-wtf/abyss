@@ -127,6 +127,7 @@ Extends bot capabilities by linking tools/knowledge. Skills are classified by or
 
 - **Built-in skills** (`builtin`): Pre-packaged with cclaw, installable via `cclaw skills install <name>`
 - **Custom skills** (`custom`): User-created via `cclaw skills add`
+- **Imported skills** (`custom`): Downloaded from GitHub via `cclaw skills import <github-url>` or `/skills import <github-url>` in Telegram
 
 Internally, skills have different tool configurations:
 
@@ -185,6 +186,7 @@ Frequently used skills are bundled as templates inside the package, installable 
 - Built-in skills: iMessage (`imsg` CLI), Apple Reminders (`reminders-cli`), Naver Map (knowledge type, web URL based), Image Processing (`slimg` CLI), Best Price (knowledge type, web search based), Supabase (MCP type, DB/Storage/Edge Functions with no-deletion guardrails), Gmail (`gogcli`), Google Calendar (`gogcli`), Twitter/X (MCP type, tweet posting/search via `@enescinar/twitter-mcp`), Jira (MCP type, issue management via `mcp-atlassian`), Naver Search (`naver-cli`, 6-type search), Kakao Local (`kakao-cli`, address/coordinate/keyword search), DART (`dartcli`, corporate disclosure/finance/filings), Translate (`translatecli`, Gemini-powered text/transcript translation), Daiso (`daiso-cli`, Daiso Mall product search), QMD (MCP type, markdown knowledge search via HTTP daemon, auto-injected system-wide)
 - `cclaw skills` command shows all skills with origin type (builtin/custom), including uninstalled builtins
 - Telegram `/skills` handler also shows origin type (builtin/custom) and uninstalled builtins
+- **GitHub import**: `import_skill_from_github(url, name)` downloads SKILL.md (required) + skill.yaml + mcp.json (optional) from a GitHub repo. `parse_github_url()` parses owner/repo/branch/subdir. Tries `main` branch first, falls back to `master`. Compatible with [skills.sh](https://skills.sh) skill packages. CLI: `cclaw skills import <url> [--skill <name>]`. Telegram: `/skills import <url> [name]` — imports and auto-attaches to the bot in one step.
 
 ### 13. QMD Auto-Injection (System-Wide Knowledge Search)
 
