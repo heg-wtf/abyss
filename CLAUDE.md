@@ -51,7 +51,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `group.py` | Group CRUD (create/delete/list/bind/unbind), shared conversation log, shared workspace, role detection |
 | `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, graceful shutdown |
 | `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection, `import_skill_from_github()` / `parse_github_url()` (GitHub import) |
-| `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support |
+| `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support, `edit_cron_job_message()` (message-only edit) |
 | `heartbeat.py` | Periodic situation awareness, active hours check, HEARTBEAT_OK detection |
 | `token_compact.py` | Compress MEMORY.md/SKILL.md/HEARTBEAT.md via `claude -p` one-shot |
 | `backup.py` | AES-256 encrypted zip of `~/.cclaw/` |

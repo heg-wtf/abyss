@@ -371,6 +371,14 @@ jobs:
 - **Relative-to-absolute conversion**: `add_cron_job()` converts relative durations (e.g., `10m`) to absolute ISO datetime at creation time. Without this, the scheduler would re-evaluate `parse_one_shot_time("10m")` every 30-second cycle, always computing `now + 10m`, causing the job to never fire
 - **Post-execution cleanup**: `delete_after_run: true` auto-deletes from `cron.yaml`. `delete_after_run: false` sets `enabled: false` to prevent re-execution on restart (since `last_run_times` is in-memory only and lost on restart)
 
+### Cron Job Message Editing
+
+- Only the `message` field is editable. Name and schedule require remove + add.
+- **CLI**: `cclaw cron edit <bot> <job>` opens `$EDITOR` (via `click.edit()`) pre-filled with current message. Save and close to apply; empty or unchanged content cancels.
+- **Telegram**: `/cron edit <name>` sends current message with `ForceReply` markup. User's next message becomes the new content.
+- **ForceReply state**: `pending_cron_edits: dict[int, str]` (chat_id -> job_name) in handler closure. `message_handler` checks this dict before normal message processing — if a pending edit exists for the chat, it processes the reply as a cron edit and returns early.
+- `edit_cron_job_message()` in `cron.py` follows the same pattern as `enable_cron_job`/`disable_cron_job`: load config, find job by name, update field, save.
+
 ### Telegram /skills Handler (Unified)
 
 The `/skills` handler manages skill listing, attach, and detach (previous `/skill` handler merged into `/skills`).

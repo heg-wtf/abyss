@@ -158,7 +158,8 @@ Automatically runs Claude Code at scheduled times and sends results via Telegram
 - **Natural language creation**: `/cron add <description>` in Telegram parses any language (Korean, English, Japanese, etc.) into cron jobs via Claude haiku one-shot (`parse_natural_language_schedule()`)
 - **Timezone**: `resolve_default_timezone()` reads from `config.yaml` timezone (single source of truth, set during `cclaw init`)
 - **Unique naming**: `generate_unique_job_name()` appends `-2`, `-3` suffix on conflict
-- **Full Telegram CRUD**: `/cron list|add|run|remove|enable|disable`
+- **Message editing**: `edit_cron_job_message()` updates only the message field (name/schedule immutable). CLI: `cclaw cron edit <bot> <job>` opens `$EDITOR`. Telegram: `/cron edit <name>` shows current message with `ForceReply`, user replies with new content. `pending_cron_edits` dict in handler tracks in-flight edits by chat_id
+- **Full Telegram CRUD**: `/cron list|add|edit|run|remove|enable|disable`
 
 ### 11. Heartbeat (Periodic Situation Awareness)
 
