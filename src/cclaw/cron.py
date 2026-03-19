@@ -152,6 +152,17 @@ def disable_cron_job(bot_name: str, job_name: str) -> bool:
     return False
 
 
+def edit_cron_job_message(bot_name: str, job_name: str, new_message: str) -> bool:
+    """Edit the message of a cron job. Returns True if found."""
+    config = load_cron_config(bot_name)
+    for job in config["jobs"]:
+        if job.get("name") == job_name:
+            job["message"] = new_message
+            save_cron_config(bot_name, config)
+            return True
+    return False
+
+
 # --- Natural language parsing ---
 
 CRON_PARSE_PROMPT = (

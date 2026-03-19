@@ -1278,6 +1278,40 @@ def cron_disable(
     console.print(f"[green]Job '{job}' disabled.[/green]")
 
 
+@cron_app.command("edit")
+def cron_edit(
+    bot: str = typer.Argument(help="Bot name"),
+    job: str = typer.Argument(help="Job name"),
+) -> None:
+    """Edit a cron job message in $EDITOR."""
+    import click
+    from rich.console import Console
+
+    from cclaw.cron import edit_cron_job_message, get_cron_job
+
+    console = Console()
+
+    cron_job = get_cron_job(bot, job)
+    if not cron_job:
+        console.print(f"[red]Job '{job}' not found in bot '{bot}'.[/red]")
+        raise typer.Exit(1)
+
+    current_message = cron_job.get("message", "")
+    edited = click.edit(current_message)
+
+    if edited is None:
+        console.print("[yellow]Edit cancelled.[/yellow]")
+        return
+
+    new_message = edited.strip()
+    if new_message == current_message:
+        console.print("[yellow]No changes made.[/yellow]")
+        return
+
+    edit_cron_job_message(bot, job, new_message)
+    console.print(f"[green]Job '{job}' message updated.[/green]")
+
+
 @cron_app.command("run")
 def cron_run(
     bot: str = typer.Argument(help="Bot name"),

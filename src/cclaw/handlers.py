@@ -10,7 +10,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, ForceReply, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -114,6 +114,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     streaming_enabled = bot_config.get("streaming", DEFAULT_STREAMING)
     attached_skills = bot_config.get("skills", [])
     bot_username = bot_config.get("telegram_username", "")
+    pending_cron_edits: dict[int, str] = {}  # chat_id -> job_name
 
     async def check_authorization(update: Update) -> bool:
         """Check if the user is authorized."""
@@ -881,6 +882,28 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         - Otherwise, process as individual (DM) message
         """
         chat_id = update.effective_chat.id
+
+        # Handle pending cron edit (ForceReply response)
+        if chat_id in pending_cron_edits:
+            if not await check_authorization(update):
+                return
+            job_name = pending_cron_edits.pop(chat_id)
+            new_message = (update.effective_message.text or "").strip()
+            if not new_message:
+                await update.effective_message.reply_text("Edit cancelled (empty message).")
+                return
+
+            from cclaw.cron import edit_cron_job_message
+
+            if edit_cron_job_message(bot_name, job_name, new_message):
+                await update.effective_message.reply_text(
+                    f"\u2705 Job `{job_name}` message updated.",
+                    parse_mode="Markdown",
+                )
+            else:
+                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
+            return
+
         group_config = find_group_by_chat_id(chat_id)
 
         if group_config is None:
@@ -1213,6 +1236,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 "\u23f0 *Cron Commands:*\n\n"
                 "`/cron list` - Show cron jobs\n"
                 "`/cron add <description>` - Create a job\n"
+                "`/cron edit <name>` - Edit job message\n"
                 "`/cron run <name>` - Run a job now\n"
                 "`/cron remove <name>` - Remove a job\n"
                 "`/cron enable <name>` - Enable a job\n"
@@ -1237,7 +1261,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 timezone_label = job.get("timezone", resolve_default_timezone())
                 next_time = next_run_time(job) if enabled else None
                 next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
-                message_preview = job.get("message", "")[:30]
+                message_preview = job.get("message", "")[:80]
                 lines.append(
                     f"{status_icon} `{job['name']}` (`{schedule_display}` {timezone_label})\n"
                     f"   Next: {next_display} | {message_preview}"
@@ -1398,9 +1422,32 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             else:
                 await update.effective_message.reply_text(f"Job '{job_name}' not found.")
 
+        elif subcommand == "edit":
+            if len(context.args) < 2:
+                await update.effective_message.reply_text(
+                    "Usage: `/cron edit <name>`", parse_mode="Markdown"
+                )
+                return
+
+            job_name = context.args[1]
+            cron_job = get_cron_job(bot_name, job_name)
+            if not cron_job:
+                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
+                return
+
+            current_message = cron_job.get("message", "")
+            pending_cron_edits[update.effective_chat.id] = job_name
+            await update.effective_message.reply_text(
+                f"\u270f\ufe0f Job `{job_name}` current message:\n\n"
+                f"{current_message}\n\n"
+                "Send new message:",
+                parse_mode="Markdown",
+                reply_markup=ForceReply(selective=True),
+            )
+
         else:
             await update.effective_message.reply_text(
-                "Unknown subcommand. Use: list, add, run, remove, enable, disable",
+                "Unknown subcommand. Use: list, add, edit, run, remove, enable, disable",
             )
 
     async def heartbeat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

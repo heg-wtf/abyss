@@ -12,6 +12,7 @@ from cclaw.cron import (
     add_cron_job,
     cron_session_directory,
     disable_cron_job,
+    edit_cron_job_message,
     enable_cron_job,
     execute_cron_job,
     generate_unique_job_name,
@@ -156,6 +157,41 @@ def test_disable_cron_job(bot_with_cron):
 def test_disable_cron_job_not_found(bot_with_cron):
     """disable_cron_job returns False when job doesn't exist."""
     assert disable_cron_job(bot_with_cron, "nonexistent") is False
+
+
+def test_edit_cron_job_message(bot_with_cron):
+    """edit_cron_job_message updates the message field."""
+    job = {"name": "test", "schedule": "0 9 * * *", "message": "Hello"}
+    add_cron_job(bot_with_cron, job)
+
+    assert edit_cron_job_message(bot_with_cron, "test", "New message") is True
+    result = get_cron_job(bot_with_cron, "test")
+    assert result["message"] == "New message"
+
+
+def test_edit_cron_job_message_not_found(bot_with_cron):
+    """edit_cron_job_message returns False when job doesn't exist."""
+    assert edit_cron_job_message(bot_with_cron, "nonexistent", "New") is False
+
+
+def test_edit_cron_job_message_preserves_other_fields(bot_with_cron):
+    """edit_cron_job_message only changes message, not other fields."""
+    job = {
+        "name": "test",
+        "schedule": "0 9 * * *",
+        "message": "Old",
+        "enabled": True,
+        "timezone": "Asia/Seoul",
+    }
+    add_cron_job(bot_with_cron, job)
+
+    edit_cron_job_message(bot_with_cron, "test", "New")
+    result = get_cron_job(bot_with_cron, "test")
+    assert result["message"] == "New"
+    assert result["name"] == "test"
+    assert result["schedule"] == "0 9 * * *"
+    assert result["enabled"] is True
+    assert result["timezone"] == "Asia/Seoul"
 
 
 # --- Validation tests ---
