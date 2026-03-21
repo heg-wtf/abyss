@@ -26,6 +26,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Path not found" }, { status: 404 });
   }
 
-  exec(`open "${resolvedPath}"`);
+  exec(`open "${resolvedPath}"`, (error) => {
+    if (error) console.error("Failed to open Finder:", error.message);
+  });
   return NextResponse.json({ ok: true });
 }
