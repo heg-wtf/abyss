@@ -166,6 +166,7 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
   🌏 timezone/language config
   🗜️ startup auto-compact
   ```
+- **Landing page update**: After release, update `docs/landing/` for cclaw.heg.wtf based on the released content
 
 ## Engineering Mindset
 
