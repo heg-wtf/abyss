@@ -9,3 +9,4 @@ build/
 *.log
 .playwright-mcp/
 .next/
+.claude/
