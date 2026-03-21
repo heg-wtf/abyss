@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModelBadge } from "@/components/status-badge";
+import { SessionList } from "@/components/session-list";
 import { MemoryEditor } from "@/components/memory-editor";
 import { CronEditor } from "@/components/cron-editor";
 
@@ -192,55 +193,10 @@ export default async function BotDetailPage({
         </TabsContent>
 
         <TabsContent value="sessions" className="mt-4">
-          {sessions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active sessions</p>
-          ) : (
-            <div className="space-y-3">
-              {sessions.map((session) => (
-                <Link
-                  key={session.chatId}
-                  href={`/bots/${name}/conversations/${session.chatId}`}
-                >
-                  <Card className="hover:border-primary/50 transition-colors cursor-pointer">
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-mono">
-                          chat_{session.chatId}
-                        </CardTitle>
-                        {session.hasSessionId && (
-                          <Badge variant="outline" className="text-xs">
-                            Active Session
-                          </Badge>
-                        )}
-                      </div>
-                      {session.lastActivity && (
-                        <CardDescription className="text-xs">
-                          Last activity:{" "}
-                          {session.lastActivity.toLocaleDateString()}{" "}
-                          {session.lastActivity.toLocaleTimeString()}
-                        </CardDescription>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex flex-wrap gap-1">
-                        {session.conversationFiles.map((file) => (
-                          <Badge
-                            key={file}
-                            variant="secondary"
-                            className="text-xs font-mono"
-                          >
-                            {file
-                              .replace("conversation-", "")
-                              .replace(".md", "")}
-                          </Badge>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </Link>
-              ))}
-            </div>
-          )}
+          <SessionList
+            botName={name}
+            initialSessions={JSON.parse(JSON.stringify(sessions))}
+          />
         </TabsContent>
 
         <TabsContent value="memory" className="mt-4">

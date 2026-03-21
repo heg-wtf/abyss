@@ -26,6 +26,11 @@ import {
   getDiskUsage,
   getSkillUsageByBots,
   deleteLogFiles,
+  deleteSession,
+  deleteConversation,
+  createSkill,
+  updateSkill,
+  deleteSkill,
 } from "../cclaw";
 
 let testHome: string;
@@ -418,6 +423,58 @@ describe("getSkill", () => {
   });
 });
 
+describe("createSkill / updateSkill / deleteSkill", () => {
+  it("creates a new skill with directory and files", () => {
+    const created = createSkill(
+      "my-tool",
+      { description: "My custom tool" },
+      "# My Tool\n\nInstructions",
+    );
+    expect(created).toBe(true);
+    const skill = getSkill("my-tool");
+    expect(skill.config?.name).toBe("my-tool");
+    expect(skill.config?.description).toBe("My custom tool");
+    expect(skill.skillMarkdown).toBe("# My Tool\n\nInstructions");
+  });
+
+  it("rejects creating a skill that already exists", () => {
+    createSkill("existing", { description: "First" }, "# First");
+    const duplicate = createSkill(
+      "existing",
+      { description: "Second" },
+      "# Second",
+    );
+    expect(duplicate).toBe(false);
+    expect(getSkill("existing").config?.description).toBe("First");
+  });
+
+  it("updates an existing skill config and markdown", () => {
+    createSkill("editable", { description: "Before" }, "# Before");
+    const updated = updateSkill(
+      "editable",
+      { description: "After", emoji: "🔧" },
+      "# After",
+    );
+    expect(updated).toBe(true);
+    const skill = getSkill("editable");
+    expect(skill.config?.description).toBe("After");
+    expect(skill.config?.emoji).toBe("🔧");
+    expect(skill.skillMarkdown).toBe("# After");
+  });
+
+  it("returns false when updating nonexistent skill", () => {
+    expect(updateSkill("nonexistent", { description: "x" })).toBe(false);
+  });
+
+  it("deletes a skill directory", () => {
+    createSkill("deletable", { description: "Gone soon" }, "# Delete me");
+    expect(listSkills().some((s) => s.name === "deletable")).toBe(true);
+    const deleted = deleteSkill("deletable");
+    expect(deleted).toBe(true);
+    expect(listSkills().some((s) => s.name === "deletable")).toBe(false);
+  });
+});
+
 // --- Sessions ---
 
 describe("getBotSessions", () => {
@@ -490,6 +547,71 @@ describe("getConversation", () => {
     );
     const content = getConversation("testbot", "12345", "260310");
     expect(content).toBe("User: Hello\nAssistant: Hi!");
+  });
+});
+
+describe("deleteConversation", () => {
+  it("deletes a specific conversation file", () => {
+    setupBasicConfig();
+    const sessionDir = path.join(
+      testHome,
+      "bots",
+      "testbot",
+      "sessions",
+      "chat_12345",
+    );
+    writeFile(path.join(sessionDir, "conversation-260310.md"), "# Day 1");
+    writeFile(path.join(sessionDir, "conversation-260311.md"), "# Day 2");
+
+    const result = deleteConversation("testbot", "12345", "260310");
+    expect(result).toBe(true);
+    expect(fs.existsSync(path.join(sessionDir, "conversation-260310.md"))).toBe(
+      false,
+    );
+    expect(fs.existsSync(path.join(sessionDir, "conversation-260311.md"))).toBe(
+      true,
+    );
+  });
+
+  it("returns false for nonexistent file", () => {
+    setupBasicConfig();
+    expect(deleteConversation("testbot", "12345", "999999")).toBe(false);
+  });
+
+  it("rejects invalid date format", () => {
+    setupBasicConfig();
+    expect(deleteConversation("testbot", "12345", "../hack")).toBe(false);
+  });
+});
+
+describe("deleteSession", () => {
+  it("deletes an existing session directory", () => {
+    setupBasicConfig();
+    const sessionDir = path.join(
+      testHome,
+      "bots",
+      "testbot",
+      "sessions",
+      "chat_12345",
+    );
+    writeFile(path.join(sessionDir, "conversation-260310.md"), "# Test");
+    writeFile(path.join(sessionDir, ".claude_session_id"), "uuid-123");
+
+    expect(getBotSessions("testbot")).toHaveLength(1);
+    const result = deleteSession("testbot", "12345");
+    expect(result).toBe(true);
+    expect(getBotSessions("testbot")).toHaveLength(0);
+    expect(fs.existsSync(sessionDir)).toBe(false);
+  });
+
+  it("returns false for nonexistent bot", () => {
+    expect(deleteSession("nonexistent", "12345")).toBe(false);
+  });
+
+  it("returns true for nonexistent session (rmSync force)", () => {
+    setupBasicConfig();
+    const result = deleteSession("testbot", "99999");
+    expect(result).toBe(true);
   });
 });
 

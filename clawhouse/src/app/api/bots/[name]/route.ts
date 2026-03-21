@@ -5,6 +5,7 @@ import {
   getCronJobs,
   getBotSessions,
   getBotMemory,
+  deleteSession,
 } from "@/lib/cclaw";
 
 export async function GET(
@@ -28,6 +29,22 @@ export async function GET(
     sessions,
     memory,
   });
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ name: string }> },
+) {
+  const { name } = await params;
+  const { chatId } = await request.json();
+  if (!chatId) {
+    return NextResponse.json({ error: "chatId is required" }, { status: 400 });
+  }
+  const deleted = deleteSession(name, chatId);
+  if (!deleted) {
+    return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+  return NextResponse.json({ success: true });
 }
 
 export async function PUT(

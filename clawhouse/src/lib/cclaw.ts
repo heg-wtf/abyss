@@ -287,6 +287,57 @@ export function getSkill(name: string): {
   return { config, skillMarkdown, mcpConfig };
 }
 
+export function createSkill(
+  name: string,
+  config: Partial<SkillConfig>,
+  skillMarkdown: string,
+): boolean {
+  const skillDir = cclawPath("skills", name);
+  if (fs.existsSync(skillDir)) return false;
+  fs.mkdirSync(skillDir, { recursive: true });
+  const fullConfig: SkillConfig = {
+    name,
+    type: "cli",
+    status: "active",
+    description: "",
+    allowed_tools: [],
+    environment_variables: [],
+    environment_variable_values: {},
+    required_commands: [],
+    install_hints: {},
+    ...config,
+  };
+  writeYaml(path.join(skillDir, "skill.yaml"), fullConfig);
+  fs.writeFileSync(path.join(skillDir, "SKILL.md"), skillMarkdown);
+  return true;
+}
+
+export function updateSkill(
+  name: string,
+  config: Partial<SkillConfig>,
+  skillMarkdown?: string,
+): boolean {
+  const skillDir = cclawPath("skills", name);
+  if (!fs.existsSync(skillDir)) return false;
+  const existing = readYaml<SkillConfig>(path.join(skillDir, "skill.yaml"));
+  if (!existing) return false;
+  writeYaml(path.join(skillDir, "skill.yaml"), { ...existing, ...config });
+  if (skillMarkdown !== undefined) {
+    fs.writeFileSync(path.join(skillDir, "SKILL.md"), skillMarkdown);
+  }
+  return true;
+}
+
+export function deleteSkill(name: string): boolean {
+  const skillDir = cclawPath("skills", name);
+  try {
+    fs.rmSync(skillDir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // --- Sessions ---
 
 export function getBotSessions(botName: string): SessionInfo[] {
@@ -332,6 +383,40 @@ export function getBotSessions(botName: string): SessionInfo[] {
       });
   } catch {
     return [];
+  }
+}
+
+export function deleteSession(botName: string, chatId: string): boolean {
+  const botPath = getBotPath(botName);
+  if (!botPath) return false;
+  const sessionDir = path.join(botPath, "sessions", `chat_${chatId}`);
+  try {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function deleteConversation(
+  botName: string,
+  chatId: string,
+  date: string,
+): boolean {
+  const botPath = getBotPath(botName);
+  if (!botPath) return false;
+  if (!/^\d{6}$/.test(date)) return false;
+  const filePath = path.join(
+    botPath,
+    "sessions",
+    `chat_${chatId}`,
+    `conversation-${date}.md`,
+  );
+  try {
+    fs.unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
