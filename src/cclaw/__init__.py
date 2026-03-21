@@ -1,3 +1,3 @@
 """cclaw - Telegram + Claude Code personal AI assistant."""
 
-__version__ = "2026.03.20"
+__version__ = "2026.03.21"
