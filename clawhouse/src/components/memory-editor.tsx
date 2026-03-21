@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import Markdown from "react-markdown";
 
 interface MemoryEditorProps {
   title: string;
@@ -89,9 +90,9 @@ export function MemoryEditor({
             className="font-mono text-sm"
           />
         ) : content ? (
-          <pre className="text-sm whitespace-pre-wrap bg-muted p-4 rounded-md">
-            {content}
-          </pre>
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <Markdown>{content}</Markdown>
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">No content</p>
         )}
