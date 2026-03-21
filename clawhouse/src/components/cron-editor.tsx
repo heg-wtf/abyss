@@ -87,16 +87,14 @@ function JobEditForm({
 
   const toggleJobType = () => {
     if (oneShot) {
-      const { at, delete_after_run, ...rest } = job;
       onUpdate(index, {
-        ...rest,
+        ...job,
         schedule: "0 9 * * *",
         at: undefined,
         delete_after_run: undefined,
       });
     } else {
-      const { schedule, ...rest } = job;
-      onUpdate(index, { ...rest, schedule: undefined, at: "" });
+      onUpdate(index, { ...job, schedule: undefined, at: "" });
     }
   };
 

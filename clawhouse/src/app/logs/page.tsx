@@ -57,26 +57,38 @@ export default function LogsPage() {
   };
 
   useEffect(() => {
-    fetchFiles();
+    fetch("/api/logs")
+      .then((r) => r.json())
+      .then((data) => {
+        setFiles(data.files || []);
+        setDaemonLogs(data.daemonLogs || []);
+        if (data.files?.length > 0) {
+          setSelectedFile(data.files[0]);
+        }
+      });
   }, []);
 
   useEffect(() => {
     if (!selectedFile) return;
-    setLoading(true);
     let cancelled = false;
     const controller = new AbortController();
-    fetch(`/api/logs?file=${selectedFile}&limit=1000`, {
-      signal: controller.signal,
-    })
-      .then((r) => r.json())
-      .then((data) => {
+    const loadContent = async () => {
+      setLoading(true);
+      try {
+        const r = await fetch(`/api/logs?file=${selectedFile}&limit=1000`, {
+          signal: controller.signal,
+        });
+        const data = await r.json();
         if (!cancelled) {
           setLines(data.lines || []);
           setTotalLines(data.totalLines || 0);
           setLoading(false);
         }
-      })
-      .catch(() => {});
+      } catch {
+        /* aborted */
+      }
+    };
+    loadContent();
     return () => {
       cancelled = true;
       controller.abort();

@@ -26,12 +26,6 @@ export function Sidebar() {
       .catch(() => {});
   }, []);
 
-  // Auto-expand on first navigation into a section
-  useEffect(() => {
-    if (pathname.startsWith("/bots")) setBotsOpen(true);
-    if (pathname.startsWith("/skills")) setSkillsOpen(true);
-  }, []);
-
   const botsActive = pathname.startsWith("/bots");
   const skillsActive = pathname.startsWith("/skills");
 
