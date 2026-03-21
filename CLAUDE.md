@@ -49,7 +49,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `session.py` | Session directories, conversation logs (`conversation-YYMMDD.md`), Claude session ID (`--resume`), memory CRUD (bot + global) |
 | `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity, group-aware routing |
 | `group.py` | Group CRUD (create/delete/list/bind/unbind), shared conversation log, shared workspace, role detection |
-| `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, graceful shutdown |
+| `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, dashboard status (port fallback), graceful shutdown |
 | `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection, `import_skill_from_github()` / `parse_github_url()` (GitHub import) |
 | `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support, `edit_cron_job_message()` (message-only edit) |
 | `heartbeat.py` | Periodic situation awareness, active hours check, HEARTBEAT_OK detection |
@@ -181,6 +181,8 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 - Server components for data pages, client components for editors
 - API routes in `src/app/api/` as thin wrappers over `lib/cclaw.ts`
 - `cclaw dashboard start/stop/restart/status` subcommands, PID file at `~/.cclaw/clawhouse.pid`
+- Status detection: PID file first, then port 3847 fallback (detects externally started dashboards)
+- `cclaw status` includes dashboard info (local + network URL)
 - `--daemon` for background mode, `--port` for custom port (default 3847)
 - Bundled in wheel via `force-include` (clawhouse_data/), works after `pip install`
 - Skills split: `BUILTIN_SKILL_NAMES` Set in `lib/cclaw.ts` classifies built-in vs custom

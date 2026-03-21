@@ -187,20 +187,32 @@ def _ensure_node_modules(clawhouse_directory: Path) -> None:
         subprocess.run(["npm", "install"], cwd=clawhouse_directory, check=True)
 
 
+def _is_port_in_use(port: int) -> bool:
+    """Check if a port is in use."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+        return connection.connect_ex(("localhost", port)) == 0
+
+
 def _is_dashboard_running() -> tuple[bool, int | None]:
     """Check if dashboard is running. Returns (running, pid)."""
     pid_file = _dashboard_pid_file()
-    if not pid_file.exists():
-        return False, None
-    try:
-        pid = int(pid_file.read_text().strip())
-        import os
+    if pid_file.exists():
+        try:
+            lines = pid_file.read_text().strip().splitlines()
+            pid = int(lines[0])
+            import os
 
-        os.kill(pid, 0)
-        return True, pid
-    except (ValueError, ProcessLookupError, PermissionError):
-        pid_file.unlink(missing_ok=True)
-        return False, None
+            os.kill(pid, 0)
+            return True, pid
+        except (ValueError, ProcessLookupError, PermissionError, IndexError):
+            pid_file.unlink(missing_ok=True)
+
+    # Fallback: check if default port is in use
+    if _is_port_in_use(DASHBOARD_DEFAULT_PORT):
+        return True, None
+    return False, None
 
 
 def _get_dashboard_port() -> int | None:
@@ -330,10 +342,12 @@ def dashboard_status() -> None:
     port = _get_dashboard_port()
 
     if running:
+        display_port = port or DASHBOARD_DEFAULT_PORT
         console.print("[green]ClawHouse is running[/green]")
-        console.print(f"  PID:  {pid}")
-        console.print(f"  Port: {port}")
-        console.print(f"  URL:  http://localhost:{port}")
+        if pid:
+            console.print(f"  PID:  {pid}")
+        console.print(f"  Port: {display_port}")
+        console.print(f"  URL:  http://localhost:{display_port}")
     else:
         console.print("[yellow]ClawHouse is not running.[/yellow]")
 

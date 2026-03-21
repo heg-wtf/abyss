@@ -430,6 +430,55 @@ def stop_bots() -> None:
     _stop_qmd_daemon()
 
 
+def _is_port_in_use(port: int) -> bool:
+    """Check if a port is in use."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+        return connection.connect_ex(("localhost", port)) == 0
+
+
+def _show_dashboard_status() -> None:
+    """Show ClawHouse dashboard status if running."""
+    default_port = 3847
+    dashboard_pid_file = cclaw_home() / "clawhouse.pid"
+    pid = None
+    port = default_port
+
+    if dashboard_pid_file.exists():
+        try:
+            lines = dashboard_pid_file.read_text().strip().splitlines()
+            pid = int(lines[0])
+            os.kill(pid, 0)
+            port = int(lines[1]) if len(lines) > 1 else default_port
+        except (ValueError, ProcessLookupError, PermissionError, IndexError):
+            pid = None
+
+    if pid is None and not _is_port_in_use(default_port):
+        console.print("[dim]Dashboard: not running[/dim]")
+        return
+
+    local_ip = _get_local_ip()
+    if pid:
+        console.print(f"[green]Dashboard: running (PID {pid})[/green]")
+    else:
+        console.print("[green]Dashboard: running[/green]")
+    console.print(f"  Local: http://localhost:{port}")
+    console.print(f"  Network: http://{local_ip}:{port}")
+
+
+def _get_local_ip() -> str:
+    """Get local network IP address."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
+            connection.connect(("8.8.8.8", 80))
+            return connection.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
 def show_status() -> None:
     """Show the running status of cclaw."""
     from rich.table import Table
@@ -451,6 +500,8 @@ def show_status() -> None:
             pid_file.unlink(missing_ok=True)
     else:
         console.print("[yellow]Status: not running[/yellow]")
+
+    _show_dashboard_status()
 
     if not config or not config.get("bots"):
         console.print("[yellow]No bots configured.[/yellow]")
