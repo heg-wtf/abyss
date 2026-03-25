@@ -206,7 +206,7 @@ def _is_dashboard_running() -> tuple[bool, int | None]:
 
             os.kill(pid, 0)
             return True, pid
-        except (ValueError, ProcessLookupError, PermissionError, IndexError):
+        except (ValueError, ProcessLookupError, PermissionError, IndexError, OverflowError):
             pid_file.unlink(missing_ok=True)
 
     # Fallback: check if default port is in use
@@ -233,8 +233,8 @@ def dashboard_start(
     daemon: bool = typer.Option(False, help="Run as background process"),
 ) -> None:
     """Start ClawHouse web dashboard."""
+    import os
     import subprocess
-    import sys
 
     from rich.console import Console
 
@@ -272,7 +272,7 @@ def dashboard_start(
         console.print("  Stop: cclaw dashboard stop")
     else:
         pid_file = _dashboard_pid_file()
-        pid_file.write_text(f"{sys.maxsize}\n{port}\n")
+        pid_file.write_text(f"{os.getpid()}\n{port}\n")
         console.print(f"[green]Starting ClawHouse on http://localhost:{port}[/green]")
         try:
             subprocess.run(
@@ -284,7 +284,6 @@ def dashboard_start(
             console.print("\n[yellow]Dashboard stopped.[/yellow]")
         finally:
             pid_file.unlink(missing_ok=True)
-            sys.exit(0)
 
 
 @dashboard_app.command("stop")
@@ -1892,7 +1891,7 @@ def group_status(
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, 0)
                 return True
-            except (ValueError, ProcessLookupError, OSError):
+            except (ValueError, ProcessLookupError, OSError, OverflowError):
                 return False
         return False
 

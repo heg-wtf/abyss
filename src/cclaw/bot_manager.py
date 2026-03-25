@@ -451,7 +451,7 @@ def _show_dashboard_status() -> None:
             pid = int(lines[0])
             os.kill(pid, 0)
             port = int(lines[1]) if len(lines) > 1 else default_port
-        except (ValueError, ProcessLookupError, PermissionError, IndexError):
+        except (ValueError, ProcessLookupError, PermissionError, IndexError, OverflowError):
             pid = None
 
     if pid is None and not _is_port_in_use(default_port):
