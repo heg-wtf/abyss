@@ -79,6 +79,12 @@ def _write_session_settings(working_directory: str, allowed_tools: list[str]) ->
     permissions["allow"] = sorted(existing_allow)
     settings["permissions"] = permissions
 
+    # Disable hooks inherited from ~/.claude/settings.json
+    # to prevent user-level plugins (e.g. context-mode) from
+    # interfering with bot's claude -p subprocess.
+    if "hooks" not in settings:
+        settings["hooks"] = {}
+
     with open(settings_path, "w") as settings_file:
         json.dump(settings, settings_file, indent=2)
 

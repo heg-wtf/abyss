@@ -367,6 +367,36 @@ def test_write_session_settings_creates_file(tmp_path):
         settings = json.load(file)
     assert "Bash(reminders:*)" in settings["permissions"]["allow"]
     assert "Bash(osascript:*)" in settings["permissions"]["allow"]
+    assert settings["hooks"] == {}
+
+
+def test_write_session_settings_disables_inherited_hooks(tmp_path):
+    """_write_session_settings adds empty hooks to prevent global hook inheritance."""
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    with open(settings_path) as file:
+        settings = json.load(file)
+    assert "hooks" in settings
+    assert settings["hooks"] == {}
+
+
+def test_write_session_settings_preserves_existing_hooks(tmp_path):
+    """_write_session_settings does not overwrite hooks if already defined."""
+    claude_directory = tmp_path / ".claude"
+    claude_directory.mkdir()
+    existing = {
+        "permissions": {"allow": []},
+        "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]},
+    }
+    with open(claude_directory / "settings.json", "w") as file:
+        json.dump(existing, file)
+
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+
+    with open(claude_directory / "settings.json") as file:
+        settings = json.load(file)
+    assert settings["hooks"] == {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}
 
 
 def test_write_session_settings_merges_existing(tmp_path):
