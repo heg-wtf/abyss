@@ -368,6 +368,7 @@ def test_write_session_settings_creates_file(tmp_path):
     assert "Bash(reminders:*)" in settings["permissions"]["allow"]
     assert "Bash(osascript:*)" in settings["permissions"]["allow"]
     assert settings["hooks"] == {}
+    assert settings["enabledPlugins"] == {}
 
 
 def test_write_session_settings_disables_inherited_hooks(tmp_path):
@@ -381,6 +382,21 @@ def test_write_session_settings_disables_inherited_hooks(tmp_path):
     assert settings["hooks"] == {}
 
 
+def test_write_session_settings_disables_inherited_plugins(tmp_path):
+    """_write_session_settings adds empty enabledPlugins to disable user plugins.
+
+    Plugin hooks (e.g. context-mode) are loaded from ~/.claude/plugins/ and
+    are NOT disabled by setting hooks: {} alone. Must also disable plugins.
+    """
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    with open(settings_path) as file:
+        settings = json.load(file)
+    assert "enabledPlugins" in settings
+    assert settings["enabledPlugins"] == {}
+
+
 def test_write_session_settings_preserves_existing_hooks(tmp_path):
     """_write_session_settings does not overwrite hooks if already defined."""
     claude_directory = tmp_path / ".claude"
@@ -388,6 +404,7 @@ def test_write_session_settings_preserves_existing_hooks(tmp_path):
     existing = {
         "permissions": {"allow": []},
         "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": []}]},
+        "enabledPlugins": {"some-plugin@marketplace": True},
     }
     with open(claude_directory / "settings.json", "w") as file:
         json.dump(existing, file)
@@ -397,6 +414,7 @@ def test_write_session_settings_preserves_existing_hooks(tmp_path):
     with open(claude_directory / "settings.json") as file:
         settings = json.load(file)
     assert settings["hooks"] == {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}
+    assert settings["enabledPlugins"] == {"some-plugin@marketplace": True}
 
 
 def test_write_session_settings_merges_existing(tmp_path):

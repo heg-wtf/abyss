@@ -85,6 +85,14 @@ def _write_session_settings(working_directory: str, allowed_tools: list[str]) ->
     if "hooks" not in settings:
         settings["hooks"] = {}
 
+    # Disable all plugins for bot subprocess sessions.
+    # Plugin hooks (e.g. context-mode) are loaded from
+    # ~/.claude/plugins/ and are NOT overridden by the
+    # hooks: {} above. Bots run autonomously and should
+    # not inherit interactive-session plugins.
+    if "enabledPlugins" not in settings:
+        settings["enabledPlugins"] = {}
+
     with open(settings_path, "w") as settings_file:
         json.dump(settings, settings_file, indent=2)
 
