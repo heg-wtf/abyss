@@ -1,4 +1,4 @@
-# abyss (claude-claw)
+# abyss
 
 <p align="center">
   <img src="abyss-logo.png" width="160" alt="abyss logo" />
@@ -410,38 +410,6 @@ uv run pytest -v             # Verbose
 # Evaluation tests (real Claude API, excluded from CI)
 uv run pytest tests/evaluation/ -v
 ```
-
-## Migration from cclaw
-
-abyss was previously called `cclaw`. If you had `cclaw` installed, follow these steps to keep your bot data:
-
-```bash
-# 1. Stop the old daemon (if running as a launchd service)
-launchctl unload ~/Library/LaunchAgents/com.cclaw.daemon.plist 2>/dev/null || true
-rm -f ~/Library/LaunchAgents/com.cclaw.daemon.plist
-
-# 2. Uninstall the old package
-pipx uninstall cclaw || uv tool uninstall cclaw || pip uninstall cclaw
-
-# 3. Move your data directory
-mv ~/.cclaw ~/.abyss
-
-# 4. If you set CCLAW_HOME in your shell rc, rename it to ABYSS_HOME
-
-# 5. Install abyss
-uv tool install abyss   # or: pipx install abyss
-
-# 6. Verify
-abyss doctor
-
-# 7. Re-register the QMD collection (name changed from cclaw-conversations to abyss-conversations)
-abyss skills setup qmd
-
-# 8. Re-start the daemon
-abyss start --daemon
-```
-
-Telegram bot tokens, conversation history, cron jobs, skills, and memory are preserved when you `mv ~/.cclaw ~/.abyss`.
 
 ## License
 

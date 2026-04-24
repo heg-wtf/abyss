@@ -361,7 +361,7 @@ abyss dashboard status             # Show status
 cd abysscope && npx next dev --port 3847
 ```
 
-Port `3847` chosen as default (CLAW on phone keypad: C=2, L=5, A=2, W=9 → too long, just use 3847).
+Port `3847` chosen as default.
 
 ## Decisions
 
