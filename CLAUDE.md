@@ -35,6 +35,11 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 - Async tests: `@pytest.mark.asyncio`
 - `tests/evaluation/`: Real Claude API calls, excluded from CI (`--ignore=tests/evaluation`)
 
+## Git
+
+- Commit messages in English (gitmoji format, e.g., `🔥 remove: strip legacy cclaw paths`)
+- Subject line ≤ 72 chars, body optional for non-obvious "why"
+
 ## Code Structure
 
 ### Core Modules

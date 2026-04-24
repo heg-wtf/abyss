@@ -33,7 +33,6 @@ export function Sidebar() {
     <aside className="flex h-screen w-56 flex-col border-r bg-muted/30">
       <div className="flex h-14 items-center border-b px-4">
         <Link href="/" className="flex items-center gap-2 font-semibold">
-          <img src="/logo.png" alt="Abysscope" className="h-8 w-auto" />
           <span>Abysscope</span>
         </Link>
       </div>
