@@ -1,9 +1,5 @@
 # abyss
 
-<p align="center">
-  <img src="abyss-logo.png" width="160" alt="abyss logo" />
-</p>
-
 Personal AI assistant powered by Telegram + Claude Code.
 A multi-bot, file-based session system that runs locally on Mac.
 
