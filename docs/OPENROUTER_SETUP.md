@@ -74,6 +74,12 @@ backend:
 
 You can edit `bot.yaml` directly to tune `max_tokens` (default 4096) or `base_url` (default OpenRouter endpoint; only override for self-hosted gateways).
 
+### Notes on `max_history` and dedup
+
+- `max_history` from `bot.yaml` is the source of truth for the per-bot context window. Raising or lowering it takes effect on the next message — no daemon restart required (the LLM backend cache refreshes config in place).
+- abyss logs the user's incoming message to `conversation-YYMMDD.md` *before* calling the backend. The OpenRouter adapter knows this and drops a trailing duplicate so the model never sees the current user message twice. Older turns with different content stay in history untouched.
+- A caller (cron / heartbeat / future plugin) can pass an explicit `request.max_history` larger than 20 to widen the window for a single run; this overrides the bot-level cap. Setting it to 0 disables history replay entirely.
+
 ## Step 4 — start the bot
 
 ```

@@ -938,10 +938,19 @@ limit=)`. Reads its DB path from the `ABYSS_CONVERSATION_DB` environment
 variable.
 
 `claude_runner._prepare_skill_config` writes per-session `.mcp.json`
-that auto-injects this server with the bot's DB path computed from the
-session's working directory (`<workdir>.parents[1] / "conversation.db"`).
+that auto-injects this server with the bot's DB path. The bot
+directory is resolved by `_resolve_bot_dir_from_working_directory()`,
+which walks up the working directory's parents until it finds an entry
+whose parent is named `bots` — so DM (`bots/<name>/sessions/chat_*`),
+cron (`bots/<name>/cron_sessions/<job>`), and heartbeat
+(`bots/<name>/heartbeat_sessions/`) flows all hit the same per-bot DB.
 Tool name in Claude's view:
 `mcp__conversation_search__search_conversations`.
+
+`reindex_session_dir` and `reindex_group_dir` always wipe the index —
+even when the source markdown directory is missing — so deleting
+source content actually purges the DB instead of leaving stale rows
+searchable.
 
 ### Auto-injection
 
@@ -1026,6 +1035,26 @@ OpenAI's chat completions schema:
   from the most recent ``conversation-YYMMDD.md`` files (newest first,
   reversed before sending).
 * The current user prompt closes the list.
+
+**User-message dedup.** abyss handlers call ``log_conversation``
+*before* ``backend.run``, so the markdown log already contains the
+current user message. ``_build_messages`` drops a trailing user turn
+whose stripped content matches ``request.user_prompt`` so the model
+never sees the same input twice (which would inflate token usage and
+bias responses toward the repeated text). Older turns with different
+content are preserved.
+
+**``max_history`` precedence.** ``_resolve_max_history(request)``
+returns:
+
+1. ``request.max_history`` when the caller explicitly raised it above
+   the dataclass default of 20 (lets cron / heartbeat widen the
+   window for a one-off run).
+2. Otherwise the bot-configured ``backend.max_history``.
+3. Otherwise 0 (history disabled).
+
+``_load_history`` loads ``cap + 1`` entries so dedup never trims
+below the configured window; the final cap is enforced after dedup.
 
 Streaming uses SSE (``stream=True`` with
 ``stream_options={"include_usage": true}``) and forwards each
