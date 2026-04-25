@@ -185,6 +185,20 @@ Total issues found: 35 (Critical: 5, High: 4, Medium: 5, Low/Info: 21)
 - **Description**: All bots in a group read the full shared conversation log. A compromised member bot could exfiltrate conversation history from other members' delegated tasks.
 - **Mitigation**: Accept as inherent to shared context model. Limit sensitive data to bot-specific memory (MEMORY.md) rather than group conversation.
 
+### 36. Conversation Search Index Stores Plaintext
+
+- **File**: `src/abyss/conversation_index.py`
+- **Status**: Equivalent risk to existing markdown logs
+- **Description**: `conversation.db` (SQLite FTS5) stores every user / assistant message in plaintext. Same exposure surface as `conversation-YYMMDD.md` files. Disk read by any process running as the user is sufficient to recover history.
+- **Mitigation**: `backup.py` packages everything under `~/.abyss/` into an AES-256 zip — DB included. No additional protections at rest beyond that. Use OS-level full-disk encryption for stronger guarantees.
+
+### 37. SQL Injection Surface in conversation_search
+
+- **File**: `src/abyss/conversation_index.py` (`search`)
+- **Status**: Mitigated
+- **Description**: The `search_conversations` MCP tool accepts a free-form `query` string from Claude. The underlying `MATCH ?` query is fully parameterized; FTS5 rejects malformed expressions cleanly without leaking schema. Date / chat_id / role filters are bound parameters as well.
+- **Verification**: `tests/test_conversation_index.py::test_search_query_with_sql_metacharacters_safe` confirms `' OR 1=1 --` and `'; DROP TABLE messages; --` are rejected without side effects.
+
 ## Positive Findings
 
 - All YAML loading uses `yaml.safe_load()` (no arbitrary code execution)

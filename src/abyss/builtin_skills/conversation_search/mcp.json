@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "conversation_search": {
+      "command": "python",
+      "args": ["-m", "abyss.mcp_servers.conversation_search"],
+      "env": {
+        "ABYSS_CONVERSATION_DB": "${ABYSS_CONVERSATION_DB}"
+      }
+    }
+  }
+}

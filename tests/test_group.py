@@ -440,3 +440,27 @@ def test_list_workspace_files(temp_abyss_home):
     assert len(files) == 2
     assert "scraper.py" in files
     assert "test_scraper.py" in files
+
+
+# ─── conversation_index integration ────────────────────────────────────────
+
+
+def test_log_to_shared_conversation_indexes(temp_abyss_home):
+    """log_to_shared_conversation mirrors into the group's FTS5 index."""
+    from abyss import conversation_index
+    from abyss.group import group_directory, log_to_shared_conversation
+
+    create_group(name="dev_team", orchestrator="dev_lead", members=["coder"])
+    log_to_shared_conversation("dev_team", "user", "스크래퍼 만들어줘")
+    log_to_shared_conversation("dev_team", "@coder_bot", "구현 완료")
+
+    db_path = group_directory("dev_team") / "conversation.db"
+    assert db_path.exists()
+
+    user_hits = conversation_index.search(db_path, query="스크래퍼")
+    assert len(user_hits) == 1
+    assert user_hits[0].role == "user"
+
+    bot_hits = conversation_index.search(db_path, query="구현")
+    assert len(bot_hits) == 1
+    assert bot_hits[0].role == "@coder_bot"

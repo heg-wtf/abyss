@@ -504,3 +504,45 @@ def test_clear_global_memory(abyss_home):
     clear_global_memory()
     assert load_global_memory() is None
     assert not (abyss_home / "GLOBAL_MEMORY.md").exists()
+
+
+# ─── conversation_index integration ────────────────────────────────────────
+
+
+def test_log_conversation_indexes_into_bot_db(bot_path):
+    """log_conversation appends to the bot's FTS5 index in addition to markdown."""
+    from abyss import conversation_index
+    from abyss.session import ensure_session, log_conversation
+
+    chat_id = 4242
+    session_dir = ensure_session(bot_path, chat_id)
+    log_conversation(session_dir, "user", "강남 카페에서 미팅")
+    log_conversation(session_dir, "assistant", "어느 카페였나요?")
+
+    db_path = bot_path / "conversation.db"
+    assert db_path.exists(), "log_conversation should create the FTS5 DB"
+    hits = conversation_index.search(db_path, query="강남")
+    assert len(hits) == 1
+    assert hits[0].chat_id == f"chat_{chat_id}"
+    assert hits[0].role == "user"
+    assert "강남" in hits[0].content
+
+
+def test_log_conversation_failure_does_not_break_markdown(bot_path, monkeypatch):
+    """If indexing fails, markdown still persists."""
+    from abyss.session import ensure_session, log_conversation
+
+    chat_id = 5151
+    session_dir = ensure_session(bot_path, chat_id)
+
+    def _broken_append(*args, **kwargs):
+        raise RuntimeError("simulated index failure")
+
+    monkeypatch.setattr("abyss.conversation_index.append", _broken_append)
+
+    # Should not raise — log_conversation must swallow the index error.
+    log_conversation(session_dir, "user", "should still be written to markdown")
+
+    md_files = list(session_dir.glob("conversation-*.md"))
+    assert len(md_files) == 1
+    assert "should still be written" in md_files[0].read_text(encoding="utf-8")

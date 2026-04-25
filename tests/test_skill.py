@@ -643,3 +643,45 @@ def test_collect_skill_allowed_tools(temp_abyss_home):
 def test_collect_skill_allowed_tools_no_allowed_tools_field(setup_tool_skill):
     """collect_skill_allowed_tools returns empty for skill without allowed_tools."""
     assert collect_skill_allowed_tools(["tool-skill"]) == []
+
+
+# ─── conversation_search auto-injection ───────────────────────────────────
+
+
+@pytest.mark.enable_conversation_search
+def test_compose_claude_md_auto_injects_conversation_search():
+    """When FTS5 is available, the conversation_search SKILL.md is auto-included."""
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+        skill_names=[],
+    )
+    assert "Available Skills" in result
+    assert "## conversation_search" in result
+    assert "search_conversations" in result
+
+
+@pytest.mark.enable_conversation_search
+def test_compose_claude_md_no_duplicate_conversation_search():
+    """If conversation_search is already in skill_names, it is not duplicated."""
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+        skill_names=["conversation_search"],
+    )
+    occurrences = result.count("## conversation_search")
+    assert occurrences == 1
+
+
+def test_compose_claude_md_skips_conversation_search_when_unavailable():
+    """Without FTS5, the auto-inject is skipped."""
+    # Default conftest fixture stubs is_fts5_available to False.
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+        skill_names=[],
+    )
+    assert "## conversation_search" not in result

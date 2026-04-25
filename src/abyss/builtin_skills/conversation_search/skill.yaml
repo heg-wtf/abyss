@@ -1,0 +1,8 @@
+name: conversation_search
+emoji: "🧠"
+description: "Search past bot conversations via SQLite FTS5 (auto-injected when FTS5 is available)"
+type: mcp
+status: builtin
+required_commands: []
+allowed_tools:
+  - "mcp__conversation_search__search_conversations"

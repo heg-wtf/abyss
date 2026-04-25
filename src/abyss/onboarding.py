@@ -88,9 +88,34 @@ def check_python() -> EnvironmentCheckResult:
     return EnvironmentCheckResult(name="Python", available=True, version=version, message="")
 
 
+def check_sqlite_fts5() -> EnvironmentCheckResult:
+    """Verify the bundled SQLite supports FTS5 — needed for conversation search."""
+    import sqlite3
+
+    from abyss.conversation_index import is_fts5_available
+
+    available = is_fts5_available()
+    if not available:
+        return EnvironmentCheckResult(
+            name="SQLite FTS5",
+            available=False,
+            version=sqlite3.sqlite_version,
+            message=(
+                "SQLite FTS5 extension is not compiled into this Python's "
+                "sqlite3 module. Conversation search will be disabled."
+            ),
+        )
+    return EnvironmentCheckResult(
+        name="SQLite FTS5",
+        available=True,
+        version=sqlite3.sqlite_version,
+        message="",
+    )
+
+
 def run_environment_checks() -> list[EnvironmentCheckResult]:
     """Run all environment checks and return results."""
-    return [check_python(), check_node(), check_claude_code()]
+    return [check_python(), check_node(), check_claude_code(), check_sqlite_fts5()]
 
 
 def display_environment_checks(checks: list[EnvironmentCheckResult]) -> bool:

@@ -201,6 +201,19 @@ QMD (local markdown search engine) is automatically available to all bots when t
 - **Collection auto-setup**: `_ensure_qmd_conversations_collection()` registers `abyss-conversations` collection pointing to `~/.abyss/bots/` with `**/conversation-*.md` glob on startup
 - **Test isolation**: `tests/conftest.py` autouse fixture patches `shutil.which` to return `None` for `"qmd"`, preventing auto-injection in tests. QMD-specific tests in `test_qmd.py` override with explicit mocking
 
+### 13.5. Conversation Search (SQLite FTS5)
+
+`conversation_search` is a built-in MCP tool that gives Claude full-text recall over the user's past messages. Markdown logs (`conversation-YYMMDD.md` for bots, `YYMMDD.md` for groups) remain the source of truth — the FTS5 SQLite database is a parallel cache that can be rebuilt at any time with `abyss reindex`.
+
+- **Storage**: `~/.abyss/bots/<name>/conversation.db` per bot, `~/.abyss/groups/<name>/conversation.db` per group. Single virtual `messages` table tokenized as `unicode61 + remove_diacritics 2`. Schema versioned.
+- **Append on log**: `session.log_conversation()` and `group.log_to_shared_conversation()` mirror each markdown write into the index. Failures log a warning and never raise — markdown is canonical.
+- **MCP server**: `abyss.mcp_servers.conversation_search` is a stdio JSON-RPC server. One tool: `search_conversations(query, since=, until=, chat_id=, role=, limit=)`. Reads its DB path from `ABYSS_CONVERSATION_DB`.
+- **Auto-injection**: `compose_claude_md()` appends the built-in `conversation_search/SKILL.md` whenever `is_fts5_available()` is True. `_prepare_skill_config()` writes per-session `.mcp.json` with the bot's DB path resolved from `working_directory.parents[1]`.
+- **Reindex**: `abyss reindex --bot|--group|--all` wipes and rebuilds from markdown.
+- **Bot startup**: `bot_manager._ensure_conversation_index()` runs `ensure_schema` for the bot DB and every group it belongs to.
+- **Test isolation**: autouse fixture in `tests/conftest.py` stubs `is_fts5_available()` to False; opt-in tests use `@pytest.mark.enable_conversation_search`.
+- **Limits**: BM25 keyword only (no semantic / embedding). No Korean morpheme analysis (prefix matches only). Group DB is indexed but the auto-injected MCP currently exposes only the bot's DB.
+
 ### 14. Session Continuity
 
 Each message runs `claude -p` as a new process, but maintains conversation context.

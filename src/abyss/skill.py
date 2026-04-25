@@ -293,6 +293,21 @@ def _load_qmd_builtin_markdown() -> str | None:
     return skill_md.read_text(encoding="utf-8")
 
 
+def _load_conversation_search_builtin_markdown() -> str | None:
+    """Load the conversation_search built-in SKILL.md, if present."""
+    from abyss.builtin_skills import get_builtin_skill_path
+
+    builtin_path = get_builtin_skill_path("conversation_search")
+    if builtin_path is None:
+        return None
+
+    skill_md = builtin_path / "SKILL.md"
+    if not skill_md.exists():
+        return None
+
+    return skill_md.read_text(encoding="utf-8")
+
+
 def compose_group_context(bot_name: str, group_config: dict[str, Any]) -> str:
     """Generate group context section for CLAUDE.md.
 
@@ -469,6 +484,17 @@ def compose_claude_md(
             qmd_markdown = _load_qmd_builtin_markdown()
             if qmd_markdown:
                 active_skills.append(("qmd", qmd_markdown))
+
+    # Auto-inject conversation_search instructions when the SQLite FTS5
+    # index is available. The actual MCP server is wired in claude_runner.
+    from abyss.conversation_index import is_fts5_available
+
+    if is_fts5_available():
+        already_included = any(name == "conversation_search" for name, _ in active_skills)
+        if not already_included:
+            cs_markdown = _load_conversation_search_builtin_markdown()
+            if cs_markdown:
+                active_skills.append(("conversation_search", cs_markdown))
 
     if active_skills:
         sections.append("")

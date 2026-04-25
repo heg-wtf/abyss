@@ -76,6 +76,7 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
             regenerate_bot_claude_md(name)
 
             bot_path = bot_directory(name)
+            _ensure_conversation_index(name, bot_path)
             handlers = make_handlers(name, bot_path, bot_config)
 
             application = Application.builder().token(token).build()
@@ -234,6 +235,29 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
 
 
 QMD_DEFAULT_PORT = 8181
+
+
+def _ensure_conversation_index(bot_name: str, bot_path: Path) -> None:
+    """Initialize the FTS5 conversation index for a bot and its groups.
+
+    Idempotent — safe to call on every bot start.
+    """
+    from abyss import conversation_index
+    from abyss.group import find_groups_for_bot
+
+    if not conversation_index.is_fts5_available():
+        logger.warning("SQLite FTS5 not available; conversation_search index disabled")
+        return
+
+    bot_db = bot_path / "conversation.db"
+    conversation_index.ensure_schema(bot_db)
+
+    for group_config in find_groups_for_bot(bot_name):
+        group_name = group_config.get("name")
+        if not group_name:
+            continue
+        group_db = conversation_index.db_path_for_group(group_name)
+        conversation_index.ensure_schema(group_db)
 
 
 def _ensure_qmd_conversations_collection() -> None:

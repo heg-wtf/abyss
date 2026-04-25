@@ -234,6 +234,30 @@ def log_to_shared_conversation(
     with open(conversation_file, "a") as file:
         file.write(entry)
 
+    _index_group_message(group_name, sender, content)
+
+
+def _index_group_message(group_name: str, sender: str, content: str) -> None:
+    """Mirror a shared-conversation message into the group's FTS5 index.
+
+    Best-effort — markdown remains the source of truth, so any failure
+    is logged and swallowed.
+    """
+    try:
+        from abyss import conversation_index
+
+        db_path = group_directory(group_name) / "conversation.db"
+        conversation_index.append(
+            db_path,
+            chat_id="group",
+            role=sender,
+            content=content,
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("failed to index group message in %s", group_name)
+
 
 def load_shared_conversation(
     group_name: str,

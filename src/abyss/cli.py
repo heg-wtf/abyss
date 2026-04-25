@@ -108,6 +108,77 @@ def doctor() -> None:
 
 
 @app.command()
+def reindex(
+    bot: str = typer.Option(
+        None, "--bot", "-b", help="Rebuild a specific bot's conversation index."
+    ),
+    group: str = typer.Option(
+        None, "--group", "-g", help="Rebuild a specific group's conversation index."
+    ),
+    all_scopes: bool = typer.Option(
+        False, "--all", help="Rebuild every bot and group conversation index."
+    ),
+) -> None:
+    """Rebuild SQLite FTS5 conversation indexes from markdown logs.
+
+    Markdown is the source of truth — this command wipes the affected
+    DB and re-inserts every parsed message. Safe to run repeatedly.
+    """
+    from rich.console import Console
+
+    from abyss import conversation_index
+    from abyss.config import bot_directory, load_config
+    from abyss.group import group_directory, list_groups
+
+    console = Console()
+
+    if not conversation_index.is_fts5_available():
+        console.print("[red]SQLite FTS5 is not available — cannot reindex.[/red]")
+        raise typer.Exit(code=1)
+
+    selected_bots: list[str] = []
+    selected_groups: list[str] = []
+
+    if bot:
+        selected_bots = [bot]
+    if group:
+        selected_groups = [group]
+    if all_scopes:
+        config = load_config() or {}
+        selected_bots = [entry["name"] for entry in config.get("bots", [])]
+        selected_groups = [entry["name"] for entry in list_groups()]
+
+    if not selected_bots and not selected_groups:
+        console.print("[yellow]Specify --bot NAME, --group NAME, or --all.[/yellow]")
+        raise typer.Exit(code=2)
+
+    total = 0
+    for bot_name in selected_bots:
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            console.print(f"[yellow]Skip {bot_name}: bot directory missing.[/yellow]")
+            continue
+        sessions_root = bot_path / "sessions"
+        db_path = bot_path / "conversation.db"
+        count = conversation_index.reindex_session_dir(db_path, sessions_root)
+        console.print(f"[green]bot[/green] {bot_name}: indexed {count} message(s)")
+        total += count
+
+    for group_name in selected_groups:
+        gdir = group_directory(group_name)
+        if not gdir.exists():
+            console.print(f"[yellow]Skip group {group_name}: directory missing.[/yellow]")
+            continue
+        conv_dir = gdir / "conversation"
+        db_path = gdir / "conversation.db"
+        count = conversation_index.reindex_group_dir(db_path, conv_dir)
+        console.print(f"[green]group[/green] {group_name}: indexed {count} message(s)")
+        total += count
+
+    console.print(f"[bold]Reindex complete: {total} total messages.[/bold]")
+
+
+@app.command()
 def backup() -> None:
     """Backup ~/.abyss/ to a password-encrypted zip file."""
     import getpass

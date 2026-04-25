@@ -250,6 +250,36 @@ QMD_ALLOWED_TOOLS = [
     "mcp__qmd__status",
 ]
 
+CONVERSATION_SEARCH_ALLOWED_TOOLS = [
+    "mcp__conversation_search__search_conversations",
+]
+
+
+def _conversation_search_mcp_server(working_directory: str) -> dict | None:
+    """Build the conversation_search MCP entry for ``working_directory``.
+
+    Returns ``None`` when the working directory does not look like a bot
+    session path (we expect ``<bot_dir>/sessions/chat_*/`` so the bot dir
+    is at ``parents[1]``). The MCP server is invoked via ``sys.executable``
+    so it inherits the abyss venv and can ``import abyss``.
+    """
+    import sys
+
+    work_path = Path(working_directory).resolve()
+    try:
+        bot_dir = work_path.parents[1]
+    except IndexError:
+        return None
+
+    db_path = bot_dir / "conversation.db"
+    return {
+        "conversation_search": {
+            "command": sys.executable,
+            "args": ["-m", "abyss.mcp_servers.conversation_search"],
+            "env": {"ABYSS_CONVERSATION_DB": str(db_path)},
+        }
+    }
+
 
 def _prepare_skill_config(
     working_directory: str,
@@ -261,13 +291,28 @@ def _prepare_skill_config(
     Returns (allowed_tools, environment_variables).
 
     Also auto-injects QMD MCP config if QMD CLI is available on the system,
-    regardless of whether the bot has the qmd skill attached.
+    regardless of whether the bot has the qmd skill attached, and
+    auto-injects the conversation_search MCP server when SQLite FTS5 is
+    available.
     """
     from abyss.skill import (
         collect_skill_allowed_tools,
         collect_skill_environment_variables,
         merge_mcp_configs,
     )
+
+    work_path = Path(working_directory)
+    if not work_path.is_dir():
+        # Without a real session directory we cannot safely write
+        # .mcp.json or settings.json. Production callers always create
+        # the directory first; this guard keeps unit tests that pass
+        # placeholder paths from blowing up on the auto-injected MCP
+        # config write.
+        logger.debug(
+            "skipping skill config; working_directory missing: %s",
+            working_directory,
+        )
+        return None, None
 
     mcp_config = None
     allowed_tools: list[str] = []
@@ -292,6 +337,21 @@ def _prepare_skill_config(
         for tool in QMD_ALLOWED_TOOLS:
             if tool not in allowed_tools:
                 allowed_tools.append(tool)
+
+    # Auto-inject conversation_search MCP when the local SQLite supports
+    # FTS5 (effectively always on macOS / Linux).
+    from abyss.conversation_index import is_fts5_available
+
+    if is_fts5_available():
+        cs_server = _conversation_search_mcp_server(working_directory)
+        if cs_server is not None:
+            if mcp_config:
+                mcp_config["mcpServers"].update(cs_server)
+            else:
+                mcp_config = {"mcpServers": dict(cs_server)}
+            for tool in CONVERSATION_SEARCH_ALLOWED_TOOLS:
+                if tool not in allowed_tools:
+                    allowed_tools.append(tool)
 
     # Write MCP config file
     if mcp_config:

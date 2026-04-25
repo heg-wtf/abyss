@@ -240,6 +240,37 @@ def log_conversation(session_directory: Path, role: str, content: str) -> None:
     with open(conversation_file, "a") as file:
         file.write(entry)
 
+    _index_session_message(session_directory, role, content)
+
+
+def _index_session_message(session_directory: Path, role: str, content: str) -> None:
+    """Mirror a logged message into the bot's FTS5 conversation index.
+
+    Best-effort: markdown remains the source of truth, so any failure
+    here (sqlite, import, unexpected bug) is swallowed.
+    """
+    try:
+        bot_dir = session_directory.parents[1]
+    except IndexError:
+        return
+
+    chat_id = session_directory.name
+
+    try:
+        from abyss import conversation_index
+
+        db_path = bot_dir / "conversation.db"
+        conversation_index.append(
+            db_path,
+            chat_id=chat_id,
+            role=role,
+            content=content,
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).exception("failed to index session message in %s", bot_dir)
+
 
 def list_workspace_files(session_directory: Path) -> list[str]:
     """List all files in the session's workspace directory.

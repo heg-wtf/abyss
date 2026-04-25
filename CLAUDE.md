@@ -61,6 +61,8 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `token_compact.py` | Compress MEMORY.md/SKILL.md/HEARTBEAT.md via `claude -p` one-shot |
 | `backup.py` | AES-256 encrypted zip of `~/.abyss/` |
 | `utils.py` | Message splitting, Markdown-to-HTML conversion, logging, IME-compatible CLI input |
+| `conversation_index.py` | SQLite FTS5 index over conversation markdown logs. Per-bot DB at `bots/<name>/conversation.db`, per-group at `groups/<name>/conversation.db`. Markdown stays the source of truth |
+| `mcp_servers/conversation_search.py` | stdio MCP server exposing `search_conversations` tool over the FTS5 index. Spawned automatically per Claude call when FTS5 is available |
 
 ### Built-in Skills
 

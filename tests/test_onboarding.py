@@ -63,13 +63,15 @@ def test_check_claude_code_missing():
 
 
 def test_run_environment_checks():
-    """run_environment_checks returns a list of 3 checks."""
+    """run_environment_checks returns Python, Node, Claude Code, and SQLite FTS5 checks."""
     with patch("abyss.onboarding.shutil.which", return_value="/usr/bin/fake"):
         with patch("abyss.onboarding.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(stdout="v1.0.0\n", stderr="")
             checks = run_environment_checks()
-            assert len(checks) == 3
+            assert len(checks) == 4
             assert all(isinstance(c, EnvironmentCheckResult) for c in checks)
+            names = {c.name for c in checks}
+            assert "SQLite FTS5" in names
 
 
 @pytest.mark.asyncio

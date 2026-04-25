@@ -885,3 +885,101 @@ All CLI input prompts use Python's builtin `input()` wrapped in two utility func
 
 - `typer.confirm()` (y/n prompts): These work correctly with IME since they only accept single ASCII characters.
 - `typer.Argument` / `typer.Option`: These are parsed from command-line arguments, not interactive prompts.
+
+
+## Conversation Search (SQLite FTS5)
+
+Cross-session keyword recall, exposed to Claude as the
+`search_conversations` MCP tool. Markdown logs remain the source of
+truth — the FTS5 index is a parallel, rebuildable cache.
+
+### Storage layout
+
+| Scope | Markdown source | FTS5 DB |
+|---|---|---|
+| Bot DM | `~/.abyss/bots/<name>/sessions/chat_*/conversation-YYMMDD.md` | `~/.abyss/bots/<name>/conversation.db` |
+| Group | `~/.abyss/groups/<name>/conversation/YYMMDD.md` | `~/.abyss/groups/<name>/conversation.db` |
+
+### Schema
+
+```sql
+CREATE VIRTUAL TABLE messages USING fts5(
+    content,
+    chat_id UNINDEXED,
+    role UNINDEXED,
+    ts UNINDEXED,
+    date_key UNINDEXED,        -- 'YYYY-MM-DD' for cheap range filter
+    tokenize='unicode61 remove_diacritics 2'
+);
+```
+
+`schema_version` is a small companion table (`v1`). Tokenizer is
+`unicode61` with `remove_diacritics 2` — handles Korean / English /
+emoji at word-segment level (no morpheme analysis).
+
+### Indexing trigger
+
+- `session.log_conversation(...)` — appends each user / assistant message.
+- `group.log_to_shared_conversation(...)` — appends each group sender's
+  line.
+
+Both call `conversation_index.append(...)` after the markdown write.
+Failures here log a warning and never raise — markdown is canonical, so
+an index miss is recoverable via `abyss reindex`.
+
+`bot_manager._ensure_conversation_index(...)` runs `ensure_schema` for
+the bot DB and every group the bot belongs to at startup.
+
+### MCP server
+
+`abyss.mcp_servers.conversation_search` is a stdio JSON-RPC server. One
+tool: `search_conversations(query, since=, until=, chat_id=, role=,
+limit=)`. Reads its DB path from the `ABYSS_CONVERSATION_DB` environment
+variable.
+
+`claude_runner._prepare_skill_config` writes per-session `.mcp.json`
+that auto-injects this server with the bot's DB path computed from the
+session's working directory (`<workdir>.parents[1] / "conversation.db"`).
+Tool name in Claude's view:
+`mcp__conversation_search__search_conversations`.
+
+### Auto-injection
+
+Two layers:
+
+1. **SKILL.md** — `compose_claude_md()` checks `is_fts5_available()`
+   and appends `conversation_search/SKILL.md` from the built-in skills
+   package, mirroring the QMD pattern.
+2. **MCP server** — `_prepare_skill_config()` adds the server entry
+   with substituted DB path.
+
+Tests gate the auto-injection behind a pytest marker
+(`@pytest.mark.enable_conversation_search`); the autouse fixture in
+`tests/conftest.py` stubs `is_fts5_available` to `False` so legacy
+tests do not need updates.
+
+### Reindexing
+
+```
+abyss reindex --bot <name>
+abyss reindex --group <name>
+abyss reindex --all
+```
+
+Wipes the affected `conversation.db` and re-parses every markdown file
+in the scope. Header formats:
+
+- Session: `## user (YYYY-MM-DD HH:MM:SS UTC)\n\n{body}\n` then blank
+  line before the next header.
+- Group: `[HH:MM:SS] sender: content` (single line; date inferred from
+  `YYMMDD.md` filename).
+
+### Limits
+
+- Keyword (BM25) only — no semantic / embedding search yet.
+- No Korean morpheme analysis. Prefix queries hit, but suffix matches
+  do not (e.g. `짬뽕집` does not match a search for `짬뽕`; `짬뽕`
+  matches `짬뽕집`).
+- Group conversations are indexed but the auto-injected MCP server
+  currently exposes only the bot's own DB. Group-scope search via MCP
+  is future work.

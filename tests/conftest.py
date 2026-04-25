@@ -24,3 +24,25 @@ def disable_qmd_auto_inject(monkeypatch):
         return original_which(name, *args, **kwargs)
 
     monkeypatch.setattr(shutil, "which", _which_without_qmd)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "enable_conversation_search: opt-in to the real "
+        "conversation_search auto-injection (FTS5 stays enabled).",
+    )
+
+
+@pytest.fixture(autouse=True)
+def disable_conversation_search_auto_inject(request, monkeypatch):
+    """Disable conversation_search auto-injection in tests by default.
+
+    The real ``is_fts5_available()`` returns True on every modern Python
+    build, which would cause the auto-injected SKILL.md and MCP server
+    to leak into tests that pre-date this feature. Tests that exercise
+    the feature opt back in with ``@pytest.mark.enable_conversation_search``.
+    """
+    if "enable_conversation_search" in request.keywords:
+        return
+    monkeypatch.setattr("abyss.conversation_index.is_fts5_available", lambda: False)
