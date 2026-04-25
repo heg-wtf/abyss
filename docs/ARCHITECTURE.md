@@ -214,6 +214,28 @@ QMD (local markdown search engine) is automatically available to all bots when t
 - **Test isolation**: autouse fixture in `tests/conftest.py` stubs `is_fts5_available()` to False; opt-in tests use `@pytest.mark.enable_conversation_search`.
 - **Limits**: BM25 keyword only (no semantic / embedding). No Korean morpheme analysis (prefix matches only). Group DB is indexed but the auto-injected MCP currently exposes only the bot's DB.
 
+### 13.6. LLM Backend Abstraction
+
+abyss routes every model call through `abyss.llm.LLMBackend`. Two backends ship today; new ones drop in by registering a class with `abyss.llm.register`.
+
+- **`claude_code` (default)** — `ClaudeCodeBackend` wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent capabilities preserved: built-in tools, MCP, skills, `/resume`, `/cancel`. No bot.yaml change required.
+- **`openrouter` (opt-in)** — `OpenRouterBackend` talks to OpenRouter's OpenAI-compatible chat completions endpoint via `httpx`. Text-only: no tool invocation, no MCP, no `/resume` continuity. Conversation history is replayed from `conversation-YYMMDD.md` (capped at `max_history`) and `CLAUDE.md` is sent as the system prompt.
+- **Per-bot selection** via `bot.yaml`:
+
+  ```yaml
+  backend:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: anthropic/claude-haiku-4.5
+    max_history: 20
+    max_tokens: 4096
+  ```
+
+- **Per-bot caching** — `get_or_create(bot_name, bot_config)` keeps one backend instance per bot for the process lifetime so HTTPX clients / SDK pools are shared across handler / cron / heartbeat call sites. The instance's `bot_config` is refreshed on each lookup so config changes take effect without process restart (backend type changes still recreate).
+- **Cancellation** — `/cancel` looks up the cached backend (`cached_backend(bot_name)`) and calls `backend.cancel(session_key)`. Falls through to legacy Claude Code cancel paths for bots that haven't yet warmed up a backend.
+- **Shutdown** — `bot_manager` calls `abyss.llm.close_all()` before stopping the SDK pool so HTTPX clients release sockets cleanly.
+- **Tests** — `tests/conftest.py::clear_llm_backend_cache` autouse fixture wipes the per-bot cache between tests. End-to-end OpenRouter tests under `tests/evaluation/test_openrouter_e2e.py` are gated on `OPENROUTER_API_KEY` and excluded from CI.
+
 ### 14. Session Continuity
 
 Each message runs `claude -p` as a new process, but maintains conversation context.

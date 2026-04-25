@@ -24,8 +24,6 @@ from abyss.claude_runner import (
     cancel_process,
     cancel_sdk_session,
     is_process_running,
-    run_claude_streaming_with_sdk,
-    run_claude_with_sdk,
 )
 from abyss.config import (
     DEFAULT_MODEL,
@@ -44,6 +42,7 @@ from abyss.group import (
     log_to_shared_conversation,
     unbind_group,
 )
+from abyss.llm import LLMRequest, cached_backend, get_or_create
 from abyss.session import (
     clear_bot_memory,
     clear_claude_session_id,
@@ -363,6 +362,22 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         chat_id = update.effective_chat.id
         group_config = find_group_by_chat_id(chat_id)
 
+        async def _cancel_for(target_bot: str, target_key: str) -> bool:
+            """Cancel a bot's running task via its cached backend.
+
+            Falls back to the legacy Claude Code cancel paths so bots
+            that haven't yet talked to their backend (no cached
+            instance) still get cancelled.
+            """
+            backend = cached_backend(target_bot)
+            if backend is not None and await backend.cancel(target_key):
+                return True
+            if await cancel_sdk_session(target_key):
+                return True
+            if is_process_running(target_key) and cancel_process(target_key):
+                return True
+            return False
+
         if group_config is not None:
             my_role = get_my_role(group_config, bot_name)
             if my_role != "orchestrator":
@@ -370,19 +385,13 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
             cancelled_bots: list[str] = []
 
-            # Cancel orchestrator's own process (SDK first, then subprocess)
             orchestrator_key = f"{bot_name}:{chat_id}"
-            if await cancel_sdk_session(orchestrator_key):
-                cancelled_bots.append(bot_name)
-            elif is_process_running(orchestrator_key) and cancel_process(orchestrator_key):
+            if await _cancel_for(bot_name, orchestrator_key):
                 cancelled_bots.append(bot_name)
 
-            # Cancel all member bots' processes
             for member_name in group_config.get("members", []):
                 member_key = f"{member_name}:{chat_id}"
-                if await cancel_sdk_session(member_key):
-                    cancelled_bots.append(member_name)
-                elif is_process_running(member_key) and cancel_process(member_key):
+                if await _cancel_for(member_name, member_key):
                     cancelled_bots.append(member_name)
 
             if cancelled_bots:
@@ -393,22 +402,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             return
 
         session_key = f"{bot_name}:{chat_id}"
-
-        # Try SDK interrupt first, then subprocess fallback
-        sdk_cancelled = await cancel_sdk_session(session_key)
-        if sdk_cancelled:
+        if await _cancel_for(bot_name, session_key):
             await update.effective_message.reply_text("\u26d4 Execution cancelled.")
             return
 
-        if not is_process_running(session_key):
-            await update.effective_message.reply_text("No running process to cancel.")
-            return
-
-        cancelled = cancel_process(session_key)
-        if cancelled:
-            await update.effective_message.reply_text("\u26d4 Execution cancelled.")
-        else:
-            await update.effective_message.reply_text("No running process to cancel.")
+        await update.effective_message.reply_text("No running process to cancel.")
 
     async def streaming_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /streaming command - toggle streaming mode on/off."""
@@ -472,19 +470,23 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
 
         typing_task = asyncio.create_task(send_typing_periodically())
 
+        backend = get_or_create(bot_name, bot_config)
+        request = LLMRequest(
+            bot_name=bot_name,
+            bot_path=bot_path,
+            session_directory=session_directory or working_directory,
+            working_directory=working_directory,
+            bot_config=bot_config,
+            user_prompt=prompt,
+            timeout=command_timeout,
+            session_key=lock_key,
+            extra_arguments=tuple(claude_arguments) if claude_arguments else (),
+            claude_session_id=claude_session_id,
+            resume_session=resume_session,
+        )
         try:
-            response = await run_claude_with_sdk(
-                working_directory=working_directory,
-                message=prompt,
-                extra_arguments=claude_arguments if claude_arguments else None,
-                timeout=command_timeout,
-                session_key=lock_key,
-                model=current_model,
-                skill_names=attached_skills if attached_skills else None,
-                claude_session_id=claude_session_id,
-                resume_session=resume_session,
-                session_directory=session_directory,
-            )
+            result = await backend.run(request)
+            response = result.text
         finally:
             typing_task.cancel()
 
@@ -587,19 +589,22 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 logger.debug("Stream fallback edit failed: %s", edit_error)
                 stream_stopped = True
 
-        response = await run_claude_streaming_with_sdk(
+        backend = get_or_create(bot_name, bot_config)
+        request = LLMRequest(
+            bot_name=bot_name,
+            bot_path=bot_path,
+            session_directory=session_directory or working_directory,
             working_directory=working_directory,
-            message=prompt,
-            on_text_chunk=on_text_chunk,
-            extra_arguments=claude_arguments if claude_arguments else None,
+            bot_config=bot_config,
+            user_prompt=prompt,
             timeout=command_timeout,
             session_key=lock_key,
-            model=current_model,
-            skill_names=attached_skills if attached_skills else None,
+            extra_arguments=tuple(claude_arguments) if claude_arguments else (),
             claude_session_id=claude_session_id,
             resume_session=resume_session,
-            session_directory=session_directory,
         )
+        result = await backend.run_streaming(request, on_text_chunk)
+        response = result.text
 
         # Clear the draft by sending an empty draft before final message
         if draft_started and not draft_failed:

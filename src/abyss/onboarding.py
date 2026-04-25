@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -311,9 +312,71 @@ def _restart_daemon() -> None:
         console.print("  Restart manually: [bold]abyss stop && abyss start --daemon[/bold]")
 
 
-def create_bot(token: str, bot_info: dict, profile: dict) -> None:
+def prompt_backend_choice() -> dict | None:
+    """Ask the user which LLM backend the bot should use.
+
+    Returns ``None`` for the default Claude Code backend (no extra YAML
+    block needed) or a dict suitable for the ``backend:`` block when the
+    user picks a non-default backend.
+    """
+    from abyss.utils import prompt_input
+
+    console.print("\n[bold]Choose LLM backend.[/bold]")
+    console.print()
+    console.print("  1. Claude Code (default — full agent: tools, MCP, skills, /resume)")
+    console.print("  2. OpenRouter (text-only — cheap/fast chat across 200+ models)")
+    console.print()
+
+    choice = prompt_input("Backend [1]:", default="1").strip()
+    if choice in ("", "1"):
+        return None
+
+    if choice != "2":
+        console.print("[yellow]Unknown choice; defaulting to Claude Code.[/yellow]")
+        return None
+
+    console.print()
+    console.print(
+        "[yellow]Note:[/yellow] OpenRouter is text-only. "
+        "Skills with MCP tools will not be invokable. "
+        "Conversation history is replayed from disk; --resume continuity is unavailable."
+    )
+    console.print()
+
+    api_key_env = (
+        prompt_input("API key environment variable [OPENROUTER_API_KEY]:") or "OPENROUTER_API_KEY"
+    ).strip()
+    model = (
+        prompt_input("Model id [anthropic/claude-haiku-4.5]:") or "anthropic/claude-haiku-4.5"
+    ).strip()
+    max_history_raw = prompt_input("Max history turns [20]:") or "20"
+    try:
+        max_history = max(0, int(max_history_raw))
+    except ValueError:
+        max_history = 20
+
+    if not os.environ.get(api_key_env):
+        console.print(
+            f"[yellow]Warning:[/yellow] ${api_key_env} is not set. "
+            "Export it before starting this bot."
+        )
+
+    return {
+        "type": "openrouter",
+        "api_key_env": api_key_env,
+        "model": model,
+        "max_history": max_history,
+    }
+
+
+def create_bot(
+    token: str,
+    bot_info: dict,
+    profile: dict,
+    backend_block: dict | None = None,
+) -> None:
     """Create bot configuration files."""
-    bot_config = {
+    bot_config: dict = {
         "telegram_token": token,
         "telegram_username": bot_info["username"],
         "telegram_botname": bot_info["botname"],
@@ -333,6 +396,8 @@ def create_bot(token: str, bot_info: dict, profile: dict) -> None:
             },
         },
     }
+    if backend_block is not None:
+        bot_config["backend"] = backend_block
 
     save_bot_config(profile["name"], bot_config)
     add_bot_to_config(profile["name"])
@@ -381,7 +446,8 @@ def add_bot() -> None:
     """Add a new bot (reuses onboarding Steps 2+3)."""
     token, bot_info = prompt_telegram_token()
     profile = prompt_bot_profile()
-    create_bot(token, bot_info, profile)
+    backend_block = prompt_backend_choice()
+    create_bot(token, bot_info, profile, backend_block=backend_block)
 
 
 def _display_sdk_status() -> None:

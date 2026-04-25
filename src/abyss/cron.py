@@ -372,8 +372,8 @@ async def execute_cron_job(
         bot_config: The bot's configuration.
         send_message_callback: Async callable(user_id, text) to send messages.
     """
-    from abyss.claude_runner import run_claude
     from abyss.config import DEFAULT_MODEL
+    from abyss.llm import LLMRequest, get_or_create
     from abyss.utils import markdown_to_telegram_html, split_message
 
     job_name = job["name"]
@@ -405,14 +405,24 @@ async def execute_cron_job(
     logger.info("Executing cron job '%s' for bot '%s'", job_name, bot_name)
 
     try:
-        response = await run_claude(
+        cron_bot_config = {
+            **bot_config,
+            "model": model,
+            "skills": job_skills,
+        }
+        backend = get_or_create(bot_name, cron_bot_config)
+        request = LLMRequest(
+            bot_name=bot_name,
+            bot_path=bot_directory(bot_name),
+            session_directory=Path(working_directory),
             working_directory=working_directory,
-            message=message,
+            bot_config=cron_bot_config,
+            user_prompt=message,
             timeout=command_timeout,
             session_key=f"cron:{bot_name}:{job_name}",
-            model=model,
-            skill_names=job_skills if job_skills else None,
         )
+        result = await backend.run(request)
+        response = result.text
     except Exception as error:
         response = f"Cron job '{job_name}' failed: {error}"
         logger.error("Cron job '%s' failed: %s", job_name, error)

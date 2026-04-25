@@ -192,9 +192,11 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     finally:
         console.print("\nStopping bots...")
 
-        # Close SDK client pool first
+        # Close cached LLM backends (httpx clients, etc.) and SDK pool
+        from abyss.llm import close_all as close_all_backends
         from abyss.sdk_client import close_pool
 
+        await close_all_backends()
         await close_pool()
 
         # Kill all running Claude Code subprocesses
