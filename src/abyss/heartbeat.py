@@ -200,8 +200,8 @@ async def execute_heartbeat(
         bot_config: The bot's configuration.
         send_message_callback: Async callable(chat_id, text, ...) to send messages.
     """
-    from abyss.claude_runner import run_claude
     from abyss.config import DEFAULT_MODEL
+    from abyss.llm import LLMRequest, get_or_create
     from abyss.utils import markdown_to_telegram_html, split_message
 
     model = bot_config.get("model", DEFAULT_MODEL)
@@ -237,14 +237,24 @@ async def execute_heartbeat(
     logger.info("Executing heartbeat for bot '%s'", bot_name)
 
     try:
-        response = await run_claude(
+        heartbeat_bot_config = {
+            **bot_config,
+            "model": model,
+            "skills": attached_skills,
+        }
+        backend = get_or_create(bot_name, heartbeat_bot_config)
+        request = LLMRequest(
+            bot_name=bot_name,
+            bot_path=bot_directory(bot_name),
+            session_directory=Path(working_directory),
             working_directory=working_directory,
-            message=message,
+            bot_config=heartbeat_bot_config,
+            user_prompt=message,
             timeout=command_timeout,
             session_key=f"heartbeat:{bot_name}",
-            model=model,
-            skill_names=attached_skills if attached_skills else None,
         )
+        result = await backend.run(request)
+        response = result.text
     except Exception as error:
         response = f"Heartbeat failed: {error}"
         logger.error("Heartbeat for '%s' failed: %s", bot_name, error)

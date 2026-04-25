@@ -199,6 +199,27 @@ Total issues found: 35 (Critical: 5, High: 4, Medium: 5, Low/Info: 21)
 - **Description**: The `search_conversations` MCP tool accepts a free-form `query` string from Claude. The underlying `MATCH ?` query is fully parameterized; FTS5 rejects malformed expressions cleanly without leaking schema. Date / chat_id / role filters are bound parameters as well.
 - **Verification**: `tests/test_conversation_index.py::test_search_query_with_sql_metacharacters_safe` confirms `' OR 1=1 --` and `'; DROP TABLE messages; --` are rejected without side effects.
 
+### 38. OpenRouter API Key in Environment Variable
+
+- **File**: `src/abyss/llm/openrouter.py` (`_auth_headers`)
+- **Status**: Acceptable for personal use; document for users
+- **Description**: The OpenRouter backend reads the API key from a process-level environment variable (default name `OPENROUTER_API_KEY`, overridable per-bot via `backend.api_key_env`). The key never lands in `bot.yaml`. Any process running as the same OS user can read the key via `/proc/<pid>/environ` or by attaching a debugger.
+- **Mitigation**: documentation calls this out; users who need stronger protection should run abyss under a dedicated OS user, scope OpenRouter keys to specific models, or move to a secret manager (macOS Keychain integration is a follow-up). The key is never logged: errors mention only the env var name, not the value.
+
+### 39. OpenRouter Sends Conversations to a Third Party
+
+- **File**: `src/abyss/llm/openrouter.py`
+- **Status**: By design; user-visible
+- **Description**: When a bot's backend is `openrouter`, every user message — plus the system prompt (`CLAUDE.md`) and the last `max_history` turns from disk — is transmitted to OpenRouter and the underlying model provider. This is the same trust posture as Claude Code calling Anthropic, but the *set* of providers is broader (200+ third parties).
+- **Mitigation**: opt-in per bot. Default backend (Claude Code) routes only to Anthropic. Onboarding flow surfaces the trade-off. Users handling sensitive data (PCI, PII, internal-only) should keep those bots on the default backend.
+
+### 40. OpenRouter Output Echo (Markdown Injection)
+
+- **File**: `src/abyss/handlers.py` (Telegram HTML conversion)
+- **Status**: Equivalent risk to existing Claude responses
+- **Description**: Model-generated text is rendered to Telegram via `markdown_to_telegram_html`, which escapes raw HTML before applying conversion. OpenRouter responses can contain adversarial markdown but the existing escape pipeline applies.
+- **Mitigation**: re-using the same conversion path means no new code path to audit. Slack adapter (separate plan) will need its own escape policy when it lands.
+
 ## Positive Findings
 
 - All YAML loading uses `yaml.safe_load()` (no arbitrary code execution)

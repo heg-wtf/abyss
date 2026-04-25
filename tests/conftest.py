@@ -35,6 +35,21 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True)
+def clear_llm_backend_cache():
+    """Reset cached LLM backend instances between tests.
+
+    The ``abyss.llm.registry`` cache persists ``ClaudeCodeBackend`` /
+    ``OpenRouterBackend`` instances per bot for the lifetime of the
+    process. Tests that exercise the same bot name with different
+    configs must start from a clean slate.
+    """
+    from abyss.llm import registry
+
+    yield
+    registry._INSTANCES.clear()
+
+
+@pytest.fixture(autouse=True)
 def disable_conversation_search_auto_inject(request, monkeypatch):
     """Disable conversation_search auto-injection in tests by default.
 

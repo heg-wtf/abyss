@@ -5,8 +5,8 @@ Personal AI assistant: Telegram + Claude Code. Runs locally on Mac.
 ## Tech Stack
 
 - Python >= 3.11, uv package manager
-- Typer (CLI), Rich (output), python-telegram-bot v21+ (async), PyYAML (config), croniter (cron)
-- Runs Claude Code CLI as subprocess (`claude -p`), with Python Agent SDK for session continuity
+- Typer (CLI), Rich (output), python-telegram-bot v21+ (async), PyYAML (config), croniter (cron), httpx (HTTP for OpenRouter)
+- LLM backends: Claude Code CLI (`claude -p`) + Python Agent SDK (default), OpenRouter (text-only chat against 200+ models, opt-in per bot)
 
 ## Dev Commands
 
@@ -63,6 +63,10 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `utils.py` | Message splitting, Markdown-to-HTML conversion, logging, IME-compatible CLI input |
 | `conversation_index.py` | SQLite FTS5 index over conversation markdown logs. Per-bot DB at `bots/<name>/conversation.db`, per-group at `groups/<name>/conversation.db`. Markdown stays the source of truth |
 | `mcp_servers/conversation_search.py` | stdio MCP server exposing `search_conversations` tool over the FTS5 index. Spawned automatically per Claude call when FTS5 is available |
+| `llm/base.py` | `LLMBackend` Protocol, `LLMRequest`, `LLMResult`. Backend-agnostic envelope used by handlers / cron / heartbeat |
+| `llm/registry.py` | `register`, `get_backend`, `get_or_create` (per-bot cache), `close_all` for shutdown |
+| `llm/claude_code.py` | `ClaudeCodeBackend` wrapping `claude_runner` (subprocess + Agent SDK). Default backend |
+| `llm/openrouter.py` | `OpenRouterBackend` — text-only chat against any OpenRouter model. No tools, no resume, replays history from disk |
 
 ### Built-in Skills
 

@@ -106,6 +106,10 @@ abyss has a **skill system** that extends your bot's capabilities with tools and
 | 📚 QMD | Search markdown knowledge bases (BM25 + vector) via [QMD](https://github.com/tobi/qmd) MCP | [Guide](docs/skills/QMD.md) |
 | 🧠 Conversation Search | Recall past bot conversations via SQLite FTS5 (auto-injected when FTS5 is available) | — |
 
+### LLM Backends
+
+Default: **Claude Code** (`claude -p` + Python Agent SDK) — full agent with tools, MCP, skills, `--resume`. **OpenRouter** is available per-bot for text-only chat against 200+ models when you want speed / cost over agent capabilities. Choose during `abyss bot add`. See [docs/OPENROUTER_SETUP.md](docs/OPENROUTER_SETUP.md).
+
 ```bash
 abyss skills builtins          # List available built-in skills
 abyss skills install <name>    # Install a built-in skill
