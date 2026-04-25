@@ -1,9 +1,11 @@
 # Plan: LLM backend abstraction with OpenRouter adapter
 
 - date: 2026-04-25
-- status: draft
+- status: done
 - author: claude
-- approved-by: (pending)
+- approved-by: ash84 (2026-04-25)
+- branch: feat/openrouter-backend (stacked on PR #7)
+- completed: 2026-04-25
 
 ---
 

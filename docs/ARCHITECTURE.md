@@ -86,6 +86,12 @@ heartbeat:                         # Heartbeat config
   active_hours:
     start: "07:00"
     end: "23:00"
+backend:                           # Optional — defaults to claude_code
+  type: openrouter                 # claude_code | openrouter
+  api_key_env: OPENROUTER_API_KEY  # env var to read the key from
+  model: anthropic/claude-haiku-4.5
+  max_history: 20                  # turns of history to replay
+  max_tokens: 4096
 ```
 
 ### 5. Multi-Bot Architecture
@@ -208,11 +214,36 @@ QMD (local markdown search engine) is automatically available to all bots when t
 - **Storage**: `~/.abyss/bots/<name>/conversation.db` per bot, `~/.abyss/groups/<name>/conversation.db` per group. Single virtual `messages` table tokenized as `unicode61 + remove_diacritics 2`. Schema versioned.
 - **Append on log**: `session.log_conversation()` and `group.log_to_shared_conversation()` mirror each markdown write into the index. Failures log a warning and never raise — markdown is canonical.
 - **MCP server**: `abyss.mcp_servers.conversation_search` is a stdio JSON-RPC server. One tool: `search_conversations(query, since=, until=, chat_id=, role=, limit=)`. Reads its DB path from `ABYSS_CONVERSATION_DB`.
-- **Auto-injection**: `compose_claude_md()` appends the built-in `conversation_search/SKILL.md` whenever `is_fts5_available()` is True. `_prepare_skill_config()` writes per-session `.mcp.json` with the bot's DB path resolved from `working_directory.parents[1]`.
+- **Auto-injection**: `compose_claude_md()` appends the built-in `conversation_search/SKILL.md` whenever `is_fts5_available()` is True. `_prepare_skill_config()` writes per-session `.mcp.json` with the bot's DB path. The bot directory is resolved by `_resolve_bot_dir_from_working_directory()` walking up the working directory's parents until it finds an entry whose parent is named `bots`, so DM (`bots/<name>/sessions/chat_*`), cron (`bots/<name>/cron_sessions/<job>`) and heartbeat (`bots/<name>/heartbeat_sessions/`) flows all hit the same per-bot DB.
+- **Reindex semantics**: `reindex_session_dir` and `reindex_group_dir` always wipe the FTS5 table — even when the source markdown directory is missing — so deleting source content actually purges the index.
 - **Reindex**: `abyss reindex --bot|--group|--all` wipes and rebuilds from markdown.
 - **Bot startup**: `bot_manager._ensure_conversation_index()` runs `ensure_schema` for the bot DB and every group it belongs to.
 - **Test isolation**: autouse fixture in `tests/conftest.py` stubs `is_fts5_available()` to False; opt-in tests use `@pytest.mark.enable_conversation_search`.
 - **Limits**: BM25 keyword only (no semantic / embedding). No Korean morpheme analysis (prefix matches only). Group DB is indexed but the auto-injected MCP currently exposes only the bot's DB.
+
+### 13.6. LLM Backend Abstraction
+
+abyss routes every model call through `abyss.llm.LLMBackend`. Two backends ship today; new ones drop in by registering a class with `abyss.llm.register`.
+
+- **`claude_code` (default)** — `ClaudeCodeBackend` wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent capabilities preserved: built-in tools, MCP, skills, `/resume`, `/cancel`. No bot.yaml change required.
+- **`openrouter` (opt-in)** — `OpenRouterBackend` talks to OpenRouter's OpenAI-compatible chat completions endpoint via `httpx`. Text-only: no tool invocation, no MCP, no `/resume` continuity. Conversation history is replayed from `conversation-YYMMDD.md` (capped at `max_history`) and `CLAUDE.md` is sent as the system prompt.
+- **Per-bot selection** via `bot.yaml`:
+
+  ```yaml
+  backend:
+    type: openrouter
+    api_key_env: OPENROUTER_API_KEY
+    model: anthropic/claude-haiku-4.5
+    max_history: 20
+    max_tokens: 4096
+  ```
+
+- **Per-bot caching** — `get_or_create(bot_name, bot_config)` keeps one backend instance per bot for the process lifetime so HTTPX clients / SDK pools are shared across handler / cron / heartbeat call sites. The instance's `bot_config` is refreshed on each lookup so config changes take effect without process restart (backend type changes still recreate).
+- **Cancellation** — `/cancel` looks up the cached backend (`cached_backend(bot_name)`) and calls `backend.cancel(session_key)`. Falls through to legacy Claude Code cancel paths for bots that haven't yet warmed up a backend.
+- **Shutdown** — `bot_manager` calls `abyss.llm.close_all()` before stopping the SDK pool so HTTPX clients release sockets cleanly.
+- **OpenRouter user-message dedup** — abyss handlers call `log_conversation` *before* `backend.run`, so the markdown log already contains the current user message. `OpenRouterBackend._build_messages` drops a trailing user turn whose content matches `request.user_prompt` so the model never sees the same input twice (which inflates tokens and biases responses).
+- **OpenRouter `max_history` precedence** — explicit caller override (`request.max_history` set above the dataclass default of 20) wins, otherwise `bot.yaml`'s `backend.max_history` is honored, otherwise the dataclass default applies. `_load_history` reads `cap + 1` so dedup never trims below the configured window.
+- **Tests** — `tests/conftest.py::clear_llm_backend_cache` autouse fixture wipes the per-bot cache between tests. End-to-end OpenRouter tests under `tests/evaluation/test_openrouter_e2e.py` are gated on `OPENROUTER_API_KEY` and excluded from CI.
 
 ### 14. Session Continuity
 

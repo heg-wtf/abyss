@@ -10,6 +10,8 @@ A multi-bot, file-based session system that runs locally on Mac.
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Skills](#skills)
+- [LLM Backends](#llm-backends)
+- [Memory & Recall](#memory--recall)
 - [Group Collaboration](#group-collaboration)
 - [Telegram Commands](#telegram-commands)
 - [File Handling](#file-handling)
@@ -112,6 +114,41 @@ abyss skills install <name>    # Install a built-in skill
 abyss skills setup <name>      # Activate (check requirements)
 ```
 
+## LLM Backends
+
+Each bot picks its LLM backend in `bot.yaml`. The default is **Claude Code** (no config change required for existing bots); **OpenRouter** is opt-in for cheap / fast text-only chat.
+
+| | Claude Code (default) | OpenRouter |
+|---|---|---|
+| Driver | `claude -p` + Python Agent SDK | OpenRouter chat completions API |
+| Tools (Bash / Read / Write / Edit / Grep) | ✅ | ❌ |
+| MCP servers (skills with `mcp.json`) | ✅ | ❌ |
+| Session continuity (`--resume`) | ✅ | replays last `max_history` turns from disk |
+| Streaming | SDK pool (per-token) | SSE chunks |
+| Cancellation | SDK interrupt + subprocess kill | cancels in-flight HTTPX task |
+
+OpenRouter sits in front of 200+ models (Anthropic / OpenAI / DeepSeek / Qwen / etc.). Pick it for bots where you want speed and cost over agent capabilities. The `abyss bot add` wizard prompts for the choice. Step-by-step setup: [docs/OPENROUTER_SETUP.md](docs/OPENROUTER_SETUP.md).
+
+```yaml
+# bot.yaml — opt-in OpenRouter
+backend:
+  type: openrouter
+  api_key_env: OPENROUTER_API_KEY
+  model: anthropic/claude-haiku-4.5
+  max_history: 20
+  max_tokens: 4096
+```
+
+## Memory & Recall
+
+abyss layers three memory surfaces on top of the per-session markdown logs:
+
+- **`MEMORY.md`** — per-bot long-term notes the bot reads and writes. Injected into the system prompt.
+- **`GLOBAL_MEMORY.md`** — read-only shared memory injected into every bot's system prompt. CLI-managed.
+- **Conversation Search (SQLite FTS5)** — an auto-injected MCP tool (`search_conversations`) lets the bot recall specific past messages by keyword, even when they've rolled out of the context window. The index is built incrementally per message; markdown stays the source of truth, and `abyss reindex --bot|--group|--all` rebuilds it from scratch.
+
+Conversation search is on by default whenever the bundled SQLite supports FTS5 (effectively always on macOS / Linux). Each bot has its own `~/.abyss/bots/<name>/conversation.db`; each group has `~/.abyss/groups/<name>/conversation.db`. `abyss doctor` reports FTS5 availability.
+
 ## Group Collaboration
 
 abyss supports **multi-bot collaboration** via Telegram groups. One orchestrator bot manages missions, delegating tasks to member bots via @mention.
@@ -199,8 +236,9 @@ Use the `/send` command to retrieve workspace files back via Telegram.
 | Configuration | PyYAML |
 | Cron Scheduler | croniter |
 | Encrypted Backup | pyzipper (AES-256) |
-| AI Engine | Claude Code CLI (`claude -p`, streaming) |
-| AI SDK | Python Agent SDK (`claude-agent-sdk`, persistent session pool) |
+| LLM Backend (default) | Claude Code CLI (`claude -p`, streaming) + Python Agent SDK persistent session pool |
+| LLM Backend (opt-in) | OpenRouter via httpx (200+ models, text-only chat, SSE streaming) |
+| Conversation Index | SQLite FTS5 (stdlib, no extra dependency) |
 | Logging | Rich (RichHandler, colorized console) |
 | Process Manager | launchd (macOS) |
 

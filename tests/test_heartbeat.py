@@ -248,7 +248,7 @@ async def test_execute_heartbeat_ok_no_notification(bot_with_config):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
         return_value="All clear. HEARTBEAT_OK",
     ):
@@ -275,7 +275,7 @@ async def test_execute_heartbeat_sends_notification(bot_with_config):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
         return_value="You have pending tasks in workspace/",
     ):
@@ -306,7 +306,7 @@ async def test_execute_heartbeat_no_allowed_users_no_sessions(bot_with_config):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
         return_value="Something to report",
     ):
@@ -341,7 +341,7 @@ async def test_execute_heartbeat_fallback_to_session_chat_ids(bot_with_config, t
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
         return_value="Something to report",
     ):
@@ -370,7 +370,7 @@ async def test_execute_heartbeat_no_heartbeat_md(bot_with_config):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
     ) as mock_claude:
         await execute_heartbeat(
@@ -397,7 +397,7 @@ async def test_execute_heartbeat_handles_error(bot_with_config):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
         side_effect=RuntimeError("Claude crashed"),
     ):

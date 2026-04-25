@@ -938,10 +938,19 @@ limit=)`. Reads its DB path from the `ABYSS_CONVERSATION_DB` environment
 variable.
 
 `claude_runner._prepare_skill_config` writes per-session `.mcp.json`
-that auto-injects this server with the bot's DB path computed from the
-session's working directory (`<workdir>.parents[1] / "conversation.db"`).
+that auto-injects this server with the bot's DB path. The bot
+directory is resolved by `_resolve_bot_dir_from_working_directory()`,
+which walks up the working directory's parents until it finds an entry
+whose parent is named `bots` — so DM (`bots/<name>/sessions/chat_*`),
+cron (`bots/<name>/cron_sessions/<job>`), and heartbeat
+(`bots/<name>/heartbeat_sessions/`) flows all hit the same per-bot DB.
 Tool name in Claude's view:
 `mcp__conversation_search__search_conversations`.
+
+`reindex_session_dir` and `reindex_group_dir` always wipe the index —
+even when the source markdown directory is missing — so deleting
+source content actually purges the DB instead of leaving stale rows
+searchable.
 
 ### Auto-injection
 
@@ -983,3 +992,95 @@ in the scope. Header formats:
 - Group conversations are indexed but the auto-injected MCP server
   currently exposes only the bot's own DB. Group-scope search via MCP
   is future work.
+
+
+## LLM Backends
+
+Per-bot LLM selection lives behind ``abyss.llm.LLMBackend``. Two
+backends ship — Claude Code (full agent, default) and OpenRouter
+(text-only chat against 200+ models). New backends drop in by
+registering a class via ``abyss.llm.register``.
+
+### Resolution
+
+``abyss.llm.get_or_create(bot_name, bot_config)`` is the only public
+entry point. It reads ``bot_config["backend"]["type"]`` (defaulting
+to ``claude_code``), instantiates the registered backend class, and
+caches it per bot. ``bot_config`` is refreshed in-place on cached
+returns so model / skill / option changes take effect without restart;
+a backend-type change recreates the instance.
+
+### Claude Code backend
+
+``ClaudeCodeBackend.run`` and ``.run_streaming`` are thin late-binding
+wrappers around ``claude_runner.run_claude_with_sdk`` /
+``run_claude_streaming_with_sdk``. All Claude Code features preserved:
+built-in tools (Bash / Read / Write / Edit / Grep / Glob / Agent),
+auto-injected MCP servers (QMD, conversation_search), skills, `--resume`
+session continuity, SDK pool persistence.
+
+``cancel(session_key)`` calls ``cancel_sdk_session`` then
+``cancel_process``. ``close()`` is a no-op (process-wide lifecycle
+managed by ``bot_manager.close_all`` / ``cancel_all_processes``).
+
+### OpenRouter backend
+
+``OpenRouterBackend`` POSTs to ``{base_url}/chat/completions``
+(default ``https://openrouter.ai/api/v1``). The request body follows
+OpenAI's chat completions schema:
+
+* ``messages[0]`` is the bot's ``CLAUDE.md`` as a ``system`` message
+  (falls back from the per-session copy to the bot-level copy).
+* The next ``max_history`` entries are user / assistant turns parsed
+  from the most recent ``conversation-YYMMDD.md`` files (newest first,
+  reversed before sending).
+* The current user prompt closes the list.
+
+**User-message dedup.** abyss handlers call ``log_conversation``
+*before* ``backend.run``, so the markdown log already contains the
+current user message. ``_build_messages`` drops a trailing user turn
+whose stripped content matches ``request.user_prompt`` so the model
+never sees the same input twice (which would inflate token usage and
+bias responses toward the repeated text). Older turns with different
+content are preserved.
+
+**``max_history`` precedence.** ``_resolve_max_history(request)``
+returns:
+
+1. ``request.max_history`` when the caller explicitly raised it above
+   the dataclass default of 20 (lets cron / heartbeat widen the
+   window for a one-off run).
+2. Otherwise the bot-configured ``backend.max_history``.
+3. Otherwise 0 (history disabled).
+
+``_load_history`` loads ``cap + 1`` entries so dedup never trims
+below the configured window; the final cap is enforced after dedup.
+
+Streaming uses SSE (``stream=True`` with
+``stream_options={"include_usage": true}``) and forwards each
+``delta.content`` chunk to the caller's ``on_chunk`` callback.
+
+API key is read from the env var named in
+``backend.api_key_env`` (default ``OPENROUTER_API_KEY``). The
+``Authorization`` header is sent alongside ``HTTP-Referer`` and
+``X-Title`` headers (per OpenRouter's attribution guidelines).
+
+Failure modes are mapped to ``RuntimeError`` with actionable text:
+
+* 401 / 403 → "OpenRouter rejected the API key in <env var>".
+* 429 → "OpenRouter rate limit hit".
+* 5xx → "OpenRouter upstream error" + first 300 chars of body.
+
+``cancel(session_key)`` cancels the in-flight ``asyncio.Task``
+registered for that key. ``close()`` calls ``httpx.AsyncClient.aclose``.
+
+### Limits intentionally accepted
+
+* OpenRouter has no tool-calling support in this backend. Bots with
+  MCP / Bash / file tools should stay on Claude Code.
+* No ``--resume``-style continuity. Long conversations rely on
+  history replay; trim ``max_history`` for cost-sensitive bots.
+* Subagent spawning is unavailable.
+* Token compaction (``token_compact.py``) still uses the direct
+  ``run_claude`` subprocess path because it's a system utility, not a
+  bot turn.

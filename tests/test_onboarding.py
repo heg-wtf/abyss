@@ -129,6 +129,73 @@ def test_create_bot(tmp_path, monkeypatch):
     assert config_path.exists()
 
 
+def test_create_bot_with_openrouter_backend_block(tmp_path, monkeypatch):
+    """create_bot writes the backend block when an OpenRouter dict is supplied."""
+    import yaml
+
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    backend_block = {
+        "type": "openrouter",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "model": "anthropic/claude-haiku-4.5",
+        "max_history": 10,
+    }
+    create_bot(
+        token="123456:ABCDEF",
+        bot_info={"username": "@or_bot", "botname": "OR Bot"},
+        profile={
+            "name": "or-bot",
+            "display_name": "OR Bot",
+            "personality": "Cheap and fast",
+            "role": "Quick chat",
+            "goal": "",
+        },
+        backend_block=backend_block,
+    )
+
+    bot_yaml = tmp_path / ".abyss" / "bots" / "or-bot" / "bot.yaml"
+    saved = yaml.safe_load(bot_yaml.read_text())
+    assert saved["backend"] == backend_block
+
+
+def test_prompt_backend_choice_default_is_claude_code(monkeypatch):
+    """Pressing enter selects the default Claude Code backend (no block)."""
+    from abyss import onboarding
+
+    monkeypatch.setattr("abyss.utils.prompt_input", lambda *a, **kw: kw.get("default", "1"))
+    assert onboarding.prompt_backend_choice() is None
+
+
+def test_prompt_backend_choice_openrouter_collects_options(monkeypatch):
+    """Choosing 2 prompts for env name + model + max_history."""
+    from abyss import onboarding
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake")
+    answers = iter(["2", "OPENROUTER_API_KEY", "openai/gpt-5-mini", "15"])
+    monkeypatch.setattr("abyss.utils.prompt_input", lambda *a, **kw: next(answers))
+
+    block = onboarding.prompt_backend_choice()
+    assert block == {
+        "type": "openrouter",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "model": "openai/gpt-5-mini",
+        "max_history": 15,
+    }
+
+
+def test_prompt_backend_choice_openrouter_invalid_history_falls_back(monkeypatch):
+    from abyss import onboarding
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fake")
+    answers = iter(["2", "", "", "not-a-number"])
+    monkeypatch.setattr("abyss.utils.prompt_input", lambda *a, **kw: next(answers))
+
+    block = onboarding.prompt_backend_choice()
+    assert block is not None
+    assert block["max_history"] == 20
+
+
 def test_create_bot_restarts_daemon_when_running(tmp_path, monkeypatch):
     """create_bot restarts daemon automatically when daemon is running."""
     monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))

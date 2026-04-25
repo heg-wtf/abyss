@@ -329,7 +329,7 @@ async def test_group_message_user_to_orchestrator(temp_abyss_home, dev_team_grou
         chat_id=-12345, text="Build a crawler", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Mission accepted."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -348,7 +348,7 @@ async def test_group_message_user_to_member_ignored(temp_abyss_home, dev_team_gr
         chat_id=-12345, text="Build a crawler", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -371,7 +371,7 @@ async def test_group_message_orchestrator_mentions_member(temp_abyss_home, dev_t
         user_id=10001,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Scraper done."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -394,7 +394,7 @@ async def test_group_message_user_mentions_member_ignored(temp_abyss_home, dev_t
         username="boss",
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -417,7 +417,7 @@ async def test_group_message_member_no_mention_ignored(temp_abyss_home, dev_team
         user_id=10001,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -440,7 +440,7 @@ async def test_group_message_bot_report_to_orchestrator(temp_abyss_home, dev_tea
         user_id=10002,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Good work."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -462,7 +462,7 @@ async def test_group_message_unbound_chat_uses_individual(temp_abyss_home):
         chat_id=-99999, text="Hello from DM", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Hi from DM."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -482,7 +482,7 @@ async def test_group_message_dm_not_affected(temp_abyss_home, dev_team_group):
         chat_id=222, text="Help me with something", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Sure, I can help."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -506,7 +506,7 @@ async def test_group_message_logged_to_shared_conversation(temp_abyss_home, dev_
         chat_id=-12345, text="Build a crawler", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Mission accepted."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -532,7 +532,7 @@ async def test_group_message_bot_message_logged(temp_abyss_home, dev_team_group)
         user_id=10002,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Good."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -554,7 +554,7 @@ async def test_group_message_ignored_still_logged(temp_abyss_home, dev_team_grou
         chat_id=-12345, text="General instruction", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -586,7 +586,7 @@ async def test_group_message_member_response_logged(temp_abyss_home, dev_team_gr
         user_id=10001,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Scraper done."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -610,7 +610,7 @@ async def test_group_claude_response_logged_to_shared_conversation(temp_abyss_ho
         chat_id=-12345, text="Implement group_status", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "group_status command implemented successfully."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -637,7 +637,7 @@ async def test_group_claude_response_logged_for_member(temp_abyss_home, dev_team
         user_id=10001,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Scraper implementation complete."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -672,7 +672,7 @@ async def test_group_bot_message_bypasses_allowed_users(temp_abyss_home, dev_tea
         user_id=10001,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = "Tests written."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
@@ -703,7 +703,7 @@ async def test_group_unauthorized_human_still_blocked(temp_abyss_home, dev_team_
         user_id=99999,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -734,7 +734,7 @@ async def test_group_message_self_message_ignored(temp_abyss_home, dev_team_grou
     # Orchestrator only handles user messages or member bot messages, not its own.
     # dev_lead_bot is the orchestrator, not a member, so its own message is not a member message.
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -757,7 +757,7 @@ async def test_group_message_member_to_member_no_reaction(temp_abyss_home, dev_t
         user_id=10002,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -782,7 +782,7 @@ async def test_group_message_orchestrator_self_response_no_retrigger(
         user_id=10001,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -817,7 +817,7 @@ async def test_group_message_unrelated_bot_ignored(temp_abyss_home, dev_team_gro
         chat_id=-12345, text="Hello everyone", is_bot=False, username="boss"
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
@@ -845,7 +845,7 @@ async def test_group_message_non_member_bot_ignored_by_orchestrator(
         user_id=99999,
     )
 
-    with patch("abyss.handlers.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 

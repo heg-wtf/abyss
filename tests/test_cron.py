@@ -375,7 +375,9 @@ async def test_execute_cron_job_sends_to_allowed_users(bot_with_cron):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude", new_callable=AsyncMock, return_value="Test response"
+        "abyss.claude_runner.run_claude_with_sdk",
+        new_callable=AsyncMock,
+        return_value="Test response",
     ):
         await execute_cron_job(
             bot_name=bot_with_cron,
@@ -400,7 +402,9 @@ async def test_execute_cron_job_no_allowed_users_no_sessions(bot_with_cron):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude", new_callable=AsyncMock, return_value="Test response"
+        "abyss.claude_runner.run_claude_with_sdk",
+        new_callable=AsyncMock,
+        return_value="Test response",
     ):
         await execute_cron_job(
             bot_name=bot_with_cron,
@@ -428,7 +432,9 @@ async def test_execute_cron_job_fallback_to_session_chat_ids(bot_with_cron, temp
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude", new_callable=AsyncMock, return_value="Test response"
+        "abyss.claude_runner.run_claude_with_sdk",
+        new_callable=AsyncMock,
+        return_value="Test response",
     ):
         await execute_cron_job(
             bot_name=bot_with_cron,
@@ -453,7 +459,7 @@ async def test_execute_cron_job_uses_job_model(bot_with_cron):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude", new_callable=AsyncMock, return_value="OK"
+        "abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock, return_value="OK"
     ) as mock_claude:
         await execute_cron_job(
             bot_name=bot_with_cron,
@@ -475,7 +481,7 @@ async def test_execute_cron_job_handles_error(bot_with_cron):
     send_mock = AsyncMock()
 
     with patch(
-        "abyss.claude_runner.run_claude",
+        "abyss.claude_runner.run_claude_with_sdk",
         new_callable=AsyncMock,
         side_effect=RuntimeError("Claude crashed"),
     ):
@@ -538,7 +544,7 @@ async def test_run_cron_scheduler_skips_disabled_jobs(bot_with_cron):
 
     asyncio.create_task(set_stop())
 
-    with patch("abyss.claude_runner.run_claude", new_callable=AsyncMock) as mock_claude:
+    with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
         await asyncio.wait_for(
             run_cron_scheduler(bot_with_cron, bot_config, application, stop_event),
             timeout=5,
@@ -613,7 +619,9 @@ async def test_run_cron_scheduler_one_shot_delete(bot_with_cron):
 
     asyncio.create_task(set_stop())
 
-    with patch("abyss.claude_runner.run_claude", new_callable=AsyncMock, return_value="Done"):
+    with patch(
+        "abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock, return_value="Done"
+    ):
         await asyncio.wait_for(
             run_cron_scheduler(bot_with_cron, bot_config, application, stop_event),
             timeout=5,
@@ -646,7 +654,9 @@ async def test_run_cron_scheduler_one_shot_disable(bot_with_cron):
 
     asyncio.create_task(set_stop())
 
-    with patch("abyss.claude_runner.run_claude", new_callable=AsyncMock, return_value="Done"):
+    with patch(
+        "abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock, return_value="Done"
+    ):
         await asyncio.wait_for(
             run_cron_scheduler(bot_with_cron, bot_config, application, stop_event),
             timeout=5,
