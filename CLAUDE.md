@@ -139,6 +139,29 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 - Auto-splits at 4096 chars via `split_message()`
 - **No markdown tables** -- Telegram cannot render them. Use emoji + text lists instead
 
+### LLM Backend Selection
+
+`abyss.llm.LLMBackend` Protocol with two ships:
+
+- **claude_code** (default): wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent (tools, MCP, skills, `--resume`).
+- **openrouter**: text-only chat against any OpenRouter model via `httpx` + SSE streaming. Replays last `max_history` turns from `conversation-YYMMDD.md`; `CLAUDE.md` is the system prompt. No tool calling, no `--resume`.
+
+Per-bot caching via `get_or_create(bot_name, bot_config)` shares HTTPX clients / SDK pools across handler / cron / heartbeat call sites. `bot_config` is refreshed in-place on cached returns; backend-type changes recreate the instance. `bot_manager.close_all()` on shutdown.
+
+`/cancel` calls `cached_backend(bot_name).cancel(session_key)` and falls through to legacy Claude Code paths for cold bots.
+
+OpenRouter dedup: handlers log the user message before `backend.run`, so OpenRouter's `_build_messages` drops a trailing user turn whose content matches `request.user_prompt`. `max_history` precedence: explicit caller override (>20) wins, otherwise `bot.yaml`'s `backend.max_history`, otherwise dataclass default (20).
+
+### Conversation Search (FTS5)
+
+Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `groups/<name>/conversation.db`. Markdown remains the source of truth — the index is a rebuildable cache.
+
+- Append on `session.log_conversation` and `group.log_to_shared_conversation` (best-effort, swallowed failures)
+- Auto-injected as `mcp__conversation_search__search_conversations` when the bundled SQLite supports FTS5
+- Bot dir resolution: `_resolve_bot_dir_from_working_directory` walks up parents until it finds a directory whose parent is named `bots`, so DM / cron / heartbeat working dirs all resolve to the same per-bot DB
+- `abyss reindex --bot|--group|--all` wipes and rebuilds from markdown (also wipes when source dir is missing — no stale rows)
+- `abyss doctor` reports FTS5 availability
+
 ## Runtime Data Structure
 
 ```
@@ -146,9 +169,10 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 ├── config.yaml               # timezone, language, bot list, settings
 ├── GLOBAL_MEMORY.md          # Shared read-only memory (CLI-managed)
 ├── bots/<name>/
-│   ├── bot.yaml              # token, display_name, personality, role, goal, model, streaming, skills, heartbeat
+│   ├── bot.yaml              # token, display_name, personality, role, goal, model, streaming, skills, heartbeat, backend
 │   ├── CLAUDE.md             # Generated system prompt (do not edit manually)
 │   ├── MEMORY.md             # Bot long-term memory (read/written by Claude Code)
+│   ├── conversation.db       # SQLite FTS5 index (auto-built; rebuild via `abyss reindex --bot <name>`)
 │   ├── cron.yaml             # Cron jobs (schedule, timezone, message)
 │   ├── cron_sessions/<job>/  # Cron working directory
 │   ├── heartbeat_sessions/   # Heartbeat working directory (HEARTBEAT.md, workspace/)
@@ -156,6 +180,7 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 ├── groups/<name>/
 │   ├── group.yaml            # Group config (name, orchestrator, members, telegram_chat_id)
 │   ├── conversation/         # Shared conversation logs (YYMMDD.md, date-based)
+│   ├── conversation.db       # Group FTS5 index (auto-built; rebuild via `abyss reindex --group <name>`)
 │   └── workspace/            # Shared workspace (persistent across resets)
 ├── skills/<name>/            # Skills (SKILL.md required, skill.yaml + mcp.json optional)
 └── logs/                     # Daily rotating logs
