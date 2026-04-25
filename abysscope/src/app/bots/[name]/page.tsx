@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModelBadge } from "@/components/status-badge";
 import { SessionList } from "@/components/session-list";
 import { MemoryEditor } from "@/components/memory-editor";
+import { SearchPanel } from "@/components/search-panel";
 import { CronEditor } from "@/components/cron-editor";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,7 @@ export default async function BotDetailPage({
             Sessions{sessions.length > 0 && ` (${sessions.length})`}
           </TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
+          <TabsTrigger value="search">Search</TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile" className="space-y-4 mt-4">
@@ -200,6 +202,10 @@ export default async function BotDetailPage({
             initialContent={memory}
             apiEndpoint={`/api/bots/${name}/memory`}
           />
+        </TabsContent>
+
+        <TabsContent value="search" className="mt-4">
+          <SearchPanel botName={name} />
         </TabsContent>
       </Tabs>
     </div>
