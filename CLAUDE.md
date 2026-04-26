@@ -6,7 +6,7 @@ Personal AI assistant: Telegram + Claude Code. Runs locally on Mac.
 
 - Python >= 3.11, uv package manager
 - Typer (CLI), Rich (output), python-telegram-bot v21+ (async), PyYAML (config), croniter (cron), httpx (HTTP for OpenRouter)
-- LLM backends: Claude Code CLI (`claude -p`) + Python Agent SDK (default), OpenRouter (text-only chat against 200+ models, opt-in per bot)
+- LLM backends: Claude Code CLI (`claude -p`) + Python Agent SDK (default), OpenAI-compatible (`openai_compat`) for MiniMax / OpenRouter / any OpenAI-compat endpoint (opt-in per bot)
 
 ## Dev Commands
 
@@ -66,7 +66,8 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `llm/base.py` | `LLMBackend` Protocol, `LLMRequest`, `LLMResult`. Backend-agnostic envelope used by handlers / cron / heartbeat |
 | `llm/registry.py` | `register`, `get_backend`, `get_or_create` (per-bot cache), `close_all` for shutdown |
 | `llm/claude_code.py` | `ClaudeCodeBackend` wrapping `claude_runner` (subprocess + Agent SDK). Default backend |
-| `llm/openrouter.py` | `OpenRouterBackend` — text-only chat against any OpenRouter model. No tools, no resume, replays history from disk |
+| `llm/openai_compat.py` | `OpenAICompatBackend` — text-only chat against any OpenAI-compatible endpoint. `PROVIDER_PRESETS` for `openrouter`, `minimax`, `minimax_china`. No tools, no resume, replays history from disk |
+| `llm/openrouter.py` | `OpenRouterBackend` — backward-compat subclass of `OpenAICompatBackend` with `type="openrouter"` and `_default_provider="openrouter"`. Existing bots unchanged |
 
 ### Built-in Skills
 
@@ -141,16 +142,17 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 
 ### LLM Backend Selection
 
-`abyss.llm.LLMBackend` Protocol with two ships:
+`abyss.llm.LLMBackend` Protocol with three registered backends:
 
 - **claude_code** (default): wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent (tools, MCP, skills, `--resume`).
-- **openrouter**: text-only chat against any OpenRouter model via `httpx` + SSE streaming. Replays last `max_history` turns from `conversation-YYMMDD.md`; `CLAUDE.md` is the system prompt. No tool calling, no `--resume`.
+- **openai_compat**: text-only chat against any OpenAI-compatible endpoint via `httpx` + SSE streaming. Supports named providers via `PROVIDER_PRESETS`: `openrouter`, `minimax` (international), `minimax_china`. Configure with `provider: minimax` in bot.yaml — see `docs/MINIMAX_SETUP.md`.
+- **openrouter** (legacy alias): identical to `openai_compat` with `provider: openrouter`. Existing `bot.yaml` files with `type: openrouter` continue to work unchanged.
 
 Per-bot caching via `get_or_create(bot_name, bot_config)` shares HTTPX clients / SDK pools across handler / cron / heartbeat call sites. `bot_config` is refreshed in-place on cached returns; backend-type changes recreate the instance. `bot_manager.close_all()` on shutdown.
 
 `/cancel` calls `cached_backend(bot_name).cancel(session_key)` and falls through to legacy Claude Code paths for cold bots.
 
-OpenRouter dedup: handlers log the user message before `backend.run`, so OpenRouter's `_build_messages` drops a trailing user turn whose content matches `request.user_prompt`. `max_history` precedence: explicit caller override (>20) wins, otherwise `bot.yaml`'s `backend.max_history`, otherwise dataclass default (20).
+Dedup: handlers log the user message before `backend.run`, so `_build_messages` drops a trailing user turn whose content matches `request.user_prompt`. `max_history` precedence: explicit caller override (>20) wins, otherwise `bot.yaml`'s `backend.max_history`, otherwise dataclass default (20).
 
 ### Conversation Search (FTS5)
 

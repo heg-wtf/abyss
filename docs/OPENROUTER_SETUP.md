@@ -74,6 +74,10 @@ backend:
 
 You can edit `bot.yaml` directly to tune `max_tokens` (default 4096) or `base_url` (default OpenRouter endpoint; only override for self-hosted gateways).
 
+> **Note:** `type: openrouter` is a legacy alias. New bots can use `type: openai_compat` with
+> `provider: openrouter` — the behaviour is identical. The legacy type will continue to work
+> indefinitely. See `docs/MINIMAX_SETUP.md` for the `openai_compat` approach with other providers.
+
 ### Notes on `max_history` and dedup
 
 - `max_history` from `bot.yaml` is the source of truth for the per-bot context window. Raising or lowering it takes effect on the next message — no daemon restart required (the LLM backend cache refreshes config in place).

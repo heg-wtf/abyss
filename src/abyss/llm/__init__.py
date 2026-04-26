@@ -37,7 +37,7 @@ __all__ = [
 def _autoregister() -> None:
     """Import the bundled backends so their ``register`` calls run."""
     # Imported for their side-effects (calls to ``register`` at module scope).
-    from abyss.llm import claude_code, openrouter  # noqa: F401
+    from abyss.llm import claude_code, openai_compat, openrouter  # noqa: F401
 
 
 _autoregister()
