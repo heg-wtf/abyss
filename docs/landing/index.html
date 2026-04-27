@@ -8,11 +8,11 @@
     </title>
     <meta
       name="description"
-      content="abyss is an open-source personal AI assistant that runs locally on your Mac. Multi-bot Telegram system with Claude Code delegation, skill plugins, cron automation, and a web dashboard."
+      content="abyss is an open-source personal AI assistant that runs locally on your Mac. Multi-bot Telegram system with Claude Code, multi-provider LLM support, skill plugins, conversation search, cron automation, and a web dashboard."
     />
     <meta
       name="keywords"
-      content="abyss, claude code, telegram bot, AI assistant, open source, local first, multi-bot, skill system, automation, Mac"
+      content="abyss, claude code, telegram bot, AI assistant, open source, local first, multi-bot, skill system, conversation search, minimax, openrouter, multi-provider llm, automation, Mac"
     />
     <meta name="author" content="HEG" />
     <meta name="robots" content="index, follow" />
@@ -24,7 +24,7 @@
     />
     <meta
       property="og:description"
-      content="Open-source, local-first AI assistant. Multi-bot Telegram system with Claude Code, skills, cron, and a web dashboard."
+      content="Open-source, local-first AI assistant. Multi-bot Telegram system with Claude Code or any OpenAI-compatible provider, skills, conversation search, cron, and a web dashboard."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://abyss.heg.wtf" />
@@ -34,7 +34,7 @@
     <meta name="twitter:title" content="abyss — Personal AI Assistant" />
     <meta
       name="twitter:description"
-      content="Open-source Telegram + Claude Code personal AI assistant. Runs locally on Mac."
+      content="Open-source Telegram AI assistant. Claude Code or any OpenAI-compatible provider. Runs locally on Mac."
     />
 
     <link rel="canonical" href="https://abyss.heg.wtf" />
@@ -341,6 +341,9 @@
       .c-orange {
         color: var(--orange);
       }
+      .c-green {
+        color: var(--green);
+      }
       @media (max-width: 640px) {
         .diag-row {
           flex-direction: column;
@@ -575,7 +578,7 @@
         "operatingSystem": "macOS",
         "url": "https://abyss.heg.wtf",
         "downloadUrl": "https://github.com/heg-wtf/abyss",
-        "softwareVersion": "2026.03.25",
+        "softwareVersion": "2026.04.24",
         "author": {
           "@type": "Organization",
           "name": "HEG",
@@ -591,7 +594,7 @@
       <div class="container">
         <div class="header-left">
           <span>abyss</span>
-          <span class="version-badge">v2026.03.25</span>
+          <span class="version-badge">v2026.04.24</span>
         </div>
         <div class="header-links">
           <a href="#features">Features</a>
@@ -628,9 +631,9 @@
         <p>
           abyss is a local-first, multi-bot AI assistant<br />powered by Claude
           Code. <br /><br />
-          No servers. No databases. No LLM API Key.
+          No server. No database. No cloud lock-in.
           <br />
-          Just your Mac, Telegram, and Claude Subscription.
+          Works with Claude subscription — or any OpenAI-compatible provider.
         </p>
 
         <div class="install-box" onclick="copyInstall()" id="installBox">
@@ -677,7 +680,8 @@
                 <div class="diag-item">👥 Group Collaboration</div>
                 <div class="diag-inner">
                   <span class="c-purple">Claude Code (SDK Pool)</span><br />
-                  <span class="c-orange">Persistent Sessions</span>
+                  <span class="c-orange">Persistent Sessions</span><br />
+                  <span class="c-green">Multi-Provider LLM</span>
                 </div>
               </div>
               <div class="diag-connector">│</div>
@@ -768,13 +772,30 @@
               Everything is inspectable and portable.
             </p>
           </div>
+          <div class="feature-card">
+            <div class="icon">🔍</div>
+            <h3>Conversation Search</h3>
+            <p>
+              Full-text search across all sessions via SQLite FTS5.
+              Auto-injected as MCP tool. Rebuild anytime with
+              <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">abyss reindex</code>.
+            </p>
+          </div>
+          <div class="feature-card">
+            <div class="icon">🌐</div>
+            <h3>Multi-Provider LLM</h3>
+            <p>
+              OpenAI-compatible backend for MiniMax, OpenRouter, or any custom
+              endpoint. Per-bot opt-in via <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">bot.yaml</code>.
+            </p>
+          </div>
         </div>
       </div>
     </section>
 
     <section class="skills" id="skills">
       <div class="container">
-        <h2>18+ Built-in Skills</h2>
+        <h2>17+ Built-in Skills</h2>
         <p class="subtitle">
           Install with
           <code
@@ -822,6 +843,9 @@
             ><span class="emoji">🧠</span> QMD Knowledge</span
           >
           <span class="skill-tag"
+            ><span class="emoji">🔍</span> Conversation Search</span
+          >
+          <span class="skill-tag"
             ><span class="emoji">📦</span> GitHub Skill Import</span
           >
         </div>
@@ -862,6 +886,30 @@
       <div class="container">
         <h2>What's New</h2>
         <div class="changelog">
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.04.24</span>
+            <span class="changelog-desc"
+              ><strong>Multi-Provider LLM</strong> — openai_compat backend for
+              MiniMax, OpenRouter, or any OpenAI-compatible endpoint. Per-bot
+              opt-in via <code style="font-family: 'JetBrains Mono', monospace;">bot.yaml</code>.</span
+            >
+          </div>
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.04.26</span>
+            <span class="changelog-desc"
+              ><strong>Abysscope Search</strong> — Full-text conversation search
+              tab in the web dashboard, powered by SQLite FTS5.</span
+            >
+          </div>
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.04.25</span>
+            <span class="changelog-desc"
+              ><strong>Conversation Search</strong> — Cross-session FTS5 search
+              auto-injected as <code style="font-family: 'JetBrains Mono', monospace;">search_conversations</code>
+              MCP tool. Rebuild index with
+              <code style="font-family: 'JetBrains Mono', monospace;">abyss reindex</code>.</span
+            >
+          </div>
           <div class="changelog-item">
             <span class="changelog-ver">v2026.03.25</span>
             <span class="changelog-desc"
