@@ -74,7 +74,7 @@ def _publish_event(bot_name: str, role: str, content: str, source: str) -> None:
             )
         )
     except Exception:
-        pass
+        logger.debug("Failed to publish chat event for bot %s", bot_name, exc_info=True)
 
 
 SESSION_LOCKS: dict[str, asyncio.Lock] = {}

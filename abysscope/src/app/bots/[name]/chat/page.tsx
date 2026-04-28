@@ -96,13 +96,16 @@ export default function ChatPage() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let accumulated = "";
+      let lineBuffer = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const raw = decoder.decode(value, { stream: true });
-        const lines = raw.split("\n");
+        lineBuffer += decoder.decode(value, { stream: true });
+        const lines = lineBuffer.split("\n");
+        // Retain potentially incomplete last line for the next read
+        lineBuffer = lines.pop() ?? "";
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
@@ -124,7 +127,7 @@ export default function ChatPage() {
               accumulated = "";
             }
           } catch {
-            // ignore parse errors
+            // ignore parse errors for incomplete lines
           }
         }
       }
@@ -263,24 +266,16 @@ function parseMarkdownHistory(markdown: string): Message[] {
     currentLines = [];
   }
 
+  // Format written by session.log_conversation: "## user (timestamp)" / "## assistant (timestamp)"
   for (const line of lines) {
-    if (line.startsWith("**User**")) {
+    if (/^## user\b/.test(line)) {
       flush();
       currentRole = "user";
-      const rest = line.replace(/^\*\*User\*\*[^:]*:\s*/, "").trim();
-      if (rest) currentLines.push(rest);
-    } else if (line.startsWith("**Assistant**")) {
+    } else if (/^## assistant\b/.test(line)) {
       flush();
       currentRole = "assistant";
-      const rest = line.replace(/^\*\*Assistant\*\*[^:]*:\s*/, "").trim();
-      if (rest) currentLines.push(rest);
     } else if (currentRole) {
-      if (line.startsWith("---")) {
-        flush();
-        currentRole = null;
-      } else {
-        currentLines.push(line);
-      }
+      currentLines.push(line);
     }
   }
   flush();

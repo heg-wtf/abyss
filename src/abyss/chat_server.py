@@ -120,7 +120,11 @@ class ChatServer:
         if not user_message:
             return web.json_response({"error": "message required"}, status=400)
 
-        bot_path, bot_config, application = self._bots[name]
+        bot_path, _cached_config, application = self._bots[name]
+        # Reload from disk so primary_chat_id set after registration is visible
+        from abyss.config import load_bot_config
+
+        bot_config = load_bot_config(name) or _cached_config
 
         response = web.StreamResponse(
             headers={
@@ -172,8 +176,11 @@ class ChatServer:
                 except asyncio.TimeoutError:
                     # Keepalive ping so proxy doesn't close the connection
                     await response.write(b": ping\n\n")
-        except (ConnectionResetError, Exception):
+        except ConnectionResetError:
+            # expected when browser closes the tab or connection
             pass
+        except Exception:
+            logger.debug("SSE stream error for bot %s", name, exc_info=True)
         finally:
             event_bus.unsubscribe(name, queue)
 
@@ -219,7 +226,7 @@ class ChatServer:
         lock_key = f"{name}:dashboard"
 
         log_conversation(session_dir, "user", user_message)
-        await event_bus.publish(name, _make_event("user", user_message, "dashboard"))
+        # Dashboard-origin messages are rendered locally; only broadcast Telegram events
 
         # Sync user message to Telegram
         primary_chat_id = bot_config.get("primary_chat_id")
@@ -266,7 +273,7 @@ class ChatServer:
                 await _sse_write(sse_response, {"type": "chunk", "content": full_response})
 
         log_conversation(session_dir, "assistant", full_response)
-        await event_bus.publish(name, _make_event("assistant", full_response, "dashboard"))
+        # Dashboard-origin responses are rendered via the POST SSE stream, not event bus
 
         # Sync bot response to Telegram
         if primary_chat_id and application:
