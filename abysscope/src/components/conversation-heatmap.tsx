@@ -70,14 +70,14 @@ export function ConversationHeatmap({ data, total }: Props) {
       <div className="flex items-baseline justify-end">
         <span className="text-xs text-muted-foreground">{total} conversations</span>
       </div>
-      <div className="overflow-x-auto">
-        <div className="inline-flex flex-col gap-1 min-w-max">
+      <div className="w-full">
+        <div className="flex flex-col gap-[3px]">
           {/* Month labels */}
           <div className="flex gap-[3px] ml-8">
             {columns.map((_, i) => {
               const label = monthLabels.find((m) => m.col === i);
               return (
-                <div key={i} className="w-[11px] text-[9px] text-muted-foreground">
+                <div key={i} className="flex-1 text-[9px] text-muted-foreground">
                   {label?.label ?? ""}
                 </div>
               );
@@ -85,17 +85,17 @@ export function ConversationHeatmap({ data, total }: Props) {
           </div>
           {/* Grid rows (Sun–Sat) */}
           {DAYS.map((day, dow) => (
-            <div key={day} className="flex items-center gap-1">
-              <span className="text-[9px] text-muted-foreground w-7 text-right leading-none">
+            <div key={day} className="flex items-center gap-[3px]">
+              <span className="text-[9px] text-muted-foreground w-7 shrink-0 text-right leading-none">
                 {dow % 2 === 1 ? day : ""}
               </span>
-              <div className="flex gap-[3px]">
+              <div className="flex flex-1 gap-[3px]">
                 {columns.map((col, week) => {
                   const cell = col[dow];
                   return (
                     <div
                       key={week}
-                      className={`w-[11px] h-[11px] rounded-sm ${getColorClass(cell.count)}`}
+                      className={`flex-1 aspect-square rounded-none ${getColorClass(cell.count)}`}
                       title={cell.date ? `${cell.date}: ${cell.count}` : ""}
                     />
                   );
