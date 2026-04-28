@@ -4,8 +4,6 @@ import {
   getCronJobs,
   getBotSessions,
   getSystemStatus,
-  getConfig,
-  listSkills,
   getDiskUsage,
 } from "@/lib/abyss";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -25,14 +23,7 @@ export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   const bots = listBots();
-  const skills = listSkills();
   const status = getSystemStatus();
-  const config = getConfig();
-
-  const totalCronJobs = bots.reduce(
-    (sum, bot) => sum + getCronJobs(bot.name).length,
-    0,
-  );
   const diskUsage = getDiskUsage();
 
   return (
@@ -45,50 +36,13 @@ export default function DashboardPage() {
         <LiveStatus initialRunning={status.running} />
       </div>
 
-      <div className="grid grid-cols-5 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Bots</CardDescription>
-            <CardTitle className="text-3xl">{bots.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Skills</CardDescription>
-            <CardTitle className="text-3xl">{skills.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Cron</CardDescription>
-            <CardTitle className="text-3xl">{totalCronJobs}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Timezone</CardDescription>
-            <CardTitle className="text-lg">
-              {config?.timezone || "UTC"}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Disk Usage</CardDescription>
-            <CardTitle className="text-lg">
-              {diskUsage.totalFormatted}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">~/.abyss Disk Breakdown</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {diskUsage.breakdown.slice(0, 10).map((item) => {
+            {diskUsage.breakdown.filter((item) => item.name !== ".DS_Store").slice(0, 10).map((item) => {
               const percentage =
                 diskUsage.totalBytes > 0
                   ? (item.bytes / diskUsage.totalBytes) * 100

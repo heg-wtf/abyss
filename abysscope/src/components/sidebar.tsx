@@ -174,7 +174,10 @@ export function Sidebar() {
           <span>Logs</span>
         </Link>
       </nav>
-      <div className="border-t p-3 flex justify-end">
+      <div className="border-t p-3 flex items-center justify-between">
+        <span className="text-xs text-muted-foreground font-mono">
+          {process.env.NEXT_PUBLIC_ABYSS_VERSION || "dev"}
+        </span>
         <ThemeToggle />
       </div>
     </aside>
