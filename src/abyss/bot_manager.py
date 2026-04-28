@@ -111,20 +111,6 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
         else:
             console.print("  [yellow]QMD[/yellow] Daemon failed to start")
 
-    # Start dashboard chat server
-    from abyss.chat_server import CHAT_SERVER_PORT, get_server
-
-    chat_server = get_server()
-    for name, application in applications:
-        bot_config = load_bot_config(name)
-        if bot_config:
-            chat_server.register_bot(name, bot_directory(name), bot_config, application)
-    try:
-        await chat_server.start()
-        console.print(f"  [green]CHAT[/green] Dashboard chat server (port {CHAT_SERVER_PORT})")
-    except Exception as chat_error:
-        console.print(f"  [yellow]CHAT[/yellow] Chat server failed to start: {chat_error}")
-
     console.print(f"Starting {len(applications)} bot(s)...")
     for name, _ in applications:
         console.print(f"  [green]OK[/green] {name}")
@@ -240,11 +226,6 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
                 logger.info("Stopped bot: %s", name)
             except Exception as error:
                 logger.error("Error stopping %s: %s", name, error)
-
-        # Stop the dashboard chat server
-        from abyss.chat_server import get_server as get_chat_server
-
-        await get_chat_server().stop()
 
         # Stop the QMD daemon
         _stop_qmd_daemon()

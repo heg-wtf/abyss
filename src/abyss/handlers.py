@@ -61,22 +61,6 @@ from abyss.utils import markdown_to_telegram_html, split_message
 
 logger = logging.getLogger(__name__)
 
-
-# Lazy import guard — chat_server may not be available during tests
-def _publish_event(bot_name: str, role: str, content: str, source: str) -> None:
-    """Fire-and-forget event publish to the dashboard chat bus."""
-    try:
-        from abyss.chat_server import _make_event, event_bus
-
-        asyncio.get_event_loop().call_soon(
-            lambda: asyncio.ensure_future(
-                event_bus.publish(bot_name, _make_event(role, content, source))
-            )
-        )
-    except Exception:
-        logger.debug("Failed to publish chat event for bot %s", bot_name, exc_info=True)
-
-
 SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 MAX_QUEUE_SIZE = 5
 
@@ -111,21 +95,6 @@ def _is_mentioned(message: Any, bot_username: str) -> bool:
     text = getattr(message, "text", None) or ""
     username = bot_username.lstrip("@")
     return f"@{username}" in text
-
-
-def _save_primary_chat_id(bot_name: str, bot_config: dict[str, Any], chat_id: int) -> None:
-    """Persist primary_chat_id to bot.yaml for dashboard session continuity."""
-    import yaml
-
-    from abyss.config import bot_directory
-
-    bot_config["primary_chat_id"] = chat_id
-    bot_yaml_path = bot_directory(bot_name) / "bot.yaml"
-    try:
-        with open(bot_yaml_path, "w") as file:
-            yaml.dump(bot_config, file, default_flow_style=False, allow_unicode=True)
-    except Exception as error:
-        logger.warning("Failed to save primary_chat_id for %s: %s", bot_name, error)
 
 
 def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> list:
@@ -868,7 +837,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         async with lock:
             session_dir = ensure_session(bot_path, chat_id, bot_name=bot_name)
             log_conversation(session_dir, "user", user_message)
-            _publish_event(bot_name, "user", user_message, "telegram")
 
             prompt, claude_session_id, resume_session = _prepare_session_context(
                 session_dir, bot_path, user_message
@@ -904,7 +872,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(response)
 
             log_conversation(session_dir, "assistant", response)
-            _publish_event(bot_name, "assistant", response, "telegram")
 
             # Log assistant response to shared group conversation
             group_config = find_group_by_chat_id(chat_id)
@@ -948,9 +915,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             # No group binding — standard individual message handling
             if not await check_authorization(update):
                 return
-            # Record first DM chat_id so dashboard can share this session
-            if not bot_config.get("primary_chat_id"):
-                _save_primary_chat_id(bot_name, bot_config, chat_id)
             await _process_message(update, context)
             return
 

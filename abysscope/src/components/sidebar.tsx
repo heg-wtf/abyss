@@ -74,32 +74,18 @@ export function Sidebar() {
           {botsOpen && (
             <div className="ml-8 space-y-0.5">
               {bots.map((bot) => (
-                <div key={bot.name}>
-                  <Link
-                    href={`/bots/${bot.name}`}
-                    className={cn(
-                      "block rounded-md px-3 py-1.5 text-sm transition-colors truncate",
-                      pathname === `/bots/${bot.name}` ||
-                        (pathname.startsWith(`/bots/${bot.name}/`) &&
-                          !pathname.startsWith(`/bots/${bot.name}/chat`))
-                        ? "bg-accent text-accent-foreground font-medium"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                    )}
-                  >
-                    {bot.display_name || bot.telegram_botname || bot.name}
-                  </Link>
-                  <Link
-                    href={`/bots/${bot.name}/chat`}
-                    className={cn(
-                      "block rounded-md px-3 py-1.5 text-xs transition-colors",
-                      pathname === `/bots/${bot.name}/chat`
-                        ? "bg-accent text-accent-foreground font-medium"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                    )}
-                  >
-                    💬 Chat
-                  </Link>
-                </div>
+                <Link
+                  key={bot.name}
+                  href={`/bots/${bot.name}`}
+                  className={cn(
+                    "block rounded-md px-3 py-1.5 text-sm transition-colors truncate",
+                    pathname.startsWith(`/bots/${bot.name}`)
+                      ? "bg-accent text-accent-foreground font-medium"
+                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )}
+                >
+                  {bot.display_name || bot.telegram_botname || bot.name}
+                </Link>
               ))}
             </div>
           )}
