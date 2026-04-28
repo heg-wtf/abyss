@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { BotAvatar } from "@/components/bot-avatar";
 
 interface BotSummary {
   name: string;
@@ -72,19 +73,26 @@ export function Sidebar() {
             <span>Bots</span>
           </button>
           {botsOpen && (
-            <div className="ml-8 space-y-0.5">
+            <div className="ml-4 space-y-0.5">
               {bots.map((bot) => (
                 <Link
                   key={bot.name}
                   href={`/bots/${bot.name}`}
                   className={cn(
-                    "block rounded-md px-3 py-1.5 text-sm transition-colors truncate",
+                    "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                     pathname.startsWith(`/bots/${bot.name}`)
                       ? "bg-accent text-accent-foreground font-medium"
                       : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                   )}
                 >
-                  {bot.display_name || bot.telegram_botname || bot.name}
+                  <BotAvatar
+                    botName={bot.name}
+                    displayName={bot.display_name || bot.telegram_botname || bot.name}
+                    size="xs"
+                  />
+                  <span className="truncate">
+                    {bot.display_name || bot.telegram_botname || bot.name}
+                  </span>
                 </Link>
               ))}
             </div>

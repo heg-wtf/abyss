@@ -8,6 +8,7 @@ import {
   listSkills,
   getDiskUsage,
 } from "@/lib/abyss";
+import { BotAvatar } from "@/components/bot-avatar";
 import {
   Card,
   CardContent,
@@ -133,15 +134,24 @@ export default function DashboardPage() {
               <Link key={bot.name} href={`/bots/${bot.name}`}>
                 <Card className="hover:border-primary/50 transition-colors cursor-pointer h-full">
                   <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-base">
-                        {bot.display_name || bot.telegram_botname || bot.name}
-                      </CardTitle>
-                      <ModelBadge model={bot.model} />
+                    <div className="flex items-center gap-3">
+                      <BotAvatar
+                        botName={bot.name}
+                        displayName={bot.display_name || bot.telegram_botname || bot.name}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <CardTitle className="text-base truncate">
+                            {bot.display_name || bot.telegram_botname || bot.name}
+                          </CardTitle>
+                          <ModelBadge model={bot.model} />
+                        </div>
+                        <CardDescription className="text-xs">
+                          {bot.telegram_username}
+                        </CardDescription>
+                      </div>
                     </div>
-                    <CardDescription className="text-xs">
-                      {bot.telegram_username}
-                    </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
                     {bot.personality && (
