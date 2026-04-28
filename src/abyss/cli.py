@@ -328,10 +328,28 @@ def dashboard_start(
 
     _ensure_node_modules(abysscope_directory)
 
+    import importlib.metadata
+
+    abyss_version = importlib.metadata.version("abyss")
+    next_env = {**os.environ, "NEXT_PUBLIC_ABYSS_VERSION": abyss_version}
+
+    console.print("[dim]Building dashboard...[/dim]")
+    try:
+        subprocess.run(
+            ["npx", "next", "build"],
+            cwd=abysscope_directory,
+            env=next_env,
+            check=True,
+        )
+    except subprocess.CalledProcessError as error:
+        console.print(f"[red]Dashboard build failed (exit {error.returncode})[/red]")
+        raise typer.Exit(1) from error
+
     if daemon:
         process = subprocess.Popen(
-            ["npx", "next", "dev", "--port", str(port)],
+            ["npx", "next", "start", "--port", str(port)],
             cwd=abysscope_directory,
+            env=next_env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
@@ -347,8 +365,9 @@ def dashboard_start(
         console.print(f"[green]Starting Abysscope on http://localhost:{port}[/green]")
         try:
             subprocess.run(
-                ["npx", "next", "dev", "--port", str(port)],
+                ["npx", "next", "start", "--port", str(port)],
                 cwd=abysscope_directory,
+                env=next_env,
                 check=True,
             )
         except KeyboardInterrupt:
