@@ -116,6 +116,7 @@ class OpenAICompatBackend(LLMBackend):
         self.api_key_env: str = (
             options.get("api_key_env") or preset.get("api_key_env") or "OPENAI_API_KEY"
         )
+        self.api_key: str | None = options.get("api_key") or None
         self.model: str = options.get("model", DEFAULT_MODEL)
         self.base_url: str = (options.get("base_url") or preset.get("base_url") or "").rstrip("/")
         self.max_history: int = int(options.get("max_history", DEFAULT_MAX_HISTORY))
@@ -249,11 +250,11 @@ class OpenAICompatBackend(LLMBackend):
             self._tasks.pop(session_key, None)
 
     def _auth_headers(self) -> dict[str, str]:
-        api_key = os.environ.get(self.api_key_env)
+        api_key = self.api_key or os.environ.get(self.api_key_env)
         if not api_key:
             raise RuntimeError(
-                f"{self._provider_label} requires environment variable "
-                f"{self.api_key_env!r} to be set."
+                f"{self._provider_label} requires either 'api_key' in bot.yaml backend config "
+                f"or environment variable {self.api_key_env!r} to be set."
             )
         return {
             "Authorization": f"Bearer {api_key}",

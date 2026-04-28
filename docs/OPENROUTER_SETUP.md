@@ -22,75 +22,46 @@ OpenRouter bots **cannot**:
 2. Open your account → Keys → **Create Key**.
 3. Copy the `sk-or-v1-…` key.
 
-## Step 2 — export the key
+## Step 2 — configure `bot.yaml`
 
-```bash
-export OPENROUTER_API_KEY=sk-or-v1-...
-```
-
-Add this to your shell profile (`~/.zshrc`, `~/.bashrc`) so abyss can read it on every start.
-
-If you prefer a different env var name (e.g. one bot per workspace), just set both:
-
-```bash
-export OPENROUTER_PERSONAL_KEY=sk-or-v1-...   # for one bot
-export OPENROUTER_WORK_KEY=sk-or-v1-...        # for another
-```
-
-You'll point each bot at the right name in step 3.
-
-## Step 3 — create a bot with OpenRouter
-
-```
-abyss bot add
-```
-
-Fill in the Telegram token + profile, then:
-
-```
-Choose LLM backend.
-
-  1. Claude Code (default — full agent: tools, MCP, skills, /resume)
-  2. OpenRouter (text-only — cheap/fast chat across 200+ models)
-
-Backend [1]: 2
-```
-
-The wizard asks for:
-
-- **API key environment variable** (default `OPENROUTER_API_KEY`).
-- **Model id** (default `anthropic/claude-haiku-4.5`). See <https://openrouter.ai/models> for the full list.
-- **Max history turns** (default 20). Lower = cheaper / faster, less context. Higher = more cost / latency, better recall.
-
-The bot's `bot.yaml` ends up with:
+Edit `~/.abyss/bots/<your-bot>/bot.yaml` and add a `backend` block with `api_key` directly:
 
 ```yaml
 backend:
-  type: openrouter
-  api_key_env: OPENROUTER_API_KEY
+  type: openai_compat
+  provider: openrouter
   model: anthropic/claude-haiku-4.5
+  api_key: sk-or-v1-...
   max_history: 20
+  max_tokens: 4096
 ```
 
-You can edit `bot.yaml` directly to tune `max_tokens` (default 4096) or `base_url` (default OpenRouter endpoint; only override for self-hosted gateways).
-
-> **Note:** `type: openrouter` is a legacy alias. New bots can use `type: openai_compat` with
-> `provider: openrouter` — the behaviour is identical. The legacy type will continue to work
-> indefinitely. See `docs/MINIMAX_SETUP.md` for the `openai_compat` approach with other providers.
+> **Legacy alias:** `type: openrouter` also works and is kept for backward compatibility.
+> New bots should use `type: openai_compat` with `provider: openrouter`.
 
 ### Notes on `max_history` and dedup
 
-- `max_history` from `bot.yaml` is the source of truth for the per-bot context window. Raising or lowering it takes effect on the next message — no daemon restart required (the LLM backend cache refreshes config in place).
-- abyss logs the user's incoming message to `conversation-YYMMDD.md` *before* calling the backend. The OpenRouter adapter knows this and drops a trailing duplicate so the model never sees the current user message twice. Older turns with different content stay in history untouched.
-- A caller (cron / heartbeat / future plugin) can pass an explicit `request.max_history` larger than 20 to widen the window for a single run; this overrides the bot-level cap. Setting it to 0 disables history replay entirely.
+- `max_history` from `bot.yaml` is the source of truth for the per-bot context window. Raising or lowering it takes effect on the next message — no restart required.
+- abyss logs the user's incoming message to `conversation-YYMMDD.md` *before* calling the backend. The OpenRouter adapter drops a trailing duplicate so the model never sees the current user message twice.
+- A caller (cron / heartbeat) can pass an explicit `request.max_history` larger than 20 to widen the window for a single run; this overrides the bot-level cap. Setting it to 0 disables history replay entirely.
 
-## Step 4 — start the bot
+## Step 3 — send a message
 
-```
-abyss start --bot or-bot
-```
+No restart needed. The next message to the bot picks up the new config automatically.
 
-abyss verifies the env var is set on startup and warns if it's missing.
+If the key is wrong or expired, abyss replies with a clear error and logs the detail at
+`~/.abyss/logs/`.
+
+## Available options
+
+| Key | Default | Description |
+|---|---|---|
+| `provider` | (none) | `openrouter` — sets the endpoint |
+| `api_key` | (required) | OpenRouter API key, set directly in bot.yaml |
+| `base_url` | from provider preset | Override the API endpoint URL |
+| `model` | `anthropic/claude-haiku-4.5` | Model identifier |
+| `max_history` | `20` | Number of past turns to replay from disk |
+| `max_tokens` | `4096` | Maximum output tokens per response |
 
 ## Recommended models (2026-04)
 
@@ -109,7 +80,7 @@ Verify current pricing at <https://openrouter.ai/models> before relying on these
 | Capability | Claude Code | OpenRouter |
 |---|---|---|
 | Built-in tools (Bash / Read / Write / Edit / Grep / Glob / Agent) | ✅ | ❌ |
-| MCP server tool calling | ✅ | ❌ (1차 릴리즈) |
+| MCP server tool calling | ✅ | ❌ |
 | Skills with `mcp.json` | Run | Markdown only — model sees instructions but cannot invoke |
 | `--resume` session continuity | ✅ | ❌ — replay-based history |
 | `/cancel` mid-stream | SDK interrupt + subprocess kill | Cancels HTTPX task |
@@ -120,12 +91,14 @@ Verify current pricing at <https://openrouter.ai/models> before relying on these
 
 ## Troubleshooting
 
-- **`OpenRouter backend requires environment variable 'OPENROUTER_API_KEY' to be set.`** — Export the key in the shell that starts abyss. Verify with `echo $OPENROUTER_API_KEY` before `abyss start`.
-- **`OpenRouter rejected the API key`** — Key is invalid, expired, or revoked. Regenerate at <https://openrouter.ai/account/keys>.
-- **`OpenRouter rate limit hit`** — Free tier has aggressive limits. Switch to a paid plan or pick a different model.
-- **`OpenRouter upstream error (HTTP 502)`** — Provider behind OpenRouter is down. Retry after a few seconds or switch models temporarily.
-- **Bot ignores tool requests** — Expected. Tools are unavailable on OpenRouter; route those bots through Claude Code instead.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `api_key` error | Key missing in bot.yaml | Add `api_key: sk-or-v1-...` to the `backend` block |
+| HTTP 401 / 403 | Wrong or expired key | Re-generate key at openrouter.ai/account/keys, update bot.yaml |
+| HTTP 429 | Rate limit | Free tier has aggressive limits; switch to paid plan or different model |
+| HTTP 502 | Provider behind OpenRouter is down | Retry after a few seconds or switch models |
+| Bot ignores tool requests | Expected | Tools unavailable on OpenRouter; use Claude Code backend instead |
 
 ## Cost monitoring
 
-OpenRouter bills per-request. Check spend at <https://openrouter.ai/account/usage>. abyss does **not** track costs — set an OpenRouter spend cap in their dashboard if you're nervous.
+OpenRouter bills per-request. Check spend at <https://openrouter.ai/account/usage>. abyss does **not** track costs — set an OpenRouter spend cap in their dashboard if needed.

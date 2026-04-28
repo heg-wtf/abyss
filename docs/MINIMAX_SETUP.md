@@ -34,23 +34,13 @@ MiniMax bots via `openai_compat` **cannot**:
 1. Log in to the [MiniMax platform](https://platform.minimaxi.com) (international)
    or [minimax.chat](https://platform.minimax.chat) (China).
 2. Go to **Account → API Keys → Create Key**.
-3. Copy the key (format: `eyJ...` or similar).
+3. Copy the key.
 
 ---
 
-## Step 2 — export the key
+## Step 2 — configure `bot.yaml`
 
-```bash
-export MINIMAX_API_KEY=your-minimax-api-key
-```
-
-Add this to your shell profile (`~/.zshrc`, `~/.bashrc`) so abyss can read it on every start.
-
----
-
-## Step 3 — configure `bot.yaml`
-
-Edit `~/.abyss/bots/<your-bot>/bot.yaml` and add a `backend` block:
+Edit `~/.abyss/bots/<your-bot>/bot.yaml` and add a `backend` block with `api_key` directly:
 
 **International endpoint:**
 
@@ -61,6 +51,7 @@ backend:
   type: openai_compat
   provider: minimax
   model: minimax-text-01
+  api_key: your-minimax-api-key
   max_history: 20
   max_tokens: 4096
 ```
@@ -72,6 +63,7 @@ backend:
   type: openai_compat
   provider: minimax_china
   model: minimax-text-01
+  api_key: your-minimax-api-key
 ```
 
 **Custom endpoint override** (if MiniMax changes URLs):
@@ -80,21 +72,19 @@ backend:
 backend:
   type: openai_compat
   provider: minimax
-  base_url: https://api.minimaxi.chat/v1   # explicit override
-  api_key_env: MINIMAX_API_KEY             # default for minimax preset
+  base_url: https://api.minimaxi.chat/v1
   model: minimax-text-01
+  api_key: your-minimax-api-key
 ```
 
 ---
 
-## Step 4 — restart abyss
+## Step 3 — send a message
 
-```bash
-abyss restart
-```
+No restart needed. The next message to the bot picks up the new config automatically.
 
-Send any message to your bot. If the key is missing or wrong, abyss replies with a clear error
-and logs the detail at `~/.abyss/logs/`.
+If the key is wrong or expired, abyss replies with a clear error and logs the detail at
+`~/.abyss/logs/`.
 
 ---
 
@@ -102,9 +92,9 @@ and logs the detail at `~/.abyss/logs/`.
 
 | Key | Default | Description |
 |---|---|---|
-| `provider` | (none) | `minimax` or `minimax_china` — sets endpoint + key env var |
+| `provider` | (none) | `minimax` or `minimax_china` — sets the endpoint |
+| `api_key` | (required) | MiniMax API key, set directly in bot.yaml |
 | `base_url` | from provider preset | Override the API endpoint URL |
-| `api_key_env` | `MINIMAX_API_KEY` | Env var name that holds the API key |
 | `model` | `anthropic/claude-haiku-4.5` | Model identifier |
 | `max_history` | `20` | Number of past turns to replay from disk |
 | `max_tokens` | `4096` | Maximum output tokens per response |
@@ -122,8 +112,8 @@ MiniMax's model identifiers (e.g. `minimax-text-01`, `abab6.5s-chat`) can be fou
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `MINIMAX_API_KEY` not set | Env var missing | `export MINIMAX_API_KEY=...` and restart |
-| HTTP 401 / 403 | Wrong or expired key | Re-generate key on platform, re-export |
+| `api_key` error | Key missing in bot.yaml | Add `api_key: your-key` to the `backend` block |
+| HTTP 401 / 403 | Wrong or expired key | Re-generate key on platform, update bot.yaml |
 | HTTP 429 | Rate limit | Lower request frequency or upgrade plan |
 | HTTP 500–503 | MiniMax upstream issue | Retry shortly |
 | Empty response | Model returned no content | Check model name is valid |
@@ -139,7 +129,8 @@ OpenRouter instead:
 backend:
   type: openai_compat
   provider: openrouter
-  model: minimax/minimax-text-01   # OpenRouter's model ID for MiniMax
+  model: minimax/minimax-text-01
+  api_key: your-openrouter-api-key
 ```
 
 See `docs/OPENROUTER_SETUP.md` for OpenRouter setup instructions.

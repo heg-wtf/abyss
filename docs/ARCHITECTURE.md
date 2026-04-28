@@ -87,8 +87,9 @@ heartbeat:                         # Heartbeat config
     start: "07:00"
     end: "23:00"
 backend:                           # Optional — defaults to claude_code
-  type: openrouter                 # claude_code | openrouter
-  api_key_env: OPENROUTER_API_KEY  # env var to read the key from
+  type: openai_compat              # claude_code | openai_compat | openrouter (legacy)
+  provider: openrouter             # openrouter | minimax | minimax_china
+  api_key: sk-or-v1-...            # API key set directly in bot.yaml
   model: anthropic/claude-haiku-4.5
   max_history: 20                  # turns of history to replay
   max_tokens: 4096
@@ -233,8 +234,9 @@ abyss routes every model call through `abyss.llm.LLMBackend`. New backends drop 
   ```yaml
   # OpenRouter
   backend:
-    type: openrouter
-    api_key_env: OPENROUTER_API_KEY
+    type: openai_compat
+    provider: openrouter
+    api_key: sk-or-v1-...           # set directly in bot.yaml
     model: anthropic/claude-haiku-4.5
     max_history: 20
     max_tokens: 4096
@@ -243,8 +245,8 @@ abyss routes every model call through `abyss.llm.LLMBackend`. New backends drop 
   backend:
     type: openai_compat
     provider: minimax
-    api_key_env: MINIMAX_API_KEY
-    model: MiniMax-Text-01
+    api_key: your-minimax-api-key   # set directly in bot.yaml
+    model: minimax-text-01
     max_history: 20
     max_tokens: 4096
   ```

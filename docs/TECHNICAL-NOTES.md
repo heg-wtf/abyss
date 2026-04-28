@@ -1060,14 +1060,13 @@ Streaming uses SSE (``stream=True`` with
 ``stream_options={"include_usage": true}``) and forwards each
 ``delta.content`` chunk to the caller's ``on_chunk`` callback.
 
-API key is read from the env var named in
-``backend.api_key_env`` (default ``OPENROUTER_API_KEY``). The
+API key is read from ``backend.api_key`` (set directly in bot.yaml). The
 ``Authorization`` header is sent alongside ``HTTP-Referer`` and
 ``X-Title`` headers (per OpenRouter's attribution guidelines).
 
 Failure modes are mapped to ``RuntimeError`` with actionable text:
 
-* 401 / 403 → "OpenRouter rejected the API key in <env var>".
+* 401 / 403 → "OpenRouter rejected the API key".
 * 429 → "OpenRouter rate limit hit".
 * 5xx → "OpenRouter upstream error" + first 300 chars of body.
 

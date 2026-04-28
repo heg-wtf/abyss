@@ -188,6 +188,37 @@ def test_openai_compat_does_not_support_tools_or_resume() -> None:
 # ─── close ─────────────────────────────────────────────────────────────────
 
 
+# ─── api_key in bot.yaml ──────────────────────────────────────────────────────
+
+
+def test_api_key_in_bot_yaml_takes_precedence_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    backend = OpenAICompatBackend(_bot_config({"provider": "minimax", "api_key": "direct-key-123"}))
+    headers = backend._auth_headers()
+    assert headers["Authorization"] == "Bearer direct-key-123"
+
+
+def test_api_key_in_bot_yaml_when_env_also_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIMAX_API_KEY", "env-key")
+    backend = OpenAICompatBackend(_bot_config({"provider": "minimax", "api_key": "direct-key-123"}))
+    headers = backend._auth_headers()
+    assert headers["Authorization"] == "Bearer direct-key-123"
+
+
+def test_env_var_used_when_api_key_not_in_bot_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MINIMAX_API_KEY", "env-key")
+    backend = OpenAICompatBackend(_bot_config({"provider": "minimax"}))
+    headers = backend._auth_headers()
+    assert headers["Authorization"] == "Bearer env-key"
+
+
+def test_error_when_neither_api_key_nor_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    backend = OpenAICompatBackend(_bot_config({"provider": "minimax"}))
+    with pytest.raises(RuntimeError, match="api_key"):
+        backend._auth_headers()
+
+
 @pytest.mark.asyncio
 async def test_close_calls_aclose() -> None:
     backend = OpenAICompatBackend(_bot_config({"provider": "minimax"}))
