@@ -405,8 +405,6 @@ cd abysscope && npx next build && npx next start --port 3847
 
 **Tech Stack**: Next.js 16 + shadcn/ui + Tailwind CSS + js-yaml. Reads `~/.abyss/` directly (no database).
 
-See [docs/PLAN-26-0311-ABYSSCOPE.md](docs/PLAN-26-0311-ABYSSCOPE.md) for full plan.
-
 ## Runtime Data
 
 Configuration and session data are stored in `~/.abyss/`. Override the path with the `ABYSS_HOME` environment variable.
