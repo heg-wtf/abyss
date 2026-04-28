@@ -5,6 +5,7 @@ import {
   getBotSessions,
   getSystemStatus,
   getDiskUsage,
+  getConversationFrequency,
 } from "@/lib/abyss";
 import { BotAvatar } from "@/components/bot-avatar";
 import {
@@ -17,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ModelBadge } from "@/components/status-badge";
 import { LiveStatus } from "@/components/live-status";
+import { ConversationHeatmap } from "@/components/conversation-heatmap";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,14 @@ export default function DashboardPage() {
   const bots = listBots();
   const status = getSystemStatus();
   const diskUsage = getDiskUsage();
+  const frequencyByBot = getConversationFrequency();
+  const mergedFrequency = frequencyByBot.reduce<Record<string, number>>((acc, bot) => {
+    for (const [date, count] of Object.entries(bot.data)) {
+      acc[date] = (acc[date] || 0) + count;
+    }
+    return acc;
+  }, {});
+  const totalConversations = frequencyByBot.reduce((sum, bot) => sum + bot.total, 0);
 
   return (
     <div className="space-y-6">
@@ -33,6 +43,15 @@ export default function DashboardPage() {
           <p className="text-muted-foreground text-sm">abyss system overview</p>
         </div>
         <LiveStatus initialRunning={status.running} />
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-4">Frequency</h2>
+        <Card>
+          <CardContent className="pt-4">
+            <ConversationHeatmap data={mergedFrequency} total={totalConversations} byBot={frequencyByBot} />
+          </CardContent>
+        </Card>
       </div>
 
       <div>

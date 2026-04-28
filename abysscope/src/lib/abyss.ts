@@ -621,6 +621,76 @@ export function getDiskUsage(): DiskUsage {
   };
 }
 
+// --- Conversation Frequency ---
+
+export interface BotConversationFrequency {
+  botName: string;
+  displayName: string;
+  data: Record<string, number>; // ISO date (YYYY-MM-DD) → user message count
+  total: number;
+}
+
+export function getConversationFrequency(): BotConversationFrequency[] {
+  const bots = listBots();
+  const cutoff = new Date();
+  cutoff.setFullYear(cutoff.getFullYear() - 1);
+
+  return bots.map((bot) => {
+    const botPath = abyssPath("bots", bot.name);
+    const sessionsDir = path.join(botPath, "sessions");
+    const data: Record<string, number> = {};
+
+    if (!fs.existsSync(sessionsDir)) {
+      return { botName: bot.name, displayName: bot.display_name || bot.name, data, total: 0 };
+    }
+
+    const sessionDirs = fs.readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(sessionsDir, entry.name));
+
+    for (const sessionDir of sessionDirs) {
+      let files: string[];
+      try {
+        files = fs.readdirSync(sessionDir);
+      } catch {
+        continue;
+      }
+
+      for (const file of files) {
+        const match = file.match(/^conversation-(\d{6})\.md$/);
+        if (!match) continue;
+
+        const raw = match[1]; // YYMMDD
+        const year = 2000 + parseInt(raw.slice(0, 2), 10);
+        const month = parseInt(raw.slice(2, 4), 10) - 1;
+        const day = parseInt(raw.slice(4, 6), 10);
+        const date = new Date(year, month, day);
+
+        if (date < cutoff) continue;
+
+        const isoDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        let content = "";
+        try {
+          content = fs.readFileSync(path.join(sessionDir, file), "utf-8");
+        } catch {
+          continue;
+        }
+
+        const count = (content.match(/^## user/gm) || []).length;
+        data[isoDate] = (data[isoDate] || 0) + count;
+      }
+    }
+
+    const total = Object.values(data).reduce((sum, n) => sum + n, 0);
+    return {
+      botName: bot.name,
+      displayName: bot.display_name || bot.name,
+      data,
+      total,
+    };
+  });
+}
+
 // --- Skill Usage ---
 
 export function getSkillUsageByBots(): Record<string, string[]> {
