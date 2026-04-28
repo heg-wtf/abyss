@@ -49,7 +49,7 @@ export default function DashboardPage() {
         <h2 className="text-lg font-semibold mb-4">Frequency</h2>
         <Card>
           <CardContent className="pt-4">
-            <ConversationHeatmap data={mergedFrequency} total={totalConversations} />
+            <ConversationHeatmap data={mergedFrequency} total={totalConversations} byBot={frequencyByBot} />
           </CardContent>
         </Card>
       </div>
