@@ -16,6 +16,7 @@ import { SessionList } from "@/components/session-list";
 import { MemoryEditor } from "@/components/memory-editor";
 import { SearchPanel } from "@/components/search-panel";
 import { CronEditor } from "@/components/cron-editor";
+import { BotAvatar } from "@/components/bot-avatar";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,11 @@ export default async function BotDetailPage({
           Dashboard
         </Link>
         <span className="text-muted-foreground">/</span>
+        <BotAvatar
+          botName={name}
+          displayName={bot.display_name || bot.telegram_botname || bot.name}
+          size="lg"
+        />
         <h1 className="text-2xl font-bold">
           {bot.display_name || bot.telegram_botname || bot.name}
         </h1>
