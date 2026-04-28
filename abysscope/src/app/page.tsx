@@ -17,7 +17,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ModelBadge } from "@/components/status-badge";
 import { LiveStatus } from "@/components/live-status";
-import { Separator } from "@/components/ui/separator";
 
 export const dynamic = "force-dynamic";
 
@@ -36,39 +35,33 @@ export default function DashboardPage() {
         <LiveStatus initialRunning={status.running} />
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Disk Breakdown</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {diskUsage.breakdown.filter((item) => item.name !== ".DS_Store").slice(0, 10).map((item) => {
-              const percentage =
-                diskUsage.totalBytes > 0
-                  ? (item.bytes / diskUsage.totalBytes) * 100
-                  : 0;
-              return (
-                <div key={item.name} className="flex items-center gap-3">
-                  <span className="text-sm w-40 truncate font-mono">
-                    {item.name}
-                  </span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary rounded-full"
-                      style={{ width: `${Math.max(percentage, 0.5)}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground w-20 text-right">
-                    {item.formatted}
-                  </span>
+      <div>
+        <h2 className="text-lg font-semibold mb-4">Disk Breakdown</h2>
+        <div className="space-y-2">
+          {diskUsage.breakdown.filter((item) => item.name !== ".DS_Store").slice(0, 10).map((item) => {
+            const percentage =
+              diskUsage.totalBytes > 0
+                ? (item.bytes / diskUsage.totalBytes) * 100
+                : 0;
+            return (
+              <div key={item.name} className="flex items-center gap-3">
+                <span className="text-sm w-40 truncate font-mono">
+                  {item.name}
+                </span>
+                <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full"
+                    style={{ width: `${Math.max(percentage, 0.5)}%` }}
+                  />
                 </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Separator />
+                <span className="text-xs text-muted-foreground w-20 text-right">
+                  {item.formatted}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       <div>
         <h2 className="text-lg font-semibold mb-4">Bots</h2>
