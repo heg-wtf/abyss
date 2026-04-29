@@ -79,6 +79,15 @@ A missing or invalid `claude_code` section falls back to all-on defaults. `bot_m
 
 `config.apply_claude_code_env(base)` is the canonical way to apply these toggles to a base env dict. It overwrites enabled keys with abyss values **and explicitly removes disabled keys** so a stray `export ENABLE_PROMPT_CACHING_1H=1` in `~/.zshrc` cannot resurrect a feature the user turned off in `config.yaml`. `_prepare_skill_config` calls it on top of `os.environ` before merging skill env.
 
+### Sandbox & Skill Shell-Execution (Phase 5 — Claude Code 2.1.91 / 2.1.113)
+
+`_apply_security_settings(working_directory, settings)` writes two security keys into every session settings.json:
+
+1. `disableSkillShellExecution` (boolean) — enabled when any attached skill is flagged `untrusted: true`. `import_skill_from_github` flips this on for every GitHub-sourced skill, alongside a `source: {type: github, url}` provenance block. `is_untrusted_skill(name)` and `has_untrusted_skill(skill_names)` are the helpers.
+2. `sandbox.network.deniedDomains` (array of strings) — `config.compose_bot_sandbox(bot_config)` returns the merged blocklist: `DEFAULT_SANDBOX_DENIED_DOMAINS` (cloud-metadata endpoints for GCP / AWS / Azure / Tencent / Aliyun) plus any extras declared under `bot.yaml.sandbox.denied_domains` (snake_case) or `sandbox.deniedDomains` (camelCase alias). Duplicates and non-string entries are dropped; defaults are preserved first so per-bot extras can extend but never replace them.
+
+Both keys are recomputed every time `_write_session_settings` runs, so flipping a skill's `untrusted` flag or editing `bot.yaml.sandbox` takes effect on the next message without a daemon restart.
+
 ### PostToolUse Telemetry & Skill-Conditional Hooks (Phase 4 — Claude Code 2.1.85 / 2.1.119)
 
 `abyss/hooks/log_tool_metrics.py` is a stdin-driven Python script registered as a Claude Code PostToolUse hook **and** PostToolUseFailure hook (matcher `*` for both). PostToolUse fires only on tool success — failed tool executions land on the separate `PostToolUseFailure` channel — so abyss registers the same script on both events and disambiguates via `ABYSS_HOOK_OUTCOME=success|failure` set in the hook command line. The recorded event carries an `outcome` field; aggregation counts a call as an error when `outcome == "failure"` **or** `exit_code != 0`. For each tool call, Claude Code 2.1.119 surfaces `duration_ms` on the payload; the hook resolves the bot from `cwd`, then calls `abyss.tool_metrics.append_event(bot_name, tool, duration_ms, …)` to append one JSONL row per call.

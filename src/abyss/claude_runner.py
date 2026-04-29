@@ -204,8 +204,43 @@ def _write_session_settings(working_directory: str, allowed_tools: list[str]) ->
     if "enabledPlugins" not in settings:
         settings["enabledPlugins"] = {}
 
+    # Phase 5: security hardening.
+    # 1. ``disableSkillShellExecution`` (CC 2.1.91): block ``!command``
+    #    blocks from running when any attached skill is untrusted
+    #    (e.g. imported from a third-party GitHub repo).
+    # 2. ``sandbox.network.deniedDomains`` (CC 2.1.113): refuse outbound
+    #    traffic to cloud-metadata endpoints by default; merge per-bot
+    #    extras from ``bot.yaml.sandbox.denied_domains``.
+    _apply_security_settings(working_directory, settings)
+
     with open(settings_path, "w") as settings_file:
         json.dump(settings, settings_file, indent=2)
+
+
+def _apply_security_settings(working_directory: str, settings: dict[str, Any]) -> None:
+    """Mutate ``settings`` with Phase 5 security blocks.
+
+    Resolves the bot from ``working_directory`` and pulls
+    ``has_untrusted_skill`` + ``compose_bot_sandbox`` to populate the
+    relevant settings.json keys. Falls back to defaults when the bot
+    directory cannot be resolved (test fixtures using ``/tmp``).
+    """
+    from abyss.config import compose_bot_sandbox, load_bot_config
+    from abyss.skill import has_untrusted_skill
+
+    bot_config: dict[str, Any] | None = None
+    bot_dir = _resolve_bot_dir_from_working_directory(working_directory)
+    if bot_dir is not None:
+        bot_config = load_bot_config(bot_dir.name)
+
+    skill_names = []
+    if isinstance(bot_config, dict):
+        raw_skills = bot_config.get("skills")
+        if isinstance(raw_skills, list):
+            skill_names = [name for name in raw_skills if isinstance(name, str)]
+
+    settings["disableSkillShellExecution"] = has_untrusted_skill(skill_names)
+    settings["sandbox"] = compose_bot_sandbox(bot_config)
 
 
 def register_process(session_key: str, process: asyncio.subprocess.Process) -> None:

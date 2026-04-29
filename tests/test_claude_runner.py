@@ -490,6 +490,118 @@ def test_write_session_settings_omits_precompact_when_bot_disables(tmp_path, mon
     assert "PreCompact" not in settings.get("hooks", {})
 
 
+def test_write_session_settings_includes_default_sandbox(tmp_path):
+    """Phase 5: every session.json carries the abyss default deniedDomains."""
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+    with open(tmp_path / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    domains = settings["sandbox"]["network"]["deniedDomains"]
+    assert "metadata.google.internal" in domains
+    assert "169.254.169.254" in domains
+
+
+def test_write_session_settings_merges_bot_sandbox_extras(tmp_path, monkeypatch):
+    """bot.yaml.sandbox.denied_domains is merged on top of defaults."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "sandbox": {"denied_domains": ["sensitive.example.com"]},
+        },
+    )
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    _write_session_settings(str(session), ["WebFetch"])
+    with open(session / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    domains = settings["sandbox"]["network"]["deniedDomains"]
+    assert domains[0] == "metadata.google.internal"
+    assert "sensitive.example.com" in domains
+
+
+def test_write_session_settings_disables_skill_shell_when_untrusted(tmp_path, monkeypatch):
+    """Attaching an untrusted skill flips disableSkillShellExecution=true."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    import yaml
+
+    from abyss.config import bot_directory, save_bot_config
+    from abyss.skill import skill_directory
+
+    skill_path = skill_directory("imported")
+    skill_path.mkdir(parents=True)
+    (skill_path / "SKILL.md").write_text("# imported\n")
+    (skill_path / "skill.yaml").write_text(yaml.safe_dump({"untrusted": True}))
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "skills": ["imported"],
+        },
+    )
+
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    _write_session_settings(str(session), ["WebFetch"])
+    with open(session / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    assert settings["disableSkillShellExecution"] is True
+
+
+def test_write_session_settings_keeps_skill_shell_enabled_for_trusted_skills(tmp_path, monkeypatch):
+    """No untrusted skill -> disableSkillShellExecution=false."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.config import bot_directory, save_bot_config
+    from abyss.skill import skill_directory
+
+    skill_path = skill_directory("safe")
+    skill_path.mkdir(parents=True)
+    (skill_path / "SKILL.md").write_text("# safe\n")
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "skills": ["safe"],
+        },
+    )
+
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    _write_session_settings(str(session), ["WebFetch"])
+    with open(session / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    assert settings["disableSkillShellExecution"] is False
+
+
 def test_write_session_settings_command_uses_python_module(tmp_path):
     """The PreCompact hook command points at ``python -m abyss.hooks.precompact_hook``."""
     import sys

@@ -715,8 +715,47 @@ def import_skill_from_github(url: str, name: str | None = None) -> Path:
         if content is not None:
             (target / optional_file).write_text(content, encoding="utf-8")
 
-    logger.info("Imported skill '%s' from %s to %s", skill_name, url, target)
+    # Phase 5: GitHub-imported skills are by default untrusted. The flag
+    # is read by claude_runner._write_session_settings to flip
+    # ``disableSkillShellExecution: true`` whenever an untrusted skill
+    # is attached to the bot, blocking inline shell exec from skill
+    # markdown / custom commands.
+    skill_yaml_path = target / "skill.yaml"
+    yaml_data: dict[str, Any] = {}
+    if skill_yaml_path.exists():
+        try:
+            loaded = yaml.safe_load(skill_yaml_path.read_text(encoding="utf-8")) or {}
+            if isinstance(loaded, dict):
+                yaml_data = loaded
+        except yaml.YAMLError:
+            yaml_data = {}
+    yaml_data["untrusted"] = True
+    yaml_data.setdefault("source", {"type": "github", "url": url})
+    skill_yaml_path.write_text(
+        yaml.safe_dump(yaml_data, default_flow_style=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+    logger.info("Imported skill '%s' from %s to %s (marked untrusted)", skill_name, url, target)
     return target
+
+
+def is_untrusted_skill(name: str) -> bool:
+    """Return ``True`` when the skill's yaml carries ``untrusted: true``.
+
+    Defaults to ``False`` for skills with no skill.yaml or no ``untrusted``
+    key, matching the historical "trusted" behaviour for built-in and
+    user-authored skills.
+    """
+    config = load_skill_config(name)
+    if not config:
+        return False
+    return bool(config.get("untrusted", False))
+
+
+def has_untrusted_skill(skill_names: list[str]) -> bool:
+    """Return ``True`` when any of the given skills is flagged untrusted."""
+    return any(is_untrusted_skill(name) for name in skill_names)
 
 
 def setup_qmd_conversations_collection() -> bool:

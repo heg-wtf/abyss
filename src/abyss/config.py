@@ -192,6 +192,51 @@ def is_mcp_always_load_enabled() -> bool:
     return bool(raw.get("mcp_always_load", True))
 
 
+# Defaults for ``sandbox.network.deniedDomains`` (Phase 5 / Claude Code 2.1.113).
+# Cloud-metadata service hostnames — these are the canonical SSRF targets and
+# should be unreachable from any abyss bot subprocess by default. Users can
+# extend the list per-bot via ``bot.yaml.sandbox.denied_domains``.
+DEFAULT_SANDBOX_DENIED_DOMAINS: tuple[str, ...] = (
+    "metadata.google.internal",
+    "metadata.goog",
+    "169.254.169.254",
+    "instance-data",
+    "metadata.azure.com",
+    "metadata.tencentyun.com",
+    "metadata.ali",
+)
+
+
+def default_sandbox_denied_domains() -> list[str]:
+    """Return abyss's baseline list of blocked outbound domains.
+
+    The list is the union of cloud-metadata endpoints across major
+    providers (GCP / AWS / Azure / Tencent / Aliyun). Returned as a list
+    copy so callers can mutate freely.
+    """
+    return list(DEFAULT_SANDBOX_DENIED_DOMAINS)
+
+
+def compose_bot_sandbox(bot_config: dict[str, Any] | None) -> dict[str, Any]:
+    """Build the ``sandbox`` settings.json subtree for a bot.
+
+    Reads ``bot.yaml.sandbox.denied_domains`` (or the camelCase alias
+    ``deniedDomains``) and merges it on top of the default list. Order
+    is preserved; duplicates are removed.
+    """
+    domains: list[str] = list(DEFAULT_SANDBOX_DENIED_DOMAINS)
+    if isinstance(bot_config, dict):
+        sandbox = bot_config.get("sandbox")
+        if isinstance(sandbox, dict):
+            extras = sandbox.get("denied_domains") or sandbox.get("deniedDomains") or []
+            if isinstance(extras, list):
+                for entry in extras:
+                    if isinstance(entry, str) and entry and entry not in domains:
+                        domains.append(entry)
+
+    return {"network": {"deniedDomains": domains}}
+
+
 def apply_claude_code_env(base: dict[str, str]) -> dict[str, str]:
     """Return ``base`` env merged with Claude Code toggles.
 

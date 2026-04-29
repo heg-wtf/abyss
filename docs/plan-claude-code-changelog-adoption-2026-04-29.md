@@ -131,10 +131,10 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 
 ### Phase 5: 보안 강화
 
-- [ ] Step 5.1: GitHub import skill 에 `disableSkillShellExecution: true` 자동 부여 (`import_skill_from_github`)
-- [ ] Step 5.2: `bot.yaml` 에 `sandbox: { deniedDomains: [...] }` 옵션 노출
-- [ ] Step 5.3: 기본 차단 도메인 리스트 (`metadata.google.internal`, `169.254.169.254`, 내부망 RFC1918) 제공
-- [ ] Step 5.4: `docs/SECURITY.md` 갱신 — 새 옵션 사용법 + 위협모델 보강
+- [x] Step 5.1: `import_skill_from_github` 가 `untrusted: true` + `source.{type,url}` 자동 기재. `_write_session_settings` 가 첨부 스킬 중 untrusted 가 있으면 `disableSkillShellExecution: true` 주입
+- [x] Step 5.2: `bot.yaml.sandbox.denied_domains` (snake_case) / `deniedDomains` (camelCase alias) 옵션 노출 → `compose_bot_sandbox(bot_config)` 가 settings.json 의 `sandbox.network.deniedDomains` 로 변환
+- [x] Step 5.3: `DEFAULT_SANDBOX_DENIED_DOMAINS` — 클라우드 메타데이터 엔드포인트 7종 (GCP/AWS/Azure/Tencent/Aliyun). RFC1918 IP CIDR 은 CC 의 deniedDomains 가 도메인-only 라 도입 보류
+- [x] Step 5.4: `docs/SECURITY.md` Phase 5 Hardening 섹션 추가 — 두 옵션의 위협모델 + 사용법
 
 ### Phase 6: ultrareview 패턴 + Skill effort 변수 (선택)
 
@@ -181,8 +181,10 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 - [x] `abysscope/src/lib/__tests__/abyss.test.ts::getToolMetrics` 5종 — empty/aggregation/sort/malformed-line/multi-day ordering
 
 **Phase 5**
-- [ ] `tests/test_skill.py::test_github_import_disables_shell` — flag 자동 부여
-- [ ] `tests/test_config.py::test_default_denied_domains` — 메타데이터 IP 포함
+- [x] `tests/test_skill.py::test_import_skill_from_github_marks_untrusted` — flag + provenance 자동 기재 (urllib mocking)
+- [x] `tests/test_skill.py::test_is_untrusted_skill_*` 2종 + `test_has_untrusted_skill_aggregates`
+- [x] `tests/test_config.py::test_default_sandbox_denied_domains_includes_metadata_endpoints` + 5종 — `compose_bot_sandbox` defaults / extras / camelCase / dedupe / malformed
+- [x] `tests/test_claude_runner.py::test_write_session_settings_includes_default_sandbox` + 3종 — bot extras merge, untrusted toggle on/off
 
 **Phase 6**
 - [ ] `tests/test_claude_runner.py::test_ultrareview_invocation` — 명령 라인 조립

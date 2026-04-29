@@ -785,3 +785,94 @@ def test_collect_skill_hooks_concatenates_across_skills(tmp_path, monkeypatch):
     entries = collect_skill_hooks(["first", "second"], "PostToolUse")
     matchers = [entry["matcher"] for entry in entries]
     assert matchers == ["Bash", "Read"]
+
+
+# --- Untrusted skill flag (Phase 5) ---
+
+
+def test_is_untrusted_skill_returns_false_for_missing_yaml(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+    from abyss.skill import is_untrusted_skill, skill_directory
+
+    skill_path = skill_directory("plain")
+    skill_path.mkdir(parents=True)
+    (skill_path / "SKILL.md").write_text("# plain\n")
+    assert is_untrusted_skill("plain") is False
+
+
+def test_is_untrusted_skill_reads_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    import yaml
+
+    from abyss.skill import is_untrusted_skill, skill_directory
+
+    skill_path = skill_directory("imported")
+    skill_path.mkdir(parents=True)
+    (skill_path / "SKILL.md").write_text("# imported\n")
+    (skill_path / "skill.yaml").write_text(yaml.safe_dump({"untrusted": True}))
+
+    assert is_untrusted_skill("imported") is True
+
+
+def test_has_untrusted_skill_aggregates(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    import yaml
+
+    from abyss.skill import has_untrusted_skill, skill_directory
+
+    safe = skill_directory("safe")
+    safe.mkdir(parents=True)
+    (safe / "SKILL.md").write_text("# safe\n")
+
+    risky = skill_directory("risky")
+    risky.mkdir(parents=True)
+    (risky / "SKILL.md").write_text("# risky\n")
+    (risky / "skill.yaml").write_text(yaml.safe_dump({"untrusted": True}))
+
+    assert has_untrusted_skill(["safe"]) is False
+    assert has_untrusted_skill(["safe", "risky"]) is True
+
+
+def test_import_skill_from_github_marks_untrusted(tmp_path, monkeypatch):
+    """import_skill_from_github writes untrusted: true into the skill.yaml.
+
+    Mocks urllib.request.urlopen so the test runs offline.
+    """
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    import io
+    from unittest.mock import patch
+
+    import yaml
+
+    from abyss.skill import import_skill_from_github, is_untrusted_skill
+
+    skill_md = b"# test-skill\n\nUseful tool."
+    yaml_payload = b"description: imported helper\n"
+
+    def fake_urlopen(url, *args, **kwargs):  # noqa: ARG001
+        url_str = url if isinstance(url, str) else url.full_url
+        if url_str.endswith("/SKILL.md"):
+            return io.BytesIO(skill_md)
+        if url_str.endswith("/skill.yaml"):
+            return io.BytesIO(yaml_payload)
+        # mcp.json absent
+        from urllib.error import HTTPError
+
+        raise HTTPError(url_str, 404, "not found", hdrs=None, fp=None)  # type: ignore[arg-type]
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        target = import_skill_from_github("https://github.com/example/test-skill", name="imported")
+
+    assert (target / "SKILL.md").exists()
+    yaml_data = yaml.safe_load((target / "skill.yaml").read_text())
+    assert yaml_data["untrusted"] is True
+    assert yaml_data["source"] == {
+        "type": "github",
+        "url": "https://github.com/example/test-skill",
+    }
+    # Original yaml fields preserved.
+    assert yaml_data["description"] == "imported helper"
+    assert is_untrusted_skill("imported") is True

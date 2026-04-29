@@ -5,13 +5,16 @@ from pathlib import Path
 import pytest
 
 from abyss.config import (
+    DEFAULT_SANDBOX_DENIED_DOMAINS,
     abyss_home,
     add_bot_to_config,
     apply_claude_code_env,
     bot_directory,
     bot_exists,
+    compose_bot_sandbox,
     default_claude_code_config,
     default_config,
+    default_sandbox_denied_domains,
     detect_local_timezone,
     generate_claude_md,
     get_claude_code_env,
@@ -412,3 +415,67 @@ def test_is_mcp_always_load_enabled_invalid_section(temp_abyss_home):
     """Invalid claude_code section falls back to True."""
     save_config({"bots": [], "claude_code": "not-a-dict"})
     assert is_mcp_always_load_enabled() is True
+
+
+# --- Sandbox denied domains (Phase 5) ---
+
+
+def test_default_sandbox_denied_domains_includes_metadata_endpoints():
+    domains = default_sandbox_denied_domains()
+    assert "metadata.google.internal" in domains
+    assert "169.254.169.254" in domains
+    assert "metadata.azure.com" in domains
+    # Returns a fresh list (mutating must not bleed into the constant).
+    domains.append("extra")
+    assert "extra" not in DEFAULT_SANDBOX_DENIED_DOMAINS
+
+
+def test_compose_bot_sandbox_returns_defaults_for_missing_config():
+    sandbox = compose_bot_sandbox(None)
+    assert sandbox == {"network": {"deniedDomains": list(DEFAULT_SANDBOX_DENIED_DOMAINS)}}
+
+    sandbox = compose_bot_sandbox({})
+    assert sandbox["network"]["deniedDomains"] == list(DEFAULT_SANDBOX_DENIED_DOMAINS)
+
+
+def test_compose_bot_sandbox_appends_bot_extras():
+    sandbox = compose_bot_sandbox(
+        {"sandbox": {"denied_domains": ["sensitive.cloud.example.com", "*.internal"]}}
+    )
+    domains = sandbox["network"]["deniedDomains"]
+    # Defaults are kept first.
+    assert domains[: len(DEFAULT_SANDBOX_DENIED_DOMAINS)] == list(DEFAULT_SANDBOX_DENIED_DOMAINS)
+    # Extras come after, in the order declared.
+    assert domains[-2:] == ["sensitive.cloud.example.com", "*.internal"]
+
+
+def test_compose_bot_sandbox_accepts_camel_case_alias():
+    sandbox = compose_bot_sandbox({"sandbox": {"deniedDomains": ["camel.example.com"]}})
+    assert "camel.example.com" in sandbox["network"]["deniedDomains"]
+
+
+def test_compose_bot_sandbox_dedupes_repeats():
+    sandbox = compose_bot_sandbox(
+        {
+            "sandbox": {
+                "denied_domains": [
+                    "metadata.google.internal",  # already a default
+                    "extra.example.com",
+                    "extra.example.com",
+                ]
+            }
+        }
+    )
+    domains = sandbox["network"]["deniedDomains"]
+    assert domains.count("metadata.google.internal") == 1
+    assert domains.count("extra.example.com") == 1
+
+
+def test_compose_bot_sandbox_ignores_malformed_extras():
+    sandbox = compose_bot_sandbox(
+        {"sandbox": {"denied_domains": ["good.example.com", 42, None, "", []]}}
+    )
+    domains = sandbox["network"]["deniedDomains"]
+    assert "good.example.com" in domains
+    assert 42 not in domains
+    assert "" not in domains

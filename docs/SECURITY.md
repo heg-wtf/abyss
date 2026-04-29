@@ -220,6 +220,28 @@ Total issues found: 35 (Critical: 5, High: 4, Medium: 5, Low/Info: 21)
 - **Description**: Model-generated text is rendered to Telegram via `markdown_to_telegram_html`, which escapes raw HTML before applying conversion. OpenRouter responses can contain adversarial markdown but the existing escape pipeline applies.
 - **Mitigation**: re-using the same conversion path means no new code path to audit. Slack adapter (separate plan) will need its own escape policy when it lands.
 
+## Phase 5 Hardening (2026-04-30)
+
+abyss now plumbs two recent Claude Code settings into every bot session:
+
+### `disableSkillShellExecution` (CC 2.1.91)
+
+- **What**: top-level boolean in `<session>/.claude/settings.json` that blocks inline `!command` shell execution embedded in skill markdown / custom commands.
+- **When abyss enables it**: any attached skill whose `skill.yaml` carries `untrusted: true`. `import_skill_from_github` automatically marks every imported skill untrusted (see `src/abyss/skill.py::is_untrusted_skill`).
+- **Threat addressed**: a malicious or compromised third-party skill cannot leverage `!`-blocks to execute arbitrary shell commands as the bot host. Falls back to `false` for trusted (built-in / user-authored) skills so power-user workflows are unaffected.
+- **Per-bot override**: explicit `bot.yaml.skills` curation. Removing the imported skill clears the flag.
+
+### `sandbox.network.deniedDomains` (CC 2.1.113)
+
+- **What**: an array of outbound-traffic blocklist entries (wildcards supported, e.g. `*.internal.example.com`) under `settings.json::sandbox.network.deniedDomains`.
+- **abyss baseline** (`config.DEFAULT_SANDBOX_DENIED_DOMAINS`): cloud-metadata endpoints across the major providers — `metadata.google.internal`, `metadata.goog`, `169.254.169.254`, `instance-data`, `metadata.azure.com`, `metadata.tencentyun.com`, `metadata.ali`. These are the canonical SSRF targets for cloud-runner deployments.
+- **Per-bot extras**: `bot.yaml.sandbox.denied_domains: ["sensitive.cloud.example.com"]`. Merged on top of the defaults; duplicates dropped.
+- **Threat addressed**: SSRF via the model's `WebFetch` tool, opportunistic exfiltration of secrets via internal/private endpoints. The list takes precedence over `allowedDomains` in CC's evaluation order.
+
+### Untrusted-skill provenance
+
+- `import_skill_from_github` now writes both `untrusted: true` and a `source: {type: github, url: ...}` provenance block into the imported `skill.yaml`. The provenance is informational; the security gate is the boolean.
+
 ## Positive Findings
 
 - All YAML loading uses `yaml.safe_load()` (no arbitrary code execution)
@@ -227,6 +249,8 @@ Total issues found: 35 (Critical: 5, High: 4, Medium: 5, Low/Info: 21)
 - `allowed_users` permission check on all handlers (group mode: human users only, bots bypass by design)
 - Process tracking with proper cleanup on shutdown (`cancel_all_processes`)
 - Skill `allowed_tools` provides hard permission boundary in Claude Code `-p` mode
+- GitHub-imported skills automatically run with `disableSkillShellExecution: true` (Phase 5)
+- Cloud-metadata endpoints blocked by default via `sandbox.network.deniedDomains` (Phase 5)
 
 ## Remediation Priority
 
