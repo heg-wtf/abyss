@@ -798,3 +798,57 @@ def collect_skill_environment_variables(skill_names: list[str]) -> dict[str, str
             result.update(env_values)
 
     return result
+
+
+# Claude Code event names that abyss recognises in skill.yaml hooks blocks.
+_SUPPORTED_HOOK_EVENTS = {
+    "PreToolUse",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "Stop",
+    "SubagentStop",
+    "SessionStart",
+    "PreCompact",
+    "PermissionDenied",
+}
+
+
+def collect_skill_hooks(skill_names: list[str], event_name: str) -> list[dict[str, Any]]:
+    """Return Claude Code hook entries declared by the given skills.
+
+    Each skill may add a ``hooks`` block to its ``skill.yaml``::
+
+        hooks:
+          PostToolUse:
+            - matcher: "Bash"
+              if: "tool_input.command =~ /rm -rf/"
+              hooks:
+                - type: command
+                  command: /usr/local/bin/safety-check.sh
+
+    Entries are written verbatim into the session ``settings.json`` so
+    Claude Code's conditional ``if`` field (2.1.85) is honoured. Unknown
+    events and malformed entries are dropped silently — a broken hook
+    must never block tool execution.
+    """
+    if event_name not in _SUPPORTED_HOOK_EVENTS:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for skill_name in skill_names:
+        config = load_skill_config(skill_name)
+        if not config:
+            continue
+        hooks_block = config.get("hooks")
+        if not isinstance(hooks_block, dict):
+            continue
+        raw_entries = hooks_block.get(event_name)
+        if not isinstance(raw_entries, list):
+            continue
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            if not isinstance(entry.get("hooks"), list):
+                continue
+            entries.append(entry)
+    return entries

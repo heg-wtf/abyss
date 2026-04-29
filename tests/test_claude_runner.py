@@ -374,16 +374,21 @@ def test_write_session_settings_creates_file(tmp_path):
 
 def test_write_session_settings_blocks_inherited_hooks_with_clean_dict(tmp_path):
     """The hooks dict is clean-slate per session, blocking ~/.claude/settings.json
-    entries except the keys abyss explicitly populates."""
+    entries except the keys abyss explicitly populates (PreCompact +
+    PostToolUse + PostToolUseFailure)."""
     _write_session_settings(str(tmp_path), ["WebFetch"])
 
     settings_path = tmp_path / ".claude" / "settings.json"
     with open(settings_path) as file:
         settings = json.load(file)
     assert "hooks" in settings
-    # PreCompact populated; other event types are absent (so user globals
-    # like PostToolUse cannot leak into the bot subprocess).
-    assert set(settings["hooks"].keys()) == {"PreCompact"}
+    # Only abyss-controlled events are present. User globals (e.g. UserPromptSubmit,
+    # SessionStart) cannot leak into the bot subprocess.
+    assert set(settings["hooks"].keys()) == {
+        "PreCompact",
+        "PostToolUse",
+        "PostToolUseFailure",
+    }
 
 
 def test_write_session_settings_disables_inherited_plugins(tmp_path):
@@ -498,6 +503,124 @@ def test_write_session_settings_command_uses_python_module(tmp_path):
     inner = entries[0]["hooks"][0]
     assert inner["type"] == "command"
     assert inner["command"] == f"{sys.executable} -m abyss.hooks.precompact_hook"
+
+
+def test_write_session_settings_injects_post_tool_use(tmp_path):
+    """PostToolUse hook is registered for tool latency metrics with outcome=success."""
+    import sys
+
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+    with open(tmp_path / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    entries = settings["hooks"]["PostToolUse"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "*"
+    inner = entries[0]["hooks"][0]
+    assert inner["type"] == "command"
+    assert "ABYSS_HOOK_OUTCOME=success" in inner["command"]
+    assert f"{sys.executable} -m abyss.hooks.log_tool_metrics" in inner["command"]
+
+
+def test_write_session_settings_injects_post_tool_use_failure(tmp_path):
+    """PostToolUseFailure hook is registered separately (CC fires the
+    failure channel for non-zero tool exits / exceptions; PostToolUse is
+    success-only). The hook command tags the event with outcome=failure
+    via ABYSS_HOOK_OUTCOME."""
+    import sys
+
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+    with open(tmp_path / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    entries = settings["hooks"]["PostToolUseFailure"]
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "*"
+    inner = entries[0]["hooks"][0]
+    assert "ABYSS_HOOK_OUTCOME=failure" in inner["command"]
+    assert f"{sys.executable} -m abyss.hooks.log_tool_metrics" in inner["command"]
+
+
+def test_write_session_settings_omits_post_tool_use_when_bot_disables(tmp_path, monkeypatch):
+    """`hooks_enabled: false` skips PostToolUse along with PreCompact."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "noisy",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "hooks_enabled": False,
+        },
+    )
+    session = bot_directory("noisy") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    _write_session_settings(str(session), ["WebFetch"])
+    with open(session / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+    assert "PreCompact" not in settings["hooks"]
+    assert "PostToolUse" not in settings["hooks"]
+    assert "PostToolUseFailure" not in settings["hooks"]
+
+
+def test_write_session_settings_appends_skill_post_tool_use_hooks(tmp_path, monkeypatch):
+    """Skill-declared PostToolUse hooks are appended after the abyss baseline."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    import yaml
+
+    from abyss.config import bot_directory, save_bot_config
+    from abyss.skill import skill_directory
+
+    skill_path = skill_directory("safety")
+    skill_path.mkdir(parents=True)
+    (skill_path / "SKILL.md").write_text("# safety\nGuardrail.")
+    skill_yaml = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "if": "tool_input.command =~ /rm -rf/",
+                    "hooks": [{"type": "command", "command": "/usr/local/bin/safety-check.sh"}],
+                }
+            ]
+        }
+    }
+    (skill_path / "skill.yaml").write_text(yaml.safe_dump(skill_yaml))
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "skills": ["safety"],
+        },
+    )
+
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    _write_session_settings(str(session), ["WebFetch"])
+    with open(session / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    post_entries = settings["hooks"]["PostToolUse"]
+    # First: abyss baseline. Second: skill-supplied with `if` field.
+    assert len(post_entries) == 2
+    assert post_entries[0]["matcher"] == "*"
+    assert post_entries[1]["matcher"] == "Bash"
+    assert post_entries[1]["if"] == "tool_input.command =~ /rm -rf/"
 
 
 @pytest.mark.asyncio

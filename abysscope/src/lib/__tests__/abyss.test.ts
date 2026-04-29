@@ -31,6 +31,8 @@ import {
   createSkill,
   updateSkill,
   deleteSkill,
+  getToolMetrics,
+  readToolMetricEvents,
 } from "../abyss";
 
 let testHome: string;
@@ -766,6 +768,96 @@ describe("getDiskUsage", () => {
     const small = usage.breakdown.find((b) => b.name === "small.txt");
     expect(small).toBeDefined();
     expect(small!.formatted).toBe("5 B");
+  });
+});
+
+// --- Tool Metrics (Phase 4) ---
+
+function writeMetricsFile(botName: string, day: string, lines: string[]): void {
+  const dir = path.join(testHome, "bots", botName, "tool_metrics");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${day}.jsonl`), lines.join("\n") + "\n");
+}
+
+describe("getToolMetrics / readToolMetricEvents", () => {
+  it("returns empty for bots without metrics dir", () => {
+    setupBasicConfig();
+    expect(getToolMetrics("testbot")).toEqual([]);
+    expect(readToolMetricEvents("testbot")).toEqual([]);
+  });
+
+  it("aggregates events per tool with p50/p95/p99 and error counts", () => {
+    setupBasicConfig();
+    const lines = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((duration) =>
+      JSON.stringify({
+        ts: "2026-04-30T00:00:00+00:00",
+        tool: "Bash",
+        duration_ms: duration,
+        exit_code: duration === 30 ? 1 : 0,
+      }),
+    );
+    writeMetricsFile("testbot", "20260430", lines);
+
+    const rows = getToolMetrics("testbot");
+    expect(rows).toHaveLength(1);
+    const bash = rows[0];
+    expect(bash.tool).toBe("Bash");
+    expect(bash.count).toBe(10);
+    expect(bash.p50_ms).toBeCloseTo(55.0, 5);
+    expect(bash.p95_ms).toBeCloseTo(95.5, 5);
+    expect(bash.p99_ms).toBeCloseTo(99.1, 5);
+    expect(bash.errorCount).toBe(1);
+  });
+
+  it("groups by tool and sorts by descending call count", () => {
+    setupBasicConfig();
+    writeMetricsFile("testbot", "20260430", [
+      JSON.stringify({ tool: "Bash", duration_ms: 10 }),
+      JSON.stringify({ tool: "Bash", duration_ms: 20 }),
+      JSON.stringify({ tool: "Read", duration_ms: 5 }),
+    ]);
+
+    const rows = getToolMetrics("testbot");
+    expect(rows.map((row) => row.tool)).toEqual(["Bash", "Read"]);
+  });
+
+  it("counts outcome=failure as errors even without exit_code", () => {
+    setupBasicConfig();
+    writeMetricsFile("testbot", "20260430", [
+      JSON.stringify({ tool: "Bash", duration_ms: 10, outcome: "success" }),
+      JSON.stringify({ tool: "Bash", duration_ms: 20, outcome: "failure" }),
+      JSON.stringify({ tool: "Bash", duration_ms: 30, outcome: "failure" }),
+    ]);
+
+    const rows = getToolMetrics("testbot");
+    expect(rows[0].count).toBe(3);
+    expect(rows[0].errorCount).toBe(2);
+  });
+
+  it("ignores malformed lines", () => {
+    setupBasicConfig();
+    writeMetricsFile("testbot", "20260430", [
+      JSON.stringify({ tool: "Bash", duration_ms: 10 }),
+      "not-json",
+      JSON.stringify({ tool: "Bash", duration_ms: "oops" }), // wrong type
+      JSON.stringify({ tool: "Bash", duration_ms: 20 }),
+    ]);
+
+    const rows = getToolMetrics("testbot");
+    expect(rows[0].count).toBe(2);
+  });
+
+  it("reads events oldest-first across multiple day files", () => {
+    setupBasicConfig();
+    writeMetricsFile("testbot", "20260428", [
+      JSON.stringify({ ts: "older", tool: "Read", duration_ms: 1 }),
+    ]);
+    writeMetricsFile("testbot", "20260430", [
+      JSON.stringify({ ts: "newer", tool: "Bash", duration_ms: 2 }),
+    ]);
+
+    const events = readToolMetricEvents("testbot");
+    expect(events.map((event) => event.ts)).toEqual(["older", "newer"]);
   });
 });
 

@@ -72,6 +72,59 @@ def _abyss_precompact_hook_entry() -> dict[str, Any]:
     return {"matcher": "", "hooks": [{"type": "command", "command": command}]}
 
 
+def _abyss_posttooluse_hook_entry(outcome: str = "success") -> dict[str, Any]:
+    """Build the PostToolUse / PostToolUseFailure hook entry.
+
+    Claude Code 2.1.119 surfaces ``duration_ms`` on PostToolUse payloads,
+    but failed tool executions land on ``PostToolUseFailure`` instead.
+    Register the hook on both events so abyss captures every call.
+    ``ABYSS_HOOK_OUTCOME`` lets the hook script tag the event without
+    parsing the payload schema differences between the two channels.
+
+    abyss's hook (``abyss.hooks.log_tool_metrics``) appends one JSONL
+    event per tool call so abysscope can graph latency without a DB.
+    Matcher is ``*`` to capture every tool.
+    """
+    import shlex
+    import sys
+
+    command = (
+        f"ABYSS_HOOK_OUTCOME={shlex.quote(outcome)} "
+        f"{sys.executable} -m abyss.hooks.log_tool_metrics"
+    )
+    return {"matcher": "*", "hooks": [{"type": "command", "command": command}]}
+
+
+def _merge_skill_hooks(
+    working_directory: str,
+    event_name: str,
+    existing: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Append skill-declared hook entries to the baseline list.
+
+    Each attached skill may declare ``hooks.<EventName>`` in its
+    ``skill.yaml`` (Claude Code event names: ``PreToolUse``, ``PostToolUse``,
+    ``PreCompact``, etc.). Entries can use the ``if`` field added in
+    Claude Code 2.1.85 for conditional firing — abyss writes the field
+    through verbatim.
+    """
+    from abyss.config import load_bot_config
+
+    bot_dir = _resolve_bot_dir_from_working_directory(working_directory)
+    if bot_dir is None:
+        return existing
+
+    bot_config = load_bot_config(bot_dir.name) or {}
+    skill_names = bot_config.get("skills") or []
+    if not skill_names:
+        return existing
+
+    from abyss.skill import collect_skill_hooks
+
+    skill_entries = collect_skill_hooks(skill_names, event_name)
+    return existing + skill_entries
+
+
 def _hooks_enabled_for_working_directory(working_directory: str) -> bool:
     """Return whether abyss should inject hooks for the given session.
 
@@ -124,8 +177,24 @@ def _write_session_settings(working_directory: str, allowed_tools: list[str]) ->
 
     if _hooks_enabled_for_working_directory(working_directory):
         settings["hooks"]["PreCompact"] = [_abyss_precompact_hook_entry()]
+        # PostToolUse fires only on success; failures land on
+        # PostToolUseFailure (CC docs). Register both so the metrics
+        # log doesn't underreport errors. Skill-supplied entries are
+        # appended after the abyss baseline on each event.
+        settings["hooks"]["PostToolUse"] = _merge_skill_hooks(
+            working_directory,
+            "PostToolUse",
+            existing=[_abyss_posttooluse_hook_entry("success")],
+        )
+        settings["hooks"]["PostToolUseFailure"] = _merge_skill_hooks(
+            working_directory,
+            "PostToolUseFailure",
+            existing=[_abyss_posttooluse_hook_entry("failure")],
+        )
     else:
         settings["hooks"].pop("PreCompact", None)
+        settings["hooks"].pop("PostToolUse", None)
+        settings["hooks"].pop("PostToolUseFailure", None)
 
     # Disable all plugins for bot subprocess sessions.
     # Plugin hooks (e.g. context-mode) are loaded from

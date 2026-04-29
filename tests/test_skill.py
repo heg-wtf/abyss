@@ -685,3 +685,103 @@ def test_compose_claude_md_skips_conversation_search_when_unavailable():
         skill_names=[],
     )
     assert "## conversation_search" not in result
+
+
+# --- collect_skill_hooks tests (Phase 4) ---
+
+
+def _write_skill_with_hooks(skills_root, name, hooks_yaml):
+    """Helper: create a fake skill dir with the given hooks block."""
+    import yaml
+
+    from abyss.skill import skill_directory
+
+    skill_path = skill_directory(name)
+    skill_path.mkdir(parents=True, exist_ok=True)
+    (skill_path / "SKILL.md").write_text(f"# {name}\nDoc.")
+    (skill_path / "skill.yaml").write_text(yaml.safe_dump({"hooks": hooks_yaml}))
+
+
+def test_collect_skill_hooks_returns_entries_for_event(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    from abyss.skill import collect_skill_hooks
+
+    _write_skill_with_hooks(
+        tmp_path,
+        "guard",
+        {
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "if": "tool_input.command =~ /rm -rf/",
+                    "hooks": [{"type": "command", "command": "/bin/true"}],
+                }
+            ]
+        },
+    )
+
+    entries = collect_skill_hooks(["guard"], "PostToolUse")
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "Bash"
+    # ``if`` field is preserved verbatim for Claude Code 2.1.85 evaluation.
+    assert entries[0]["if"] == "tool_input.command =~ /rm -rf/"
+
+
+def test_collect_skill_hooks_unknown_event_returns_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    from abyss.skill import collect_skill_hooks
+
+    _write_skill_with_hooks(
+        tmp_path,
+        "guard",
+        {"PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "x"}]}]},
+    )
+    assert collect_skill_hooks(["guard"], "NotAnEvent") == []
+
+
+def test_collect_skill_hooks_skips_malformed_entries(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    from abyss.skill import collect_skill_hooks
+
+    _write_skill_with_hooks(
+        tmp_path,
+        "guard",
+        {
+            "PostToolUse": [
+                "not-a-dict",
+                {"matcher": "Bash"},  # missing inner hooks list
+                {
+                    "matcher": "Read",
+                    "hooks": [{"type": "command", "command": "/bin/true"}],
+                },
+            ]
+        },
+    )
+
+    entries = collect_skill_hooks(["guard"], "PostToolUse")
+    assert len(entries) == 1
+    assert entries[0]["matcher"] == "Read"
+
+
+def test_collect_skill_hooks_concatenates_across_skills(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+
+    from abyss.skill import collect_skill_hooks
+
+    _write_skill_with_hooks(
+        tmp_path,
+        "first",
+        {"PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "a"}]}]},
+    )
+    _write_skill_with_hooks(
+        tmp_path,
+        "second",
+        {"PostToolUse": [{"matcher": "Read", "hooks": [{"type": "command", "command": "b"}]}]},
+    )
+
+    entries = collect_skill_hooks(["first", "second"], "PostToolUse")
+    matchers = [entry["matcher"] for entry in entries]
+    assert matchers == ["Bash", "Read"]

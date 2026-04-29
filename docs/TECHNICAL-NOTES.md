@@ -79,6 +79,38 @@ A missing or invalid `claude_code` section falls back to all-on defaults. `bot_m
 
 `config.apply_claude_code_env(base)` is the canonical way to apply these toggles to a base env dict. It overwrites enabled keys with abyss values **and explicitly removes disabled keys** so a stray `export ENABLE_PROMPT_CACHING_1H=1` in `~/.zshrc` cannot resurrect a feature the user turned off in `config.yaml`. `_prepare_skill_config` calls it on top of `os.environ` before merging skill env.
 
+### PostToolUse Telemetry & Skill-Conditional Hooks (Phase 4 — Claude Code 2.1.85 / 2.1.119)
+
+`abyss/hooks/log_tool_metrics.py` is a stdin-driven Python script registered as a Claude Code PostToolUse hook **and** PostToolUseFailure hook (matcher `*` for both). PostToolUse fires only on tool success — failed tool executions land on the separate `PostToolUseFailure` channel — so abyss registers the same script on both events and disambiguates via `ABYSS_HOOK_OUTCOME=success|failure` set in the hook command line. The recorded event carries an `outcome` field; aggregation counts a call as an error when `outcome == "failure"` **or** `exit_code != 0`. For each tool call, Claude Code 2.1.119 surfaces `duration_ms` on the payload; the hook resolves the bot from `cwd`, then calls `abyss.tool_metrics.append_event(bot_name, tool, duration_ms, …)` to append one JSONL row per call.
+
+Storage layout: `~/.abyss/bots/<name>/tool_metrics/YYMMDD.jsonl`. One file per UTC day, rotated on every append (files older than `RETENTION_DAYS = 7` days are deleted). Each row is `{"ts", "tool", "duration_ms", "exit_code"?, "session_id"?}`. Markdown is *not* the source of truth — these JSONL files are.
+
+Aggregation: `abyss.tool_metrics.aggregate(bot_name)` returns per-tool rows with `count`, `p50_ms`, `p95_ms`, `p99_ms`, `error_count`. The mirror function on the abysscope side, `getToolMetrics(name)`, reads the same files via `lib/abyss.ts` and feeds the new "Metrics" tab on the bot detail page (`components/tool-latency-panel.tsx`).
+
+Same safety contract as the PreCompact hook (Phase 3):
+
+- `AI_AGENT == "abyss"` guard — hook is a no-op for non-abyss subprocesses.
+- Never blocks: empty stdin, malformed JSON, missing `cwd` / `tool_name` / `duration_ms`, unresolvable bot dir, and exceptions all return exit 0.
+- Per-bot opt-out via `bot.yaml.hooks_enabled: false` skips both PostToolUse and PreCompact.
+
+#### Skill-Conditional Hooks
+
+Each skill may declare extra hook entries in its `skill.yaml`:
+
+```yaml
+hooks:
+  PostToolUse:
+    - matcher: "Bash"
+      if: "tool_input.command =~ /rm -rf/"
+      hooks:
+        - type: command
+          command: /usr/local/bin/safety-check.sh
+```
+
+`abyss.skill.collect_skill_hooks(skill_names, event_name)` returns these entries unchanged — abyss writes the optional `if` field through verbatim so Claude Code 2.1.85 can evaluate it. Supported events are `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SubagentStop`, `SessionStart`, `PreCompact`, `PermissionDenied`. Malformed entries (missing inner `hooks` list, non-dict items, unsupported events) are dropped silently — a broken hook must never block tool execution.
+
+`_write_session_settings` calls `_merge_skill_hooks(working_directory, "PostToolUse", existing=[abyss baseline])` so abyss's `log_tool_metrics` always runs first, followed by skill-supplied entries.
+
 ### PreCompact Hook (Phase 3 — Claude Code 2.1.105)
 
 `abyss/hooks/precompact_hook.py` is a stdin-driven Python script registered as a Claude Code PreCompact hook in every bot session's `.claude/settings.json`. When the host decides to compact the in-flight conversation, it invokes the hook with a JSON payload (`{cwd, session_id, transcript_path, …}`); abyss reuses that signal to also compact the bot's persistent files (MEMORY.md / HEARTBEAT.md / user SKILL.md) via `token_compact.run_compact(bot_name)`.

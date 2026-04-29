@@ -122,12 +122,12 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 
 **Hook 위치**: Phase 3 와 동일 — `~/.abyss/bots/<name>/.claude/settings.json` 에만 등록. 사용자 글로벌 `~/.claude/settings.json` 건드리지 않음.
 
-- [ ] Step 4.1: PostToolUse hook 스크립트 (`abyss/hooks/log_tool_metrics.py`) 추가 — payload 의 `duration_ms` 파싱 후 jsonl append. 진입부에서 `AI_AGENT` 체크.
-- [ ] Step 4.2: 봇별 `~/.abyss/bots/<name>/.claude/settings.json` 의 hooks 섹션에 위 스크립트를 PostToolUse 로 등록
-- [ ] Step 4.3: `~/.abyss/bots/<name>/tool_metrics.jsonl` append (rotation 7일)
-- [ ] Step 4.4: abysscope 봇 상세에 "Tool Latency" 패널 추가 (per-tool p50/p95)
-- [ ] Step 4.5: skill 별 hook 등록 시 `if` 필드 활용 — `compose_claude_md` 단계에서 봇 settings.json 에 조건부 hook 머지 (skill 의 `mcp.json` 과 같은 위치 정책)
-- [ ] Step 4.6: builtin_skills 중 1개를 조건부 hook 예시로 마이그레이션
+- [x] Step 4.1: PostToolUse hook 스크립트 `abyss/hooks/log_tool_metrics.py` — `duration_ms` 파싱, `AI_AGENT` 가드, 모든 실패 경로 exit 0
+- [x] Step 4.2: hook 등록 위치는 Phase 3 와 동일 — 세션-레벨 `<session>/.claude/settings.json` 의 `hooks.PostToolUse` (사용자 글로벌 settings 무관)
+- [x] Step 4.3: 저장 경로 `~/.abyss/bots/<name>/tool_metrics/YYMMDD.jsonl` (per-day) — append 시 마다 7일 초과 파일 자동 삭제 (`abyss.tool_metrics.append_event`)
+- [x] Step 4.4: abysscope `Metrics` 탭 + `ToolLatencyPanel` 컴포넌트 — `getToolMetrics(name)` 가 jsonl 읽어 p50/p95/p99/count/errors 집계
+- [x] Step 4.5: skill `if` 필드 — `skill.yaml.hooks.<Event>` 블록을 `collect_skill_hooks(skills, event)` 로 수집해 세션 settings 에 verbatim 머지. `if` 필드는 Claude Code 가 평가하므로 그대로 통과
+- [ ] Step 4.6: builtin_skill 마이그레이션 — 보류. 현재 abyss 쪽에서 유의미한 조건부 hook 예시가 부재. Phase 5 의 `disableSkillShellExecution` 와 함께 고려할 가치 있음 → 별도 plan 으로 분리
 
 ### Phase 5: 보안 강화
 
@@ -174,8 +174,11 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 - [x] `tests/test_claude_runner.py::test_write_session_settings_*` 7종 — settings.json 에 PreCompact entry 주입, 토글 false 시 생략, hook command 형식 검증, 기존 hook 보존
 
 **Phase 4**
-- [ ] `tests/test_hook_telemetry.py::test_duration_ms_recorded` — payload 파싱
-- [ ] `tests/test_hook_telemetry.py::test_metrics_jsonl_rotation` — 7일 초과 파일 정리
+- [x] `tests/test_tool_metrics.py` 11종 — append/rotation/aggregation/percentile/corrupt-line tolerance
+- [x] `tests/test_log_tool_metrics_hook.py` 9종 — guard, stdin handling, happy path, nested duration, exception swallow
+- [x] `tests/test_claude_runner.py` 추가 4종 — PostToolUse 주입, hooks_enabled=false 옵트아웃, skill hook 머지 (`if` 필드)
+- [x] `tests/test_skill.py::collect_skill_hooks` 4종 — supported events, malformed entries skipped, multi-skill concat
+- [x] `abysscope/src/lib/__tests__/abyss.test.ts::getToolMetrics` 5종 — empty/aggregation/sort/malformed-line/multi-day ordering
 
 **Phase 5**
 - [ ] `tests/test_skill.py::test_github_import_disables_shell` — flag 자동 부여

@@ -5,6 +5,7 @@ import {
   getCronJobs,
   getBotSessions,
   getBotMemory,
+  getToolMetrics,
   listSkills,
 } from "@/lib/abyss";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import { MemoryEditor } from "@/components/memory-editor";
 import { SearchPanel } from "@/components/search-panel";
 import { CronEditor } from "@/components/cron-editor";
 import { BotAvatar } from "@/components/bot-avatar";
+import { ToolLatencyPanel } from "@/components/tool-latency-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +35,7 @@ export default async function BotDetailPage({
   const sessions = getBotSessions(name);
   const memory = getBotMemory(name);
   const availableSkillNames = listSkills().map((skill) => skill.name);
+  const toolMetrics = getToolMetrics(name);
 
   return (
     <div className="space-y-6">
@@ -71,6 +74,9 @@ export default async function BotDetailPage({
           </TabsTrigger>
           <TabsTrigger value="memory">Memory</TabsTrigger>
           <TabsTrigger value="search">Search</TabsTrigger>
+          <TabsTrigger value="metrics">
+            Metrics{toolMetrics.length > 0 && ` (${toolMetrics.length})`}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile" className="space-y-4 mt-4">
@@ -212,6 +218,10 @@ export default async function BotDetailPage({
 
         <TabsContent value="search" className="mt-4">
           <SearchPanel botName={name} />
+        </TabsContent>
+
+        <TabsContent value="metrics" className="mt-4">
+          <ToolLatencyPanel rows={toolMetrics} />
         </TabsContent>
       </Tabs>
     </div>
