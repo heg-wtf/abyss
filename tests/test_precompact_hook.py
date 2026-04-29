@@ -51,15 +51,41 @@ def test_main_no_op_when_ai_agent_other(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_main_handles_empty_stdin(abyss_env: None) -> None:
-    assert precompact_hook.main(stdin=io.StringIO("")) == 0
+    """Empty stdin -> exit 0 without invoking run_compact."""
+    with patch("abyss.token_compact.run_compact") as run_compact:
+        assert precompact_hook.main(stdin=io.StringIO("")) == 0
+    run_compact.assert_not_called()
 
 
 def test_main_handles_invalid_json(abyss_env: None) -> None:
-    assert precompact_hook.main(stdin=io.StringIO("{not json")) == 0
+    """Malformed JSON -> exit 0 without invoking run_compact."""
+    with patch("abyss.token_compact.run_compact") as run_compact:
+        assert precompact_hook.main(stdin=io.StringIO("{not json")) == 0
+    run_compact.assert_not_called()
 
 
 def test_main_handles_non_object_payload(abyss_env: None) -> None:
-    assert precompact_hook.main(stdin=io.StringIO("[]")) == 0
+    """Non-object JSON payload -> exit 0 without invoking run_compact."""
+    with patch("abyss.token_compact.run_compact") as run_compact:
+        assert precompact_hook.main(stdin=io.StringIO("[]")) == 0
+    run_compact.assert_not_called()
+
+
+def test_main_skips_when_payload_omits_cwd(
+    abyss_env: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Even if cwd is inherited from the bot session dir, an invalid
+    payload (missing ``cwd``) must NOT trigger compaction. Codex P2.
+    """
+    # Simulate the hook process inheriting a bot session as its cwd.
+    session = tmp_path / "bots" / "alpha" / "sessions" / "chat_42"
+    session.mkdir(parents=True)
+    monkeypatch.chdir(session)
+
+    with patch("abyss.token_compact.run_compact") as run_compact:
+        # Payload exists but lacks ``cwd``.
+        assert precompact_hook.main(stdin=_stdin_with({"session_id": "x"})) == 0
+    run_compact.assert_not_called()
 
 
 # ─── cwd resolution ──────────────────────────────────────────────────────

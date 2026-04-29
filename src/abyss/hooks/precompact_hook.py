@@ -91,7 +91,16 @@ def main(stdin: Any | None = None) -> int:
         return EXIT_OK
 
     payload = _read_payload(stdin if stdin is not None else sys.stdin)
-    cwd = payload.get("cwd") or os.getcwd()
+    cwd = payload.get("cwd")
+    if not cwd:
+        # Empty stdin, malformed JSON, non-object payload, or a real
+        # PreCompact run that omits ``cwd`` all land here. Do NOT fall
+        # back to ``os.getcwd()``: the hook subprocess inherits the bot
+        # session directory from its parent, so a fallback would let an
+        # invalid payload still trigger compaction. Skip instead.
+        logger.info("PreCompact hook: payload missing cwd; skipping")
+        return EXIT_OK
+
     bot_name = _resolve_bot_name_from_cwd(cwd)
     if bot_name is None:
         logger.info(
