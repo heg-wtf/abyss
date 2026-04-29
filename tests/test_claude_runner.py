@@ -506,6 +506,34 @@ async def test_run_claude_skill_env_overrides_claude_code_env(tmp_path, monkeypa
     assert env["ENABLE_PROMPT_CACHING_1H"] == "1"
 
 
+@pytest.mark.asyncio
+async def test_run_claude_disabled_toggle_strips_host_env(tmp_path, monkeypatch):
+    """Disabled toggle removes a host-shell export from the subprocess env."""
+    abyss_home = tmp_path / ".abyss"
+    monkeypatch.setenv("ABYSS_HOME", str(abyss_home))
+
+    # Simulate a user shell profile setting the var on the host.
+    monkeypatch.setenv("ENABLE_PROMPT_CACHING_1H", "1")
+
+    # Disable the toggle in config.yaml.
+    from abyss.config import default_config, save_config
+
+    config = default_config()
+    config["claude_code"]["prompt_caching_1h"] = False
+    save_config(config)
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"output", b""))
+    mock_process.returncode = 0
+
+    with patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_process
+        await run_claude(str(tmp_path), "Hello", skill_names=None)
+
+    env = mock_exec.call_args[1]["env"]
+    assert "ENABLE_PROMPT_CACHING_1H" not in env
+
+
 # --- Streaming helper tests ---
 
 

@@ -173,6 +173,33 @@ def get_claude_code_env() -> dict[str, str]:
     return env
 
 
+def apply_claude_code_env(base: dict[str, str]) -> dict[str, str]:
+    """Return ``base`` env merged with Claude Code toggles.
+
+    Enabled toggles overwrite the corresponding key in ``base`` with the
+    abyss-controlled value. Disabled toggles **remove** the key from
+    ``base`` so that a stray host-shell export (e.g. ``ENABLE_PROMPT_CACHING_1H=1``
+    in ``~/.zshrc``) cannot resurrect the feature after the user has turned
+    it off in ``config.yaml``. Always-on entries are always set.
+
+    The input dict is not mutated.
+    """
+    config = load_config() or {}
+    raw = config.get("claude_code")
+    if not isinstance(raw, dict):
+        raw = default_claude_code_config()
+
+    result = dict(base)
+    for toggle, (var_name, value) in CLAUDE_CODE_ENV_TOGGLES.items():
+        if raw.get(toggle, True):
+            result[var_name] = value
+        else:
+            result.pop(var_name, None)
+    for var_name, value in CLAUDE_CODE_ENV_ALWAYS.items():
+        result[var_name] = value
+    return result
+
+
 def add_bot_to_config(name: str) -> None:
     """Add a bot entry to the global config."""
     config = load_config() or default_config()

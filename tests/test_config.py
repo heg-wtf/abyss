@@ -7,6 +7,7 @@ import pytest
 from abyss.config import (
     abyss_home,
     add_bot_to_config,
+    apply_claude_code_env,
     bot_directory,
     bot_exists,
     default_claude_code_config,
@@ -336,3 +337,50 @@ def test_default_claude_code_config_keys():
         "hide_cwd",
     }
     assert all(value is True for value in config.values())
+
+
+def test_apply_claude_code_env_strips_host_value_on_disable(temp_abyss_home):
+    """Disabled toggle removes the var even if host env exports it."""
+    config = default_config()
+    config["claude_code"] = {
+        "prompt_caching_1h": False,
+        "fork_subagent": True,
+        "mcp_nonblocking": False,
+        "hide_cwd": True,
+    }
+    save_config(config)
+
+    base = {
+        "PATH": "/usr/bin",
+        "ENABLE_PROMPT_CACHING_1H": "1",  # leftover from user shell profile
+        "MCP_CONNECTION_NONBLOCKING": "true",  # ditto
+        "UNRELATED": "keep",
+    }
+    result = apply_claude_code_env(base)
+
+    # Disabled toggles -> stripped, not preserved from host env
+    assert "ENABLE_PROMPT_CACHING_1H" not in result
+    assert "MCP_CONNECTION_NONBLOCKING" not in result
+    # Enabled toggles -> set
+    assert result["CLAUDE_CODE_FORK_SUBAGENT"] == "1"
+    assert result["CLAUDE_CODE_HIDE_CWD"] == "1"
+    # Always-on
+    assert result["AI_AGENT"] == "abyss"
+    # Unrelated host env preserved
+    assert result["PATH"] == "/usr/bin"
+    assert result["UNRELATED"] == "keep"
+
+
+def test_apply_claude_code_env_does_not_mutate_input(temp_abyss_home):
+    """apply_claude_code_env returns a new dict and leaves input intact."""
+    base = {"PATH": "/usr/bin", "ENABLE_PROMPT_CACHING_1H": "stale"}
+    snapshot = dict(base)
+    apply_claude_code_env(base)
+    assert base == snapshot
+
+
+def test_apply_claude_code_env_overwrites_host_value_when_enabled(temp_abyss_home):
+    """Enabled toggle overwrites whatever the host shell exported."""
+    base = {"ENABLE_PROMPT_CACHING_1H": "stale-host-value"}
+    result = apply_claude_code_env(base)
+    assert result["ENABLE_PROMPT_CACHING_1H"] == "1"

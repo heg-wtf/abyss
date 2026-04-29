@@ -67,6 +67,8 @@ claude_code:
 
 A missing or invalid `claude_code` section falls back to all-on defaults. `bot_manager._run_bots` logs the active env at startup.
 
+`config.apply_claude_code_env(base)` is the canonical way to apply these toggles to a base env dict. It overwrites enabled keys with abyss values **and explicitly removes disabled keys** so a stray `export ENABLE_PROMPT_CACHING_1H=1` in `~/.zshrc` cannot resurrect a feature the user turned off in `config.yaml`. `_prepare_skill_config` calls it on top of `os.environ` before merging skill env.
+
 ## Python Agent SDK Client Pool
 
 ### Pool Architecture
