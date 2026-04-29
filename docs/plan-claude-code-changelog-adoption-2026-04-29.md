@@ -1,6 +1,6 @@
 # Plan: Claude Code 최신 changelog 기능 abyss 적용
 - date: 2026-04-29
-- status: in-progress
+- status: done
 - author: claude
 - approved-by: (pending)
 
