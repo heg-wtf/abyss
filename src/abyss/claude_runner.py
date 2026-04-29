@@ -57,11 +57,47 @@ def _get_claude_path() -> str:
     return _cached_claude_path
 
 
-def _write_session_settings(working_directory: str, allowed_tools: list[str]) -> None:
-    """Write .claude/settings.json in the session directory with skill permissions."""
-    if not allowed_tools:
-        return
+def _abyss_precompact_hook_entry() -> dict[str, Any]:
+    """Build the PreCompact hook entry pointing at abyss's hook script.
 
+    The session settings file is the canonical place for hooks (deeper
+    than bot- or home-level settings, so it wins on merge). We inject
+    the entry here so abyss can react to Claude Code's PreCompact event
+    by compacting MEMORY.md / HEARTBEAT.md / user SKILL.md files —
+    wherever the host decides the conversation is heavy enough.
+    """
+    import sys
+
+    command = f"{sys.executable} -m abyss.hooks.precompact_hook"
+    return {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+
+
+def _hooks_enabled_for_working_directory(working_directory: str) -> bool:
+    """Return whether abyss should inject hooks for the given session.
+
+    Walks up to the bot directory, loads ``bot.yaml`` and reads the
+    ``hooks_enabled`` toggle. Default ``True``. Returns ``True`` even
+    when the bot directory cannot be resolved (e.g. test fixtures using
+    ``/tmp``) so unit tests still exercise the injection path.
+    """
+    from abyss.config import load_bot_config
+
+    bot_dir = _resolve_bot_dir_from_working_directory(working_directory)
+    if bot_dir is None:
+        return True
+
+    bot_config = load_bot_config(bot_dir.name) or {}
+    return bool(bot_config.get("hooks_enabled", True))
+
+
+def _write_session_settings(working_directory: str, allowed_tools: list[str]) -> None:
+    """Write .claude/settings.json in the session directory.
+
+    Always writes when invoked (no longer conditional on ``allowed_tools``
+    being non-empty) so abyss can install its PreCompact hook even for
+    bots without skills. ``allowed_tools`` may be empty — in that case
+    the ``permissions`` section is omitted.
+    """
     claude_directory = Path(working_directory) / ".claude"
     claude_directory.mkdir(parents=True, exist_ok=True)
 
@@ -72,18 +108,24 @@ def _write_session_settings(working_directory: str, allowed_tools: list[str]) ->
         with open(settings_path) as settings_file:
             settings = json.load(settings_file)
 
-    permissions = settings.get("permissions", {})
-    existing_allow = set(permissions.get("allow", []))
-    existing_allow.update(allowed_tools)
+    if allowed_tools:
+        permissions = settings.get("permissions", {})
+        existing_allow = set(permissions.get("allow", []))
+        existing_allow.update(allowed_tools)
+        permissions["allow"] = sorted(existing_allow)
+        settings["permissions"] = permissions
 
-    permissions["allow"] = sorted(existing_allow)
-    settings["permissions"] = permissions
-
-    # Disable hooks inherited from ~/.claude/settings.json
-    # to prevent user-level plugins (e.g. context-mode) from
-    # interfering with bot's claude -p subprocess.
-    if "hooks" not in settings:
+    # Hooks: start from a clean slate per session so a stray entry in
+    # ~/.claude/settings.json (user global) cannot fire for bot
+    # subprocesses. Then inject abyss's own PreCompact hook when the
+    # bot has not opted out via bot.yaml `hooks_enabled: false`.
+    if "hooks" not in settings or not isinstance(settings["hooks"], dict):
         settings["hooks"] = {}
+
+    if _hooks_enabled_for_working_directory(working_directory):
+        settings["hooks"]["PreCompact"] = [_abyss_precompact_hook_entry()]
+    else:
+        settings["hooks"].pop("PreCompact", None)
 
     # Disable all plugins for bot subprocess sessions.
     # Plugin hooks (e.g. context-mode) are loaded from
@@ -412,8 +454,11 @@ def _prepare_skill_config(
         for tool in DEFAULT_ALLOWED_TOOLS:
             if tool not in allowed_tools:
                 allowed_tools.append(tool)
-        _write_session_settings(working_directory, allowed_tools)
         logger.info("Allowed tools: %s", allowed_tools)
+
+    # Always write session settings — even when no tools are whitelisted —
+    # so abyss can install its PreCompact hook (Phase 3).
+    _write_session_settings(working_directory, allowed_tools)
 
     return allowed_tools or None, environment_variables
 

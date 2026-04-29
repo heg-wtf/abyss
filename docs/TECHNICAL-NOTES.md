@@ -79,6 +79,18 @@ A missing or invalid `claude_code` section falls back to all-on defaults. `bot_m
 
 `config.apply_claude_code_env(base)` is the canonical way to apply these toggles to a base env dict. It overwrites enabled keys with abyss values **and explicitly removes disabled keys** so a stray `export ENABLE_PROMPT_CACHING_1H=1` in `~/.zshrc` cannot resurrect a feature the user turned off in `config.yaml`. `_prepare_skill_config` calls it on top of `os.environ` before merging skill env.
 
+### PreCompact Hook (Phase 3 — Claude Code 2.1.105)
+
+`abyss/hooks/precompact_hook.py` is a stdin-driven Python script registered as a Claude Code PreCompact hook in every bot session's `.claude/settings.json`. When the host decides to compact the in-flight conversation, it invokes the hook with a JSON payload (`{cwd, session_id, transcript_path, …}`); abyss reuses that signal to also compact the bot's persistent files (MEMORY.md / HEARTBEAT.md / user SKILL.md) via `token_compact.run_compact(bot_name)`.
+
+Safety properties:
+
+- **`AI_AGENT` guard.** The script first checks `os.environ.get("AI_AGENT") == "abyss"` and silently exits 0 otherwise. Combined with Phase 1's env injection (only abyss subprocesses get `AI_AGENT=abyss`), this means the hook is a no-op even if the command somehow ends up referenced from `~/.claude/settings.json`.
+- **Never blocks.** Empty stdin, malformed JSON, missing `cwd`, unresolvable bot directory, and exceptions from `run_compact` all return exit 0. The host's transcript compact proceeds either way.
+- **Bot resolution.** Mirrors `claude_runner._resolve_bot_dir_from_working_directory` — walks parents of `cwd` until one whose parent is named `bots`. Works for DM (`bots/<name>/sessions/chat_*`), cron (`bots/<name>/cron_sessions/<job>`) and heartbeat (`bots/<name>/heartbeat_sessions`) sessions alike.
+
+Where it lives in settings: `_write_session_settings` always writes `<session>/.claude/settings.json` (no longer conditional on `allowed_tools`) and injects `hooks.PreCompact = [{matcher: "", hooks: [{type: "command", command: "python -m abyss.hooks.precompact_hook"}]}]`. Existing non-PreCompact hook entries (e.g. user-supplied `PreToolUse`) are preserved; `enabledPlugins: {}` still disables user plugins. Per-bot opt-out via `bot.yaml.hooks_enabled: false` skips the PreCompact injection while leaving permissions/plugins behavior untouched. Cron and heartbeat continue to call `run_compact` on their own schedule as a fallback for environments where the hook never fires (older Claude Code, hooks disabled).
+
 ## Python Agent SDK Client Pool
 
 ### Pool Architecture

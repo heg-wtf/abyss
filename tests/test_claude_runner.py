@@ -367,26 +367,30 @@ def test_write_session_settings_creates_file(tmp_path):
         settings = json.load(file)
     assert "Bash(reminders:*)" in settings["permissions"]["allow"]
     assert "Bash(osascript:*)" in settings["permissions"]["allow"]
-    assert settings["hooks"] == {}
+    # Phase 3: hooks contains the abyss PreCompact entry
+    assert "PreCompact" in settings["hooks"]
     assert settings["enabledPlugins"] == {}
 
 
-def test_write_session_settings_disables_inherited_hooks(tmp_path):
-    """_write_session_settings adds empty hooks to prevent global hook inheritance."""
+def test_write_session_settings_blocks_inherited_hooks_with_clean_dict(tmp_path):
+    """The hooks dict is clean-slate per session, blocking ~/.claude/settings.json
+    entries except the keys abyss explicitly populates."""
     _write_session_settings(str(tmp_path), ["WebFetch"])
 
     settings_path = tmp_path / ".claude" / "settings.json"
     with open(settings_path) as file:
         settings = json.load(file)
     assert "hooks" in settings
-    assert settings["hooks"] == {}
+    # PreCompact populated; other event types are absent (so user globals
+    # like PostToolUse cannot leak into the bot subprocess).
+    assert set(settings["hooks"].keys()) == {"PreCompact"}
 
 
 def test_write_session_settings_disables_inherited_plugins(tmp_path):
     """_write_session_settings adds empty enabledPlugins to disable user plugins.
 
     Plugin hooks (e.g. context-mode) are loaded from ~/.claude/plugins/ and
-    are NOT disabled by setting hooks: {} alone. Must also disable plugins.
+    are NOT disabled by the hooks dict reset alone. Must also disable plugins.
     """
     _write_session_settings(str(tmp_path), ["WebFetch"])
 
@@ -397,8 +401,8 @@ def test_write_session_settings_disables_inherited_plugins(tmp_path):
     assert settings["enabledPlugins"] == {}
 
 
-def test_write_session_settings_preserves_existing_hooks(tmp_path):
-    """_write_session_settings does not overwrite hooks if already defined."""
+def test_write_session_settings_preserves_existing_non_precompact_hooks(tmp_path):
+    """Existing non-PreCompact hook entries are preserved; PreCompact is replaced."""
     claude_directory = tmp_path / ".claude"
     claude_directory.mkdir()
     existing = {
@@ -413,7 +417,10 @@ def test_write_session_settings_preserves_existing_hooks(tmp_path):
 
     with open(claude_directory / "settings.json") as file:
         settings = json.load(file)
-    assert settings["hooks"] == {"PreToolUse": [{"matcher": "Bash", "hooks": []}]}
+    # Existing PreToolUse preserved
+    assert settings["hooks"]["PreToolUse"] == [{"matcher": "Bash", "hooks": []}]
+    # PreCompact added
+    assert "PreCompact" in settings["hooks"]
     assert settings["enabledPlugins"] == {"some-plugin@marketplace": True}
 
 
@@ -433,10 +440,64 @@ def test_write_session_settings_merges_existing(tmp_path):
     assert "Bash(reminders:*)" in settings["permissions"]["allow"]
 
 
-def test_write_session_settings_empty_tools(tmp_path):
-    """_write_session_settings does nothing with empty tools list."""
+def test_write_session_settings_empty_tools_writes_hook_only(tmp_path):
+    """Empty tools still triggers settings.json creation (Phase 3) so the
+    PreCompact hook can be installed for skill-less bots."""
     _write_session_settings(str(tmp_path), [])
-    assert not (tmp_path / ".claude" / "settings.json").exists()
+
+    settings_path = tmp_path / ".claude" / "settings.json"
+    assert settings_path.exists()
+    with open(settings_path) as file:
+        settings = json.load(file)
+    # No permissions section when no tools.
+    assert "permissions" not in settings
+    # But hook is installed.
+    assert "PreCompact" in settings["hooks"]
+
+
+def test_write_session_settings_omits_precompact_when_bot_disables(tmp_path, monkeypatch):
+    """When the resolved bot.yaml has hooks_enabled=false, PreCompact is not injected."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.config import bot_directory, save_bot_config
+
+    bot_name = "noisy"
+    save_bot_config(
+        bot_name,
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "hooks_enabled": False,
+        },
+    )
+
+    session = bot_directory(bot_name) / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    _write_session_settings(str(session), ["WebFetch"])
+
+    with open(session / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+    assert "PreCompact" not in settings.get("hooks", {})
+
+
+def test_write_session_settings_command_uses_python_module(tmp_path):
+    """The PreCompact hook command points at ``python -m abyss.hooks.precompact_hook``."""
+    import sys
+
+    _write_session_settings(str(tmp_path), ["WebFetch"])
+    with open(tmp_path / ".claude" / "settings.json") as file:
+        settings = json.load(file)
+
+    entries = settings["hooks"]["PreCompact"]
+    assert len(entries) == 1
+    inner = entries[0]["hooks"][0]
+    assert inner["type"] == "command"
+    assert inner["command"] == f"{sys.executable} -m abyss.hooks.precompact_hook"
 
 
 @pytest.mark.asyncio

@@ -109,12 +109,12 @@ claude_code:
 
 추가 안전장치: hook 스크립트 진입부에서 `AI_AGENT == "abyss"` env 체크 (Phase 1 의존). 누락 시 즉시 exit 0 — 만약 사용자가 settings 를 잘못 머지해도 abyss 외부에서 무동작.
 
-- [ ] Step 3.1: `token_compact.py::compact()` 를 hook 진입점에서 호출 가능한 함수로 분리
-- [ ] Step 3.2: `skill.py` 또는 `bot_manager.py` 시작 시 `~/.abyss/bots/<name>/.claude/settings.json` 자동 생성/갱신 — PreCompact hook entry 추가 (사용자 글로벌 settings 건드리지 않음)
-- [ ] Step 3.3: hook 스크립트 첫 줄에서 `AI_AGENT` env 체크, 누락 시 exit 0
-- [ ] Step 3.4: hook 실패 시 exit code 2 로 차단하지 않고 로그만 (compact 실패해도 대화 진행)
-- [ ] Step 3.5: 기존 cron/heartbeat 의 수동 compact 트리거는 유지 (hook 누락 환경 대비)
-- [ ] Step 3.6: `bot.yaml` 에 `hooks_enabled: true` 토글 추가 (default on, 끄면 settings.json 미생성)
+- [x] Step 3.1: `token_compact.run_compact(bot_name)` 가 이미 hook 진입점에서 직접 호출 가능 (분리 불필요). 신규 모듈 `abyss/hooks/precompact_hook.py` 가 wrapping
+- [x] Step 3.2: hook 등록 위치 변경 — 봇-레벨 `bots/<name>/.claude/settings.json` 대신 **세션-레벨** `<session>/.claude/settings.json` 에 등록. 기존 `_write_session_settings` 가 deeper merge 우선이라 봇-레벨이 clobber 되는 문제 회피. 사용자 글로벌 `~/.claude/settings.json` 은 절대 건드리지 않음
+- [x] Step 3.3: hook 스크립트 진입부에서 `AI_AGENT == "abyss"` 체크, 누락/불일치 시 exit 0
+- [x] Step 3.4: hook 모든 실패 경로 (빈 stdin, 잘못된 JSON, run_compact 예외) 가 exit 0 — 차단 없음
+- [x] Step 3.5: cron/heartbeat 의 수동 compact 트리거 유지 (코드 미변경)
+- [x] Step 3.6: `bot.yaml.hooks_enabled` 토글 (default true) — false 면 PreCompact entry 만 생략, settings.json 자체는 여전히 생성 (allowedTools 정상 동작 위함)
 
 ### Phase 4: Hook Telemetry & 조건부 Hook
 
@@ -165,8 +165,13 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 - [x] `tests/test_config.py::test_default_claude_code_config_includes_mcp_always_load` + `test_is_mcp_always_load_enabled_*` 3종 — config 헬퍼
 
 **Phase 3**
-- [ ] `tests/test_token_compact.py::test_compact_callable_via_hook` — hook 진입점 시그니처 호환
-- [ ] `tests/test_token_compact.py::test_compact_failure_non_blocking` — 실패해도 exit code 0
+- [x] `tests/test_precompact_hook.py::test_main_no_op_when_ai_agent_missing` + `test_main_no_op_when_ai_agent_other` — AI_AGENT 가드
+- [x] `tests/test_precompact_hook.py::test_main_handles_*` 3종 — empty/invalid/non-object stdin 안전 처리
+- [x] `tests/test_precompact_hook.py::test_resolve_bot_name_from_*` 3종 (DM, heartbeat, cron) + `test_resolve_bot_name_returns_none_when_outside_bots`
+- [x] `tests/test_precompact_hook.py::test_main_no_op_when_cwd_outside_bots` — bots/ 외부 cwd 시 run_compact 미호출
+- [x] `tests/test_precompact_hook.py::test_main_invokes_run_compact_with_resolved_bot` — 정상 경로
+- [x] `tests/test_precompact_hook.py::test_main_swallows_run_compact_exception` — 실패해도 exit 0
+- [x] `tests/test_claude_runner.py::test_write_session_settings_*` 7종 — settings.json 에 PreCompact entry 주입, 토글 false 시 생략, hook command 형식 검증, 기존 hook 보존
 
 **Phase 4**
 - [ ] `tests/test_hook_telemetry.py::test_duration_ms_recorded` — payload 파싱
