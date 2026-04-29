@@ -138,10 +138,10 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 
 ### Phase 6: ultrareview 패턴 + Skill effort 변수 (선택)
 
-- [ ] Step 6.1: `claude ultrareview` 호출 래퍼 함수 (`claude_runner.run_ultrareview()`)
-- [ ] Step 6.2: 신규 builtin skill `code_review` 추가 — Telegram 으로 PR URL 던지면 ultrareview 결과 회신
-- [ ] Step 6.3: SKILL.md 템플릿에 `${CLAUDE_EFFORT}` 변수 사용 예시 추가
-- [ ] Step 6.4: `bot.yaml` `effort` 필드 (기본 `high`) 추가, `claude_runner` 가 환경에 inject
+- [x] Step 6.1: `run_ultrareview(target, working_directory, *, json_output, timeout, extra_arguments)` 추가. `apply_claude_code_env` 적용, ValueError/TimeoutError/RuntimeError 명시
+- [x] Step 6.2: 신규 builtin skill `code_review` 추가 — `claude ultrareview <target> --json` 사용법 + 결과 요약 가이드. `allowed_tools: ["Bash(claude ultrareview:*)"]` 로 쉘 권한 최소화
+- [x] Step 6.3: `code_review/SKILL.md` 가 `${CLAUDE_EFFORT}` 변수로 리뷰 깊이 분기 — low/medium/high/xhigh/max 별 출력 세부도 가이드
+- [x] Step 6.4: `bot.yaml.effort` 필드 (low|medium|high|xhigh|max) 지원. `_effort_flag_args(working_directory)` 가 subprocess CLI 에 `--effort <level>` 주입. SDK 경로는 ClaudeAgentOptions 에 effort 노출 안되어 fallback subprocess 에서만 적용됨 — 별도 plan 으로 SDK 지원 추적
 
 ## 5. 테스트 계획
 
@@ -187,7 +187,11 @@ abysscope 에 도구별 실행시간 패널 추가 + skill 별 hook 게이팅.
 - [x] `tests/test_claude_runner.py::test_write_session_settings_includes_default_sandbox` + 3종 — bot extras merge, untrusted toggle on/off
 
 **Phase 6**
-- [ ] `tests/test_claude_runner.py::test_ultrareview_invocation` — 명령 라인 조립
+- [x] `tests/test_claude_runner.py::test_effort_flag_args_*` 5종 — 빈 디렉터리, 미설정, 정상값, case/whitespace 정규화, 잘못된 값 폐기
+- [x] `tests/test_claude_runner.py::test_run_claude_passes_effort_flag` — bot.yaml → command line `--effort` 통합
+- [x] `tests/test_claude_runner.py::test_run_ultrareview_*` 6종 — 정상 호출, json_output false, extra_arguments, 비-0 종료 RuntimeError, 빈 target ValueError, timeout
+- [x] `tests/test_builtin_skills.py::test_*_code_review_*` 4종 — 등록, SKILL.md `${CLAUDE_EFFORT}` 검증, allowed_tools whitelist, 설치 후 inactive
+
 
 ### 통합 테스트
 

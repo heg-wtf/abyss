@@ -79,6 +79,14 @@ A missing or invalid `claude_code` section falls back to all-on defaults. `bot_m
 
 `config.apply_claude_code_env(base)` is the canonical way to apply these toggles to a base env dict. It overwrites enabled keys with abyss values **and explicitly removes disabled keys** so a stray `export ENABLE_PROMPT_CACHING_1H=1` in `~/.zshrc` cannot resurrect a feature the user turned off in `config.yaml`. `_prepare_skill_config` calls it on top of `os.environ` before merging skill env.
 
+### Effort Level & ultrareview Wrapper (Phase 6 — Claude Code 2.1.111 / 2.1.120)
+
+`bot.yaml.effort` (one of `low|medium|high|xhigh|max`) is read by `claude_runner._effort_flag_args(working_directory)` and added to the `claude -p` command line as `--effort <level>` for both batch (`run_claude`) and streaming (`run_claude_streaming`) paths. Invalid or missing values fall back to Claude Code's own default (`high` for Pro / Max subscribers on Opus 4.6 / Sonnet 4.6). Whitespace and case are normalised. The flag is session-scoped per CC docs — the SDK pool path doesn't expose effort yet, so explicit per-bot effort is delivered via the subprocess fallback.
+
+`run_ultrareview(target, working_directory, *, json_output=True, timeout=1800, extra_arguments=None)` wraps `claude ultrareview <target>` (CC 2.1.120). It applies the same `apply_claude_code_env` baseline so the review subprocess gets the abyss-controlled env (1h cache, AI_AGENT, hide_cwd, etc.). Default timeout matches CC's own 30-minute cap. The result is the raw stdout — JSON when `json_output=True`, prose when `False`.
+
+The new builtin skill `code_review` is the user-facing entry point: it documents how a bot should detect a review request, invoke `claude ultrareview <target> --json`, summarise the findings to the chat, and adapt the verbosity to the session's `${CLAUDE_EFFORT}` template variable. `skill.yaml` whitelists only `Bash(claude ultrareview:*)` so the skill cannot expand into arbitrary shell access.
+
 ### Sandbox & Skill Shell-Execution (Phase 5 — Claude Code 2.1.91 / 2.1.113)
 
 `_apply_security_settings(working_directory, settings)` writes two security keys into every session settings.json:

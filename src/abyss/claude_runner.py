@@ -57,6 +57,38 @@ def _get_claude_path() -> str:
     return _cached_claude_path
 
 
+VALID_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def _effort_flag_args(working_directory: str) -> list[str]:
+    """Return ``["--effort", <level>]`` when bot.yaml declares one.
+
+    Reads ``bot.yaml.effort`` (Phase 6 — Claude Code 2.1.111). Invalid
+    or missing values yield an empty list so the CLI falls back to its
+    own default (``high`` for Pro / Max subscribers on recent models).
+    """
+    from abyss.config import load_bot_config
+
+    bot_dir = _resolve_bot_dir_from_working_directory(working_directory)
+    if bot_dir is None:
+        return []
+    bot_config = load_bot_config(bot_dir.name) or {}
+    raw = bot_config.get("effort")
+    if not isinstance(raw, str):
+        return []
+    level = raw.strip().lower()
+    if level not in VALID_EFFORT_LEVELS:
+        if level:
+            logger.warning(
+                "bot %s: invalid effort %r (allowed: %s); skipping --effort",
+                bot_dir.name,
+                raw,
+                ", ".join(VALID_EFFORT_LEVELS),
+            )
+        return []
+    return ["--effort", level]
+
+
 def _abyss_precompact_hook_entry() -> dict[str, Any]:
     """Build the PreCompact hook entry pointing at abyss's hook script.
 
@@ -338,6 +370,9 @@ async def run_claude(
     if model:
         command.extend(["--model", model])
 
+    # Phase 6: bot.yaml.effort -> --effort <level>
+    command.extend(_effort_flag_args(working_directory))
+
     if extra_arguments:
         command.extend(extra_arguments)
 
@@ -382,6 +417,87 @@ async def run_claude(
 
     if error_output:
         logger.warning("Claude Code stderr: %s", error_output[:200])
+
+    return output
+
+
+async def run_ultrareview(
+    target: str,
+    working_directory: str,
+    *,
+    json_output: bool = True,
+    timeout: int = 1800,
+    extra_arguments: list[str] | None = None,
+) -> str:
+    """Invoke ``claude ultrareview <target>`` non-interactively.
+
+    Phase 6 — Claude Code 2.1.120 added ``claude ultrareview`` as a
+    standalone subcommand that runs the comprehensive parallel code
+    review pipeline against a PR (URL / number) or a local path. abyss
+    wraps it so a Telegram message like "review PR #123" can fan out
+    to the same review the human-side ``/ultrareview`` skill would run.
+
+    Args:
+        target: PR URL, PR number, or path. Passed verbatim to the CLI.
+        working_directory: Working directory for the review (the repo).
+        json_output: Pass ``--json`` to receive the structured payload
+            (default). When ``False`` the human-readable text is returned.
+        timeout: Seconds before the process is killed. CC's own default
+            is 30 minutes; we use 1800s to match. Pass ``--timeout`` via
+            ``extra_arguments`` to override on the CLI side too.
+        extra_arguments: Additional CLI flags passed through verbatim.
+
+    Returns:
+        stdout from the ultrareview run.
+
+    Raises:
+        TimeoutError: process killed after ``timeout`` seconds.
+        RuntimeError: ultrareview exited non-zero.
+        ValueError: ``target`` is empty / non-string.
+    """
+    if not isinstance(target, str) or not target.strip():
+        raise ValueError("ultrareview target must be a non-empty string")
+
+    claude_path = _get_claude_path()
+    command = [claude_path, "ultrareview", target.strip()]
+    if json_output:
+        command.append("--json")
+    if extra_arguments:
+        command.extend(extra_arguments)
+
+    # Apply Phase 1 env (1h cache, AI_AGENT, hide_cwd, etc.) so the
+    # subprocess inherits the same hardening abyss applies elsewhere.
+    from abyss.config import apply_claude_code_env
+
+    environment = apply_claude_code_env(dict(os.environ))
+
+    logger.info("Running claude ultrareview in %s on target %r", working_directory, target)
+
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=working_directory,
+        env=environment,
+    )
+
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        logger.error("ultrareview timed out after %ds", timeout)
+        raise TimeoutError(f"ultrareview timed out after {timeout} seconds")
+
+    output = stdout.decode("utf-8", errors="replace").strip()
+    error_output = stderr.decode("utf-8", errors="replace").strip()
+
+    if process.returncode != 0:
+        logger.error("ultrareview failed (rc=%d): %s", process.returncode, error_output[:300])
+        raise RuntimeError(f"ultrareview exited with code {process.returncode}: {error_output}")
+
+    if error_output:
+        logger.warning("ultrareview stderr: %s", error_output[:200])
 
     return output
 
@@ -667,6 +783,9 @@ async def run_claude_streaming(
 
     if model:
         command.extend(["--model", model])
+
+    # Phase 6: bot.yaml.effort -> --effort <level>
+    command.extend(_effort_flag_args(working_directory))
 
     if extra_arguments:
         command.extend(extra_arguments)

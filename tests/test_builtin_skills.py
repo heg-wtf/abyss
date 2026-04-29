@@ -884,3 +884,50 @@ def test_installed_translate_skill_starts_inactive(temp_abyss_home):
     """Installed translate skill starts with inactive status."""
     install_builtin_skill("translate")
     assert skill_status("translate") == "inactive"
+
+
+# --- code_review skill (Phase 6) ---
+
+
+def test_list_builtin_skills_includes_code_review():
+    """The code_review builtin skill is registered."""
+    skills = list_builtin_skills()
+    names = [skill["name"] for skill in skills]
+    assert "code_review" in names
+
+    skill = next(s for s in skills if s["name"] == "code_review")
+    assert skill["description"]
+    assert skill["path"].is_dir()
+    assert (skill["path"] / "SKILL.md").exists()
+    assert (skill["path"] / "skill.yaml").exists()
+
+
+def test_code_review_skill_md_references_effort_template():
+    """SKILL.md exposes ${CLAUDE_EFFORT} so the template is hot."""
+    path = get_builtin_skill_path("code_review")
+    assert path is not None
+    contents = (path / "SKILL.md").read_text()
+    assert "${CLAUDE_EFFORT}" in contents
+    assert "claude ultrareview" in contents
+
+
+def test_code_review_skill_yaml_locks_bash_to_ultrareview():
+    """allowed_tools whitelists only ``claude ultrareview`` invocations
+    so an attached bot cannot use this skill to run other shell commands.
+    """
+    import yaml
+
+    path = get_builtin_skill_path("code_review")
+    assert path is not None
+    with open(path / "skill.yaml") as file:
+        config = yaml.safe_load(file)
+
+    assert config["type"] == "cli"
+    assert "claude" in config["required_commands"]
+    assert config["allowed_tools"] == ["Bash(claude ultrareview:*)"]
+
+
+def test_installed_code_review_skill_starts_inactive(temp_abyss_home):
+    """Installed code_review skill starts with inactive status."""
+    install_builtin_skill("code_review")
+    assert skill_status("code_review") == "inactive"

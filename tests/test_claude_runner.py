@@ -490,6 +490,249 @@ def test_write_session_settings_omits_precompact_when_bot_disables(tmp_path, mon
     assert "PreCompact" not in settings.get("hooks", {})
 
 
+# --- Effort flag (Phase 6) ---
+
+
+def test_effort_flag_args_returns_empty_when_no_bot_dir(tmp_path):
+    from abyss.claude_runner import _effort_flag_args
+
+    assert _effort_flag_args(str(tmp_path)) == []
+
+
+def test_effort_flag_args_skips_when_bot_yaml_missing_field(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.claude_runner import _effort_flag_args
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+        },
+    )
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    assert _effort_flag_args(str(session)) == []
+
+
+def test_effort_flag_args_returns_flag_for_valid_level(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.claude_runner import _effort_flag_args
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "effort": "high",
+        },
+    )
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    assert _effort_flag_args(str(session)) == ["--effort", "high"]
+
+
+def test_effort_flag_args_normalises_case_and_whitespace(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.claude_runner import _effort_flag_args
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "effort": "  Xhigh  ",
+        },
+    )
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    assert _effort_flag_args(str(session)) == ["--effort", "xhigh"]
+
+
+def test_effort_flag_args_drops_invalid_level(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.claude_runner import _effort_flag_args
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "effort": "ultra",  # not a valid CC level
+        },
+    )
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    assert _effort_flag_args(str(session)) == []
+
+
+@pytest.mark.asyncio
+async def test_run_claude_passes_effort_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
+
+    from abyss.config import bot_directory, save_bot_config
+
+    save_bot_config(
+        "alpha",
+        {
+            "telegram_token": "fake",
+            "personality": "x",
+            "role": "y",
+            "goal": "",
+            "allowed_users": [],
+            "claude_args": [],
+            "effort": "max",
+        },
+    )
+    session = bot_directory("alpha") / "sessions" / "chat_1"
+    session.mkdir(parents=True)
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"ok", b""))
+    mock_process.returncode = 0
+
+    with patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_process
+        await run_claude(str(session), "Hello")
+
+    args = list(mock_exec.call_args[0])
+    assert "--effort" in args
+    assert args[args.index("--effort") + 1] == "max"
+
+
+# --- run_ultrareview (Phase 6) ---
+
+
+@pytest.mark.asyncio
+async def test_run_ultrareview_invokes_subcommand(tmp_path):
+    from abyss.claude_runner import run_ultrareview
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b'{"findings": []}', b""))
+    mock_process.returncode = 0
+
+    with patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_process
+        result = await run_ultrareview("https://github.com/x/y/pull/1", str(tmp_path))
+
+    args = list(mock_exec.call_args[0])
+    assert "ultrareview" in args
+    assert "https://github.com/x/y/pull/1" in args
+    assert "--json" in args
+    assert result == '{"findings": []}'
+
+
+@pytest.mark.asyncio
+async def test_run_ultrareview_drops_json_when_disabled(tmp_path):
+    from abyss.claude_runner import run_ultrareview
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"text report", b""))
+    mock_process.returncode = 0
+
+    with patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_process
+        await run_ultrareview("123", str(tmp_path), json_output=False)
+
+    args = list(mock_exec.call_args[0])
+    assert "--json" not in args
+
+
+@pytest.mark.asyncio
+async def test_run_ultrareview_passes_extra_arguments(tmp_path):
+    from abyss.claude_runner import run_ultrareview
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"ok", b""))
+    mock_process.returncode = 0
+
+    with patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_process
+        await run_ultrareview(
+            "123",
+            str(tmp_path),
+            extra_arguments=["--timeout", "10"],
+        )
+
+    args = list(mock_exec.call_args[0])
+    assert "--timeout" in args
+    assert "10" in args
+
+
+@pytest.mark.asyncio
+async def test_run_ultrareview_raises_on_nonzero_exit(tmp_path):
+    from abyss.claude_runner import run_ultrareview
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"", b"boom"))
+    mock_process.returncode = 1
+
+    with patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec:
+        mock_exec.return_value = mock_process
+        with pytest.raises(RuntimeError, match="ultrareview exited"):
+            await run_ultrareview("123", str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_run_ultrareview_rejects_empty_target(tmp_path):
+    from abyss.claude_runner import run_ultrareview
+
+    with pytest.raises(ValueError):
+        await run_ultrareview("", str(tmp_path))
+    with pytest.raises(ValueError):
+        await run_ultrareview("   ", str(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_run_ultrareview_timeout(tmp_path):
+    from abyss.claude_runner import run_ultrareview
+
+    mock_process = MagicMock()
+    mock_process.kill = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"", b""))
+
+    with (
+        patch(MOCK_SUBPROCESS, new_callable=AsyncMock) as mock_exec,
+        patch(
+            "abyss.claude_runner.asyncio.wait_for",
+            side_effect=asyncio.TimeoutError(),
+        ),
+    ):
+        mock_exec.return_value = mock_process
+        with pytest.raises(TimeoutError, match="ultrareview timed out"):
+            await run_ultrareview("123", str(tmp_path), timeout=5)
+
+    mock_process.kill.assert_called_once()
+
+
 def test_write_session_settings_includes_default_sandbox(tmp_path):
     """Phase 5: every session.json carries the abyss default deniedDomains."""
     _write_session_settings(str(tmp_path), ["WebFetch"])

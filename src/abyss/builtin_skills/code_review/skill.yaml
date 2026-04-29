@@ -1,0 +1,9 @@
+name: code_review
+emoji: "\U0001F50E"
+description: "Run claude ultrareview on a PR or path and summarize findings"
+type: cli
+status: inactive
+required_commands:
+  - claude
+allowed_tools:
+  - "Bash(claude ultrareview:*)"
