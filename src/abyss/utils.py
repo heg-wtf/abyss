@@ -63,6 +63,26 @@ def split_message(text: str, limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
     return chunks
 
 
+_SAFE_URL_SCHEMES = ("http", "https", "tg", "mailto")
+
+
+def _sanitize_link_url(url: str) -> str | None:
+    """Return URL if scheme is whitelisted, else None.
+
+    Blocks javascript:, data:, vbscript:, file:, and schemeless URLs to prevent
+    XSS through LLM-generated Markdown links. Defense-in-depth — Telegram clients
+    typically strip dangerous schemes, but downstream renderers (dashboards,
+    future channel adapters) must not see attack payloads in the canonical HTML.
+    """
+    stripped = url.strip()
+    if ":" not in stripped:
+        return None
+    scheme = stripped.split(":", 1)[0].lower()
+    if scheme not in _SAFE_URL_SCHEMES:
+        return None
+    return stripped
+
+
 def markdown_to_telegram_html(text: str) -> str:
     """Convert Markdown formatting to Telegram-compatible HTML.
 
@@ -95,10 +115,15 @@ def markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", text)
 
-    # Restore links as HTML <a> tags
+    # Restore links as HTML <a> tags. Drop the anchor for unsafe URLs.
     for placeholder, (link_text, url) in link_placeholder.items():
         escaped_text = html.escape(link_text)
-        text = text.replace(placeholder, f'<a href="{url}">{escaped_text}</a>')
+        safe_url = _sanitize_link_url(url)
+        if safe_url is None:
+            text = text.replace(placeholder, escaped_text)
+        else:
+            escaped_url = html.escape(safe_url, quote=True)
+            text = text.replace(placeholder, f'<a href="{escaped_url}">{escaped_text}</a>')
 
     return text
 
