@@ -6,46 +6,56 @@ import { getBot, getAbyssHome } from "@/lib/abyss";
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 async function fetchTelegramAvatar(token: string): Promise<Buffer | null> {
-  const baseUrl = `https://api.telegram.org/bot${token}`;
+  try {
+    const baseUrl = `https://api.telegram.org/bot${token}`;
 
-  const meResponse = await fetch(`${baseUrl}/getMe`);
-  if (!meResponse.ok) return null;
-  const meData = (await meResponse.json()) as { result?: { id?: number } };
-  const botId = meData.result?.id;
-  if (!botId) return null;
+    const meResponse = await fetch(`${baseUrl}/getMe`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!meResponse.ok) return null;
+    const meData = (await meResponse.json()) as { result?: { id?: number } };
+    const botId = meData.result?.id;
+    if (!botId) return null;
 
-  const photosResponse = await fetch(
-    `${baseUrl}/getUserProfilePhotos?user_id=${botId}&limit=1`,
-  );
-  if (!photosResponse.ok) return null;
-  const photosData = (await photosResponse.json()) as {
-    result?: { photos?: Array<Array<{ file_id: string }>> };
-  };
-  const photos = photosData.result?.photos;
-  if (!photos || photos.length === 0) return null;
+    const photosResponse = await fetch(
+      `${baseUrl}/getUserProfilePhotos?user_id=${botId}&limit=1`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    if (!photosResponse.ok) return null;
+    const photosData = (await photosResponse.json()) as {
+      result?: { photos?: Array<Array<{ file_id: string }>> };
+    };
+    const photos = photosData.result?.photos;
+    if (!photos || photos.length === 0) return null;
 
-  // Use largest size (last in array)
-  const photoSizes = photos[0];
-  const bestPhoto = photoSizes[photoSizes.length - 1];
-  if (!bestPhoto) return null;
+    // Use largest size (last in array)
+    const photoSizes = photos[0];
+    const bestPhoto = photoSizes[photoSizes.length - 1];
+    if (!bestPhoto) return null;
 
-  const fileResponse = await fetch(
-    `${baseUrl}/getFile?file_id=${bestPhoto.file_id}`,
-  );
-  if (!fileResponse.ok) return null;
-  const fileData = (await fileResponse.json()) as {
-    result?: { file_path?: string };
-  };
-  const filePath = fileData.result?.file_path;
-  if (!filePath) return null;
+    const fileResponse = await fetch(
+      `${baseUrl}/getFile?file_id=${bestPhoto.file_id}`,
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    if (!fileResponse.ok) return null;
+    const fileData = (await fileResponse.json()) as {
+      result?: { file_path?: string };
+    };
+    const filePath = fileData.result?.file_path;
+    if (!filePath) return null;
 
-  const imageResponse = await fetch(
-    `https://api.telegram.org/file/bot${token}/${filePath}`,
-  );
-  if (!imageResponse.ok) return null;
+    const imageResponse = await fetch(
+      `https://api.telegram.org/file/bot${token}/${filePath}`,
+      { signal: AbortSignal.timeout(15_000) },
+    );
+    if (!imageResponse.ok) return null;
 
-  const arrayBuffer = await imageResponse.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+    const arrayBuffer = await imageResponse.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  } catch (err) {
+    console.error(`[avatar] Telegram fetch failed: ${err}`);
+    return null;
+  }
 }
 
 function getBotAvatarPath(botName: string): string {
@@ -82,6 +92,16 @@ export async function GET(
   // Fetch from Telegram
   const imageBuffer = await fetchTelegramAvatar(bot.telegram_token);
   if (!imageBuffer) {
+    // Serve stale cache if Telegram fetch fails
+    if (fs.existsSync(avatarPath)) {
+      const staleBuffer = fs.readFileSync(avatarPath);
+      return new NextResponse(staleBuffer.buffer as ArrayBuffer, {
+        headers: {
+          "Content-Type": "image/jpeg",
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    }
     return NextResponse.json({ error: "No avatar available" }, { status: 404 });
   }
 
