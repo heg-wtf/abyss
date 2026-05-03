@@ -140,6 +140,7 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
 
     started_applications = []
     cron_tasks = []
+    chat_server = None
     try:
         for name, application in applications:
             try:
@@ -194,11 +195,30 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
                 interval = heartbeat_config.get("interval_minutes", 30)
                 console.print(f"  [green]HEARTBEAT[/green] {name} (every {interval}m)")
 
+        # Start the dashboard chat server (HTTP/SSE on 127.0.0.1:3848)
+        from abyss.chat_server import get_server as _get_chat_server
+
+        chat_server = _get_chat_server()
+        try:
+            await chat_server.start()
+            console.print(
+                f"  [green]CHAT[/green] dashboard server "
+                f"(http://{chat_server.host}:{chat_server.port})"
+            )
+        except OSError as chat_error:
+            console.print(f"  [yellow]CHAT[/yellow] failed to bind: {chat_error}")
+            chat_server = None
+
         console.print(f"\n{len(started_applications)} bot(s) running. Press Ctrl+C to stop.")
         await stop_event.wait()
 
     finally:
         console.print("\nStopping bots...")
+
+        # Stop the dashboard chat server first (drains in-flight SSE)
+        if chat_server is not None:
+            with suppress(Exception):
+                await chat_server.stop()
 
         # Close cached LLM backends (httpx clients, etc.) and SDK pool
         from abyss.llm import close_all as close_all_backends

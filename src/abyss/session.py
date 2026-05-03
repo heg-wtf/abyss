@@ -17,9 +17,35 @@ CONVERSATION_DATE_FORMAT = "%y%m%d"
 CONVERSATION_GLOB_PATTERN = "conversation-[0-9][0-9][0-9][0-9][0-9][0-9].md"
 
 
-def session_directory(bot_path: Path, chat_id: int) -> Path:
-    """Return the session directory path for a given chat."""
-    return bot_path / "sessions" / f"chat_{chat_id}"
+def session_directory(bot_path: Path, chat_id: int | str) -> Path:
+    """Return the session directory path for a given chat.
+
+    For integer chat_id (Telegram), directory is ``chat_<int>``.
+    For string chat_id (e.g. dashboard ``chat_web_<uuid>``), the string is
+    used verbatim as the directory name — callers must include any prefix
+    they want.
+    """
+    if isinstance(chat_id, int):
+        return bot_path / "sessions" / f"chat_{chat_id}"
+    return bot_path / "sessions" / chat_id
+
+
+WEB_SESSION_PREFIX = "chat_web_"
+
+
+def collect_web_session_ids(bot_path: Path) -> list[str]:
+    """Collect dashboard chat session IDs (``chat_web_<uuid>``) for a bot.
+
+    Returns directory names verbatim (e.g. ``chat_web_a3f9b2c1``).
+    """
+    sessions_directory = bot_path / "sessions"
+    if not sessions_directory.exists():
+        return []
+    out: list[str] = []
+    for child in sorted(sessions_directory.iterdir()):
+        if child.is_dir() and child.name.startswith(WEB_SESSION_PREFIX):
+            out.append(child.name)
+    return out
 
 
 def collect_session_chat_ids(bot_path: Path) -> list[int]:
@@ -45,7 +71,7 @@ def collect_session_chat_ids(bot_path: Path) -> list[int]:
 
 def ensure_session(
     bot_path: Path,
-    chat_id: int,
+    chat_id: int | str,
     *,
     bot_name: str | None = None,
 ) -> Path:
@@ -68,8 +94,8 @@ def ensure_session(
     session_claude_md = directory / "CLAUDE.md"
     bot_claude_md = bot_path / "CLAUDE.md"
 
-    if bot_name is not None:
-        # Check if this chat belongs to a bound group
+    if bot_name is not None and isinstance(chat_id, int):
+        # Group binding only applies to integer Telegram chat IDs.
         from abyss.group import find_group_by_chat_id
 
         group_config = find_group_by_chat_id(chat_id)
