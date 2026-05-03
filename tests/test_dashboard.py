@@ -334,6 +334,76 @@ def test_next_build_artifact_size_sums_files(tmp_path):
     assert _next_build_artifact_size(tmp_path) == 3 * 1000 + 1
 
 
+def test_ensure_conversation_index_creates_bot_db(temp_abyss_home, monkeypatch):
+    """Bot start hook ensures the FTS5 schema exists on every run."""
+    from abyss import conversation_index
+    from abyss.bot_manager import _ensure_conversation_index
+
+    if not conversation_index.is_fts5_available():
+        pytest.skip("FTS5 not available on this build")
+
+    monkeypatch.setattr("abyss.group.find_groups_for_bot", lambda _name: [])
+    bot_path = temp_abyss_home / "bots" / "alpha"
+    bot_path.mkdir(parents=True)
+    _ensure_conversation_index("alpha", bot_path)
+    assert (bot_path / "conversation.db").is_file()
+
+
+def test_ensure_conversation_index_skips_when_fts5_unavailable(
+    temp_abyss_home, monkeypatch, caplog
+):
+    """When FTS5 is missing the helper logs once and short-circuits."""
+    import logging
+
+    from abyss.bot_manager import _ensure_conversation_index
+
+    monkeypatch.setattr("abyss.conversation_index.is_fts5_available", lambda: False)
+    bot_path = temp_abyss_home / "bots" / "alpha"
+    bot_path.mkdir(parents=True)
+    with caplog.at_level(logging.WARNING):
+        _ensure_conversation_index("alpha", bot_path)
+    assert not (bot_path / "conversation.db").exists()
+    assert any("FTS5" in record.message for record in caplog.records)
+
+
+def test_ensure_qmd_conversations_collection_skips_when_no_bots(tmp_path, monkeypatch):
+    """No bots/ tree → no QMD subprocess invocation."""
+    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+    from abyss.bot_manager import _ensure_qmd_conversations_collection
+
+    called: list[bool] = []
+
+    def _fake_run(*_args, **_kwargs):
+        called.append(True)
+        raise AssertionError("subprocess should not be invoked when bots/ is missing")
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+    _ensure_qmd_conversations_collection()
+    assert called == []
+
+
+def test_stop_qmd_daemon_no_op_when_qmd_missing(monkeypatch):
+    """`abyss start` shutdown path shouldn't fail when qmd isn't installed."""
+    from abyss.bot_manager import _stop_qmd_daemon
+
+    monkeypatch.setattr("shutil.which", lambda _name: None)
+    # Just confirming the function returns without raising.
+    _stop_qmd_daemon()
+
+
+def test_qmd_health_check_returns_false_on_connection_error(monkeypatch):
+    """Health check uses asyncio.open_connection; a refusal must report unreachable."""
+    import asyncio
+
+    from abyss.bot_manager import _qmd_health_check
+
+    async def _refused(*_args, **_kwargs):
+        raise ConnectionRefusedError("nope")
+
+    monkeypatch.setattr(asyncio, "open_connection", _refused)
+    assert asyncio.run(_qmd_health_check()) is False
+
+
 def test_dashboard_restart_fails_when_running_without_pid(temp_abyss_home, monkeypatch):
     """If the dashboard is detected via port fallback (no PID file), the
     restart command must surface a non-zero exit instead of silently

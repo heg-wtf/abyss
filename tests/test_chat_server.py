@@ -492,6 +492,181 @@ async def test_upload_count_cap_holds_under_concurrency(client, abyss_home, monk
 
 
 @pytest.mark.asyncio
+async def test_upload_missing_file_field(client, abyss_home):
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "file_field_missing"
+
+
+@pytest.mark.asyncio
+async def test_upload_invalid_multipart_body(client):
+    """Server rejects payloads that aren't multipart with a 4xx + clear reason."""
+    resp = await client.post(
+        "/chat/upload",
+        data=b"not multipart",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_multipart"
+
+
+@pytest.mark.asyncio
+async def test_upload_unknown_bot_or_session(client):
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"ghost", None),
+            ("session_id", b"chat_web_abc12345", None),
+            ("a.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_upload_unknown_session_for_known_bot(client, abyss_home):
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", b"chat_web_deadbeef", None),
+            ("a.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 404
+    assert (await resp.json())["error"] == "session not found"
+
+
+@pytest.mark.asyncio
+async def test_serve_unknown_attachment_returns_404(client):
+    sid = await _new_session(client)
+    resp = await client.get(f"/chat/sessions/alpha/{sid}/file/abcd1234__missing.png")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_serve_invalid_session_returns_404(client):
+    resp = await client.get("/chat/sessions/alpha/chat_web_deadbeef/file/abcd1234__missing.png")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_with_attachments_missing_session_dir(client):
+    """A valid session id whose directory was deleted out-of-band must surface
+    as the matching session-level 404, not a path-traversal 400."""
+    sid = "chat_web_deadbeef99"
+    resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "hi",
+            "attachments": ["uploads/abcd1234__file.png"],
+        },
+    )
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_chat_with_invalid_attachment_field_type(client):
+    sid = await _new_session(client)
+    resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "hi",
+            "attachments": "uploads/should-be-list.png",
+        },
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_with_attachment_not_under_uploads_prefix(client):
+    sid = await _new_session(client)
+    resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "hi",
+            "attachments": ["other/abc.png"],
+        },
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_message_too_large(client):
+    sid = await _new_session(client)
+    resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "x" * 33_000,  # > MAX_MESSAGE_BYTES (32 KiB)
+        },
+    )
+    assert resp.status == 413
+
+
+@pytest.mark.asyncio
+async def test_chat_invalid_json_body(client):
+    resp = await client.post(
+        "/chat",
+        data=b"not json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid JSON"
+
+
+@pytest.mark.asyncio
+async def test_cancel_invalid_json(client):
+    resp = await client.post(
+        "/chat/cancel",
+        data=b"not json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_create_session_invalid_json(client):
+    resp = await client.post(
+        "/chat/sessions",
+        data=b"not json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_missing_bot_param(client):
+    resp = await client.get("/chat/sessions")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_reset_server_singleton(monkeypatch):
+    from abyss.chat_server import get_server, reset_server_for_testing
+
+    server_a = get_server()
+    await reset_server_for_testing()
+    server_b = get_server()
+    assert server_a is not server_b
+    await reset_server_for_testing()
+
+
+@pytest.mark.asyncio
 async def test_chat_rejects_too_many_attachments(client):
     from abyss.chat_server import MAX_UPLOADS_PER_MESSAGE
 

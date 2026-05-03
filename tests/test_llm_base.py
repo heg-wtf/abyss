@@ -172,3 +172,61 @@ def test_protocol_runtime_is_structural() -> None:
     assert callable(getattr(fake, "cancel"))
     assert callable(getattr(fake, "close"))
     assert fake.type == "fake"
+
+
+def test_backend_options_returns_empty_when_block_is_not_a_dict() -> None:
+    from abyss.llm.base import backend_options
+
+    # ``backend`` keyed to a non-dict (e.g. a stray string) should not raise.
+    assert backend_options({"backend": "not-a-dict"}) == {}
+
+
+def test_make_request_normalizes_list_extra_arguments_and_images(tmp_path) -> None:
+    from abyss.llm.base import make_request
+
+    request = make_request(
+        bot_name="alpha",
+        bot_path=tmp_path,
+        session_directory=tmp_path,
+        working_directory=str(tmp_path),
+        bot_config={},
+        user_prompt="hi",
+        extra_arguments=["--flag", "value"],
+        images=[tmp_path / "a.png"],
+    )
+    assert isinstance(request.extra_arguments, tuple)
+    assert request.extra_arguments == ("--flag", "value")
+    assert isinstance(request.images, tuple)
+
+
+def test_make_request_normalizes_none_to_empty_tuple(tmp_path) -> None:
+    from abyss.llm.base import make_request
+
+    request = make_request(
+        bot_name="alpha",
+        bot_path=tmp_path,
+        session_directory=tmp_path,
+        working_directory=str(tmp_path),
+        bot_config={},
+        user_prompt="hi",
+        extra_arguments=None,
+        images=None,
+    )
+    assert request.extra_arguments == ()
+    assert request.images == ()
+
+
+def test_make_request_passes_through_existing_tuple(tmp_path) -> None:
+    from abyss.llm.base import make_request
+
+    args = ("--flag",)
+    request = make_request(
+        bot_name="alpha",
+        bot_path=tmp_path,
+        session_directory=tmp_path,
+        working_directory=str(tmp_path),
+        bot_config={},
+        user_prompt="hi",
+        extra_arguments=args,
+    )
+    assert request.extra_arguments is args

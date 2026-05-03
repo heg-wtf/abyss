@@ -456,6 +456,63 @@ def abyss_home(tmp_path, monkeypatch):
     return home
 
 
+def test_collect_web_session_ids_returns_empty_when_dir_missing(tmp_path):
+    """No `sessions/` yet → empty list, never raises."""
+    from abyss.session import collect_web_session_ids
+
+    assert collect_web_session_ids(tmp_path / "ghost") == []
+
+
+def test_collect_web_session_ids_filters_chat_web_prefix(tmp_path):
+    from abyss.session import collect_web_session_ids
+
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "chat_123").mkdir()  # Telegram session — must be excluded
+    (sessions / "chat_web_abc").mkdir()
+    (sessions / "chat_web_def").mkdir()
+    (sessions / "not_a_session").mkdir()
+    out = collect_web_session_ids(tmp_path)
+    assert sorted(out) == ["chat_web_abc", "chat_web_def"]
+
+
+def test_session_directory_for_string_chat_id_uses_name_verbatim(tmp_path):
+    from abyss.session import session_directory
+
+    out = session_directory(tmp_path, "chat_web_xyz")
+    assert out == tmp_path / "sessions" / "chat_web_xyz"
+
+
+def test_collect_session_chat_ids_skips_non_integer_dirs(tmp_path):
+    from abyss.session import collect_session_chat_ids
+
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    (sessions / "chat_42").mkdir()
+    (sessions / "chat_99").mkdir()
+    (sessions / "chat_web_abc").mkdir()  # web session — must be skipped
+    (sessions / "chat_unparseable").mkdir()
+    assert sorted(collect_session_chat_ids(tmp_path)) == [42, 99]
+
+
+def test_conversation_status_summary_for_missing_directory(tmp_path):
+    from abyss.session import conversation_status_summary
+
+    assert conversation_status_summary(tmp_path / "ghost") == "No conversation yet"
+
+
+def test_conversation_status_summary_reports_byte_count(tmp_path):
+    from abyss.session import conversation_status_summary
+
+    target = tmp_path / "session"
+    target.mkdir()
+    (target / "conversation-260101.md").write_text("hello world")
+    (target / "conversation.md").write_text("legacy")  # legacy fallback included
+    summary = conversation_status_summary(target)
+    assert "bytes" in summary
+    assert "2 files" in summary
+
+
 def test_global_memory_file_path(abyss_home):
     """global_memory_file_path returns expected path."""
     from abyss.session import global_memory_file_path

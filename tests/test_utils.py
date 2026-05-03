@@ -153,3 +153,38 @@ class TestMarkdownToTelegramHtmlLinks:
     def test_whitespace_in_url_stripped(self) -> None:
         result = markdown_to_telegram_html("[x](  https://example.com  )")
         assert '<a href="https://example.com">x</a>' in result
+
+
+class TestSetupLogging:
+    def test_setup_logging_creates_log_directory_and_handlers(self, tmp_path, monkeypatch) -> None:
+        import logging
+
+        from abyss.utils import setup_logging
+
+        monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+        for handler in list(logging.root.handlers):
+            logging.root.removeHandler(handler)
+
+        setup_logging("DEBUG")
+
+        log_dir = tmp_path / "logs"
+        assert log_dir.is_dir()
+        file_handler = logging.root.handlers[0]
+        assert isinstance(file_handler, logging.FileHandler)
+        assert file_handler.baseFilename.startswith(str(log_dir))
+        assert file_handler.formatter is not None
+        assert logging.root.level == logging.DEBUG
+
+    def test_setup_logging_falls_back_to_info_for_unknown_level(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        import logging
+
+        from abyss.utils import setup_logging
+
+        monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
+        for handler in list(logging.root.handlers):
+            logging.root.removeHandler(handler)
+
+        setup_logging("not-a-real-level")
+        assert logging.root.level == logging.INFO
