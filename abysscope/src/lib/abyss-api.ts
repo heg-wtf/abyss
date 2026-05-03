@@ -20,20 +20,64 @@ export interface BotSummary {
 export interface ChatSession {
   id: string;
   bot: string;
+  bot_display_name?: string;
   updated_at: string;
   preview: string;
+}
+
+export interface ChatAttachmentRef {
+  display_name: string;
+  real_name: string;
+  mime: string;
+  url: string;
 }
 
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  attachments?: ChatAttachmentRef[];
 }
+
+/** Attachment record returned by `POST /chat/upload`. */
+export interface UploadedAttachment {
+  path: string;
+  display_name: string;
+  mime: string;
+  size: number;
+}
+
+export const ALLOWED_UPLOAD_MIME_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+] as const;
+
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOADS_PER_MESSAGE = 5;
 
 export type ChatEvent =
   | { type: "chunk"; text: string }
   | { type: "done"; text: string }
   | { type: "error"; message: string };
+
+/**
+ * Thrown when the sidecar replies with a non-2xx status. Lets callers
+ * forward upstream 4xx errors verbatim instead of collapsing every
+ * failure into a 503.
+ */
+export class UpstreamError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: string,
+    public readonly contentType: string
+  ) {
+    super(`upstream ${status}: ${body.slice(0, 200)}`);
+    this.name = "UpstreamError";
+  }
+}
 
 async function jsonFetch<T>(
   path: string,
@@ -48,7 +92,11 @@ async function jsonFetch<T>(
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`abyss-api ${path} ${response.status}: ${text}`);
+    throw new UpstreamError(
+      response.status,
+      text,
+      response.headers.get("Content-Type") ?? "application/json"
+    );
   }
   return (await response.json()) as T;
 }
@@ -111,19 +159,73 @@ export async function cancelChat(bot: string, sessionId: string): Promise<void> 
  * Forward a streaming chat request to the sidecar and return the raw
  * `Response`. Caller is responsible for piping the body into another
  * `Response` (for Next.js API proxying) or parsing SSE locally.
+ *
+ * `attachments` is the list of `path` values returned by
+ * `uploadAttachment()`. Empty list omits the field entirely.
  */
 export async function streamChatRaw(
   bot: string,
   sessionId: string,
   message: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  attachments: string[] = []
 ): Promise<Response> {
+  const body: Record<string, unknown> = {
+    bot,
+    session_id: sessionId,
+    message,
+  };
+  if (attachments.length > 0) {
+    body.attachments = attachments;
+  }
   return fetch(getApiBase() + "/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ bot, session_id: sessionId, message }),
+    body: JSON.stringify(body),
     signal,
   });
+}
+
+/**
+ * Upload a single attachment via the sidecar's multipart endpoint.
+ * Returns the stored path that should be passed to `streamChatRaw`.
+ *
+ * Throws `UpstreamError` for HTTP failures, plain `Error` for network errors.
+ */
+export async function uploadAttachment(
+  bot: string,
+  sessionId: string,
+  file: File,
+  signal?: AbortSignal
+): Promise<UploadedAttachment> {
+  const form = new FormData();
+  form.append("bot", bot);
+  form.append("session_id", sessionId);
+  form.append("file", file, file.name);
+
+  const response = await fetch("/api/chat/upload", {
+    method: "POST",
+    body: form,
+    signal,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new UpstreamError(
+      response.status,
+      text,
+      response.headers.get("Content-Type") ?? "application/json"
+    );
+  }
+  return (await response.json()) as UploadedAttachment;
+}
+
+/** URL for fetching a previously uploaded file via the dashboard proxy. */
+export function attachmentUrl(
+  bot: string,
+  sessionId: string,
+  realName: string
+): string {
+  return `/api/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}/file/${encodeURIComponent(realName)}`;
 }
 
 /**

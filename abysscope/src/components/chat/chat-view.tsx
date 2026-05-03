@@ -10,6 +10,7 @@ import {
   type BotSummary,
   type ChatMessage as ChatMessageType,
   type ChatSession,
+  type UploadedAttachment,
 } from "@/lib/abyss-api";
 import { BotSelector } from "./bot-selector";
 import { ChatMessage } from "./chat-message";
@@ -129,16 +130,34 @@ export function ChatView({ initialBots, apiOnline }: Props) {
     }
   };
 
-  const handleSubmit = async (text: string) => {
+  const handleSubmit = async (payload: {
+    text: string;
+    attachments: UploadedAttachment[];
+  }) => {
     if (!activeSession) {
       setTransientError("Pick or create a chat first");
       return;
     }
+    const session = activeSession;
+    const optimisticAttachments = payload.attachments.map((attachment) => {
+      const realName = attachment.path.startsWith("uploads/")
+        ? attachment.path.slice("uploads/".length)
+        : attachment.path;
+      return {
+        display_name: attachment.display_name,
+        real_name: realName,
+        mime: attachment.mime,
+        url: `/api/chat/sessions/${encodeURIComponent(session.bot)}/${encodeURIComponent(session.id)}/file/${encodeURIComponent(realName)}`,
+      };
+    });
+
     const userMessage: ConversationMessage = {
       id: newId(),
       role: "user",
-      content: text,
+      content: payload.text,
       timestamp: new Date().toISOString(),
+      attachments:
+        optimisticAttachments.length > 0 ? optimisticAttachments : undefined,
     };
     const assistantId = newId();
     setMessages((prev) => [
@@ -154,21 +173,19 @@ export function ChatView({ initialBots, apiOnline }: Props) {
     ]);
     setTransientError(null);
 
-    let accumulated = "";
     const final = await stream.send(
-      activeSession.bot,
-      activeSession.id,
-      text
+      session.bot,
+      session.id,
+      payload.text,
+      payload.attachments.map((attachment) => attachment.path)
     );
-    accumulated = final;
     setMessages((prev) =>
       prev.map((message) =>
         message.id === assistantId
-          ? { ...message, content: accumulated, streaming: false }
+          ? { ...message, content: final, streaming: false }
           : message
       )
     );
-    // refresh session preview
     void reloadAllSessions();
   };
 
@@ -271,18 +288,25 @@ export function ChatView({ initialBots, apiOnline }: Props) {
                 role={message.role}
                 content={message.content}
                 streaming={message.streaming && stream.streaming}
+                botName={activeSession?.bot ?? null}
+                botDisplayName={
+                  activeSession?.bot_display_name ?? activeSession?.bot ?? null
+                }
+                attachments={message.attachments}
               />
             ))}
           </div>
         </ScrollArea>
         <PromptInput
+          bot={activeSession?.bot ?? null}
+          sessionId={activeSession?.id ?? null}
           onSubmit={handleSubmit}
           onCancel={handleCancel}
           streaming={stream.streaming}
           disabled={!activeSession || stream.streaming}
           placeholder={
             activeSession
-              ? `Message ${activeSession.bot}…`
+              ? `Message ${activeSession.bot_display_name || activeSession.bot}…`
               : activeBot
                 ? "Click 'Start chat' to begin"
                 : "Pick a bot first"

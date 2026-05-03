@@ -153,23 +153,31 @@ async def process_chat_message(
     on_chunk: OnChunk | None = None,
     session_key: str | None = None,
     timeout: int = 600,
+    attachments: tuple[Path, ...] = (),
 ) -> str:
     """End-to-end chat turn used by non-Telegram callers (dashboard chat).
 
     Steps:
       1. ``ensure_session`` to materialize the session directory + CLAUDE.md
-      2. Append the user message to the conversation log
-      3. Bootstrap or resume the Claude session
+      2. Append the user message (with attachment markers) to the log
+      3. Bootstrap or resume the Claude session, embedding ``File: <path>``
+         lines for each attachment so the agent can ``Read`` them
       4. Call ``LLMBackend.run_streaming`` (or ``run``) with optional ``on_chunk``
       5. Append the assistant response to the conversation log
       6. Return the full assistant text
+
+    ``attachments`` is a tuple of absolute Paths inside the session workspace.
+    Mirrors the Telegram ``file_handler`` approach: paths are inlined into
+    the prompt as text and Claude opens them via its ``Read`` tool. No
+    multimodal SDK wiring is required.
     """
     session_dir = ensure_session(bot_path, chat_id, bot_name=bot_name)
 
-    log_conversation(session_dir, "user", user_message)
+    log_text, prompt_text = _compose_user_turn(user_message, attachments)
+    log_conversation(session_dir, "user", log_text)
 
     prompt, claude_session_id, resume_session = prepare_session_context(
-        bot_path, session_dir, user_message
+        bot_path, session_dir, prompt_text
     )
 
     effective_key = session_key or f"{bot_name}:{chat_id}"
@@ -180,7 +188,7 @@ async def process_chat_message(
             bot_path=bot_path,
             bot_config=bot_config,
             session_dir=session_dir,
-            user_message=user_message,
+            user_message=prompt_text,
             prompt=prompt,
             claude_session_id=claude_session_id,
             resume_session=resume_session,
@@ -194,3 +202,43 @@ async def process_chat_message(
 
     log_conversation(session_dir, "assistant", full_text)
     return full_text
+
+
+def _compose_user_turn(user_message: str, attachments: tuple[Path, ...]) -> tuple[str, str]:
+    """Mirror ``handlers.file_handler`` formatting for attachment turns.
+
+    Returns ``(log_text, prompt_text)`` where:
+      * ``log_text`` — what gets appended to ``conversation-YYMMDD.md``.
+        Format: ``[file: name1.png(uuid__name1.png), name2.pdf(uuid__name2.pdf)]\\n\\n<caption>``
+        when attachments exist, plain ``user_message`` otherwise. The
+        ``(real_name)`` parenthetical lets the dashboard restore working
+        download URLs after a reload (see ``chat_server`` message parsing).
+      * ``prompt_text`` — what Claude actually receives. Caption text plus
+        one ``File: <abs path>`` line per attachment so the agent can
+        ``Read`` each file.
+    """
+    if not attachments:
+        return user_message, user_message
+
+    pairs = [(_attachment_display_name(p.name), p.name) for p in attachments]
+    marker = "[file: " + ", ".join(f"{display}({real})" for display, real in pairs) + "]"
+    caption = user_message.strip()
+    log_text = marker if not caption else f"{marker}\n\n{caption}"
+
+    base = caption or "I sent files."
+    file_lines = "\n".join(f"File: {path}" for path in attachments)
+    prompt_text = f"{base}\n\n{file_lines}"
+
+    return log_text, prompt_text
+
+
+def _attachment_display_name(real_name: str) -> str:
+    """Recover the user-visible filename from a stored ``<8hex>__<safe>.<ext>``.
+
+    The dashboard uploader prefixes a short uuid with ``__`` so the original
+    (sanitized) basename is recoverable for display. Files that don't follow
+    the convention fall back to the raw name.
+    """
+    if "__" in real_name:
+        return real_name.split("__", 1)[1]
+    return real_name

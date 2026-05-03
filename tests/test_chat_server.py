@@ -229,3 +229,282 @@ async def test_cancel_endpoint(client, abyss_home, patch_backend):
     )
     assert resp.status == 200
     assert (await resp.json())["cancelled"] is True
+
+
+# ---------------------------------------------------------------------------
+# Attachment upload / serve / chat integration
+# ---------------------------------------------------------------------------
+
+
+# Smallest legal PNG (1x1 transparent) — passes magic byte check.
+_MINIMAL_PNG_BYTES = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000a49444154789c63000100000005000183b76148000000004945"
+    "4e44ae426082"
+)
+_MINIMAL_PDF_BYTES = b"%PDF-1.4\n%fake\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n"
+
+
+def _multipart_form(parts: list[tuple[str, bytes, str | None]]) -> tuple[bytes, str]:
+    """Build a basic multipart/form-data body for aiohttp test client."""
+    boundary = "----abyss-test-boundary"
+    out = bytearray()
+    for name, content, content_type in parts:
+        out += f"--{boundary}\r\n".encode()
+        if content_type is None:
+            out += f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
+            out += content
+        else:
+            out += (f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n').encode()
+            out += f"Content-Type: {content_type}\r\n\r\n".encode()
+            out += content
+        out += b"\r\n"
+    out += f"--{boundary}--\r\n".encode()
+    return bytes(out), f"multipart/form-data; boundary={boundary}"
+
+
+async def _new_session(client) -> str:
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    return (await create.json())["id"]
+
+
+@pytest.mark.asyncio
+async def test_upload_png_succeeds(client, abyss_home):
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("photo.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 200, await resp.text()
+    payload = await resp.json()
+    assert payload["display_name"] == "photo.png"
+    assert payload["mime"] == "image/png"
+    assert payload["size"] == len(_MINIMAL_PNG_BYTES)
+    assert payload["path"].startswith("uploads/")
+    saved = abyss_home / "bots" / "alpha" / "sessions" / sid / "workspace" / payload["path"]
+    assert saved.is_file()
+    assert saved.read_bytes() == _MINIMAL_PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_upload_pdf_succeeds(client, abyss_home):
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("doc.pdf", _MINIMAL_PDF_BYTES, "application/pdf"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 200
+    payload = await resp.json()
+    assert payload["mime"] == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_invalid_mime(client):
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("note.txt", b"plain text", "text/plain"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 400
+    assert (await resp.json())["error"] == "invalid_mime"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_mime_spoof(client):
+    """A text payload claiming to be PNG must be rejected by magic byte check."""
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("fake.png", b"not really a png " * 10, "image/png"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_oversize(client, abyss_home, monkeypatch):
+    from abyss import chat_server
+
+    monkeypatch.setattr(chat_server, "MAX_UPLOAD_BYTES", 1024)
+    # Re-create the server with the patched limit so the inner check fires.
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("big.png", _MINIMAL_PNG_BYTES + b"\x00" * 4096, "image/png"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert resp.status in (400, 413)
+
+
+@pytest.mark.asyncio
+async def test_upload_session_count_cap(client, abyss_home, monkeypatch):
+    from abyss import chat_server
+
+    monkeypatch.setattr(chat_server, "MAX_UPLOADS_PER_SESSION", 1)
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("a.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    first = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    assert first.status == 200
+    body2, ctype2 = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("b.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    second = await client.post("/chat/upload", data=body2, headers={"Content-Type": ctype2})
+    assert second.status == 429
+
+
+@pytest.mark.asyncio
+async def test_serve_uploaded_file(client, abyss_home):
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("photo.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    name = (await resp.json())["path"][len("uploads/") :]
+    served = await client.get(f"/chat/sessions/alpha/{sid}/file/{name}")
+    assert served.status == 200
+    assert served.headers["Content-Type"] == "image/png"
+    assert await served.read() == _MINIMAL_PNG_BYTES
+
+
+@pytest.mark.asyncio
+async def test_serve_rejects_traversal(client):
+    sid = await _new_session(client)
+    resp = await client.get(f"/chat/sessions/alpha/{sid}/file/..%2Fetc%2Fpasswd")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_with_attachments_threads_paths(client, abyss_home, patch_backend):
+    """A chat call with attachments propagates File: lines + log marker."""
+    sid = await _new_session(client)
+    body, ctype = _multipart_form(
+        [
+            ("bot", b"alpha", None),
+            ("session_id", sid.encode(), None),
+            ("hello.png", _MINIMAL_PNG_BYTES, "image/png"),
+        ]
+    )
+    upload = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+    saved_path = (await upload.json())["path"]
+
+    chat_resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "describe please",
+            "attachments": [saved_path],
+        },
+    )
+    # Drain SSE
+    async for _ in chat_resp.content.iter_any():
+        pass
+
+    msgs = await client.get(f"/chat/sessions/alpha/{sid}/messages")
+    body_msgs = (await msgs.json())["messages"]
+    user_turn = next(m for m in body_msgs if m["role"] == "user")
+    assert "describe please" in user_turn["content"]
+    assert "attachments" in user_turn
+    assert user_turn["attachments"][0]["display_name"] == "hello.png"
+    assert user_turn["attachments"][0]["mime"] == "image/png"
+    assert user_turn["attachments"][0]["url"].startswith(f"/api/chat/sessions/alpha/{sid}/file/")
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_invalid_attachment_path(client):
+    sid = await _new_session(client)
+    resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "hi",
+            "attachments": ["../../etc/passwd"],
+        },
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_count_cap_holds_under_concurrency(client, abyss_home, monkeypatch):
+    """Concurrent uploads must not exceed MAX_UPLOADS_PER_SESSION even when
+    the count → check → write window is squeezed."""
+    import asyncio as _asyncio
+
+    from abyss import chat_server
+
+    monkeypatch.setattr(chat_server, "MAX_UPLOADS_PER_SESSION", 2)
+    sid = await _new_session(client)
+
+    async def upload_one(suffix: bytes) -> int:
+        body, ctype = _multipart_form(
+            [
+                ("bot", b"alpha", None),
+                ("session_id", sid.encode(), None),
+                (f"x{suffix.decode()}.png", _MINIMAL_PNG_BYTES, "image/png"),
+            ]
+        )
+        resp = await client.post("/chat/upload", data=body, headers={"Content-Type": ctype})
+        return resp.status
+
+    statuses = await _asyncio.gather(
+        upload_one(b"1"),
+        upload_one(b"2"),
+        upload_one(b"3"),
+        upload_one(b"4"),
+    )
+    assert statuses.count(200) == 2
+    assert statuses.count(429) == 2
+    upload_dir = abyss_home / "bots" / "alpha" / "sessions" / sid / "workspace" / "uploads"
+    assert sum(1 for _ in upload_dir.iterdir()) == 2
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_too_many_attachments(client):
+    from abyss.chat_server import MAX_UPLOADS_PER_MESSAGE
+
+    sid = await _new_session(client)
+    resp = await client.post(
+        "/chat",
+        json={
+            "bot": "alpha",
+            "session_id": sid,
+            "message": "hi",
+            "attachments": [
+                f"uploads/abc__file{i}.png" for i in range(MAX_UPLOADS_PER_MESSAGE + 1)
+            ],
+        },
+    )
+    assert resp.status == 400

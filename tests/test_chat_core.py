@@ -219,3 +219,57 @@ async def test_bootstrap_includes_history_and_memory(bot, fake_backend):
     assert "bot notes" in sent
     assert "follow-up" in sent
     assert fake_backend.last_request.resume_session is False
+
+
+@pytest.mark.asyncio
+async def test_attachments_inline_paths_and_log_marker(bot, fake_backend):
+    """Mirrors Telegram file_handler: paths in prompt, [file: ...] in log."""
+    workspace = bot["path"] / "sessions" / "chat_web_attach1" / "workspace" / "uploads"
+    workspace.mkdir(parents=True, exist_ok=True)
+    foo = workspace / "abc12345__photo.png"
+    foo.write_bytes(b"\x89PNG")
+    bar = workspace / "def67890__doc.pdf"
+    bar.write_bytes(b"%PDF-")
+
+    await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=bot["config"],
+        chat_id="chat_web_attach1",
+        user_message="please summarize",
+        on_chunk=None,
+        attachments=(foo, bar),
+    )
+
+    sent = fake_backend.last_request.user_prompt
+    assert f"File: {foo}" in sent
+    assert f"File: {bar}" in sent
+    assert "please summarize" in sent
+
+    convo_files = sorted((bot["path"] / "sessions" / "chat_web_attach1").glob("conversation-*.md"))
+    log_text = convo_files[0].read_text()
+    assert "[file: photo.png(abc12345__photo.png), doc.pdf(def67890__doc.pdf)]" in log_text
+    assert "please summarize" in log_text
+
+
+@pytest.mark.asyncio
+async def test_attachments_without_caption(bot, fake_backend):
+    """Empty caption + attachments still produces a usable prompt."""
+    workspace = bot["path"] / "sessions" / "chat_web_attach2" / "workspace" / "uploads"
+    workspace.mkdir(parents=True, exist_ok=True)
+    img = workspace / "11111111__pic.png"
+    img.write_bytes(b"\x89PNG")
+
+    await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=bot["config"],
+        chat_id="chat_web_attach2",
+        user_message="",
+        on_chunk=None,
+        attachments=(img,),
+    )
+
+    sent = fake_backend.last_request.user_prompt
+    assert "I sent files." in sent
+    assert f"File: {img}" in sent

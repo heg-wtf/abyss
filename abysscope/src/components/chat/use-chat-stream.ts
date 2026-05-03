@@ -6,7 +6,12 @@ import { parseChatEvents } from "@/lib/abyss-api";
 export interface StreamHandle {
   text: string;
   streaming: boolean;
-  send: (bot: string, sessionId: string, message: string) => Promise<string>;
+  send: (
+    bot: string,
+    sessionId: string,
+    message: string,
+    attachmentPaths?: string[]
+  ) => Promise<string>;
   cancel: () => void;
   error: string | null;
 }
@@ -20,7 +25,12 @@ export function useChatStream(
   const abortRef = useRef<AbortController | null>(null);
 
   const send = useCallback(
-    async (bot: string, sessionId: string, message: string) => {
+    async (
+      bot: string,
+      sessionId: string,
+      message: string,
+      attachmentPaths: string[] = []
+    ) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -30,10 +40,18 @@ export function useChatStream(
       setStreaming(true);
 
       try {
+        const body: Record<string, unknown> = {
+          bot,
+          session_id: sessionId,
+          message,
+        };
+        if (attachmentPaths.length > 0) {
+          body.attachments = attachmentPaths;
+        }
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ bot, session_id: sessionId, message }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
         if (!response.ok || !response.body) {
