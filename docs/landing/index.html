@@ -578,7 +578,7 @@
         "operatingSystem": "macOS",
         "url": "https://abyss.heg.wtf",
         "downloadUrl": "https://github.com/heg-wtf/abyss",
-        "softwareVersion": "2026.04.30",
+        "softwareVersion": "2026.05.03",
         "author": {
           "@type": "Organization",
           "name": "HEG",
@@ -594,7 +594,7 @@
       <div class="container">
         <div class="header-left">
           <span>abyss</span>
-          <span class="version-badge">v2026.04.30</span>
+          <span class="version-badge">v2026.05.03</span>
         </div>
         <div class="header-links">
           <a href="#features">Features</a>
@@ -887,6 +887,40 @@
       <div class="container">
         <h2>What's New</h2>
         <div class="changelog">
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.05.03</span>
+            <span class="changelog-desc"
+              ><strong>Dashboard Chat</strong> — top-level
+              <code style="font-family: 'JetBrains Mono', monospace;">/chat</code>
+              page with bot picker, streaming SSE responses, and per-session
+              avatars. Sessions live in
+              <code style="font-family: 'JetBrains Mono', monospace;"
+                >chat_web_*</code
+              >
+              under the bot's workspace, fully separate from Telegram.
+              <strong>Image + PDF attachments</strong> via paperclip / drag &
+              drop / clipboard paste — files land in
+              <code style="font-family: 'JetBrains Mono', monospace;"
+                >workspace/uploads/</code
+              >
+              and Claude opens them through its
+              <code style="font-family: 'JetBrains Mono', monospace;">Read</code>
+              tool. Magic-byte MIME sniff, per-session upload cap,
+              path-traversal guard. New
+              <strong>build progress UI</strong> for
+              <code style="font-family: 'JetBrains Mono', monospace;"
+                >abyss dashboard restart</code
+              >: replaces the raw
+              <code style="font-family: 'JetBrains Mono', monospace;">next build</code>
+              firehose with a 4-step Rich checklist, captures the build log
+              under
+              <code style="font-family: 'JetBrains Mono', monospace;"
+                >~/.abyss/logs/dashboard-build-*.log</code
+              >, surfaces failures with the last 30 lines.
+              <strong>Collapsible sidebar</strong> with persisted state.
+              Test coverage 69 → 71% (+52 cases).</span
+            >
+          </div>
           <div class="changelog-item">
             <span class="changelog-ver">v2026.04.30</span>
             <span class="changelog-desc"
