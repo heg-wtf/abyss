@@ -111,9 +111,7 @@ def test_running_step_renders_spinner_and_detail():
     target.detail = "next build"
     target.started_at = 0  # avoid a flaky elapsed counter in the snapshot
 
-    Console(file=buffer, force_terminal=False, color_system=None, width=120).print(
-        target.render()
-    )
+    Console(file=buffer, force_terminal=False, color_system=None, width=120).print(target.render())
     output = buffer.getvalue()
     assert "alpha" in output
     assert "next build" in output
