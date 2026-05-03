@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 
+import pytest
 from rich.console import Console
 
 from abyss.dashboard_ui import (
@@ -37,17 +38,20 @@ def test_clean_step_marks_success_and_records_duration():
     assert finalized.duration >= 0.0
 
 
+def _trigger_failing_step(progress: BuildProgress) -> None:
+    """Helper that always raises inside the progress block — kept as a
+    standalone function so static analyzers don't flag the test body
+    after ``pytest.raises`` as unreachable.
+    """
+    with progress.live():
+        with progress.step("alpha"):
+            raise RuntimeError("boom")
+
+
 def test_failing_step_marks_failed_and_reraises():
     progress, _ = _make_progress("alpha")
-    raised = None
-    with progress.live():
-        try:
-            with progress.step("alpha"):
-                raise RuntimeError("boom")
-        except RuntimeError as error:
-            raised = error
-    assert raised is not None
-    assert "boom" in str(raised)
+    with pytest.raises(RuntimeError, match="boom"):
+        _trigger_failing_step(progress)
     finalized = progress.get("alpha")
     assert finalized.status is StepStatus.FAILED
     assert finalized.detail == "boom"

@@ -469,9 +469,9 @@ def dashboard_start(
         return
 
     # Foreground: hand off to next start. Output flows directly to the user.
-    if abysscope_directory is None:
-        # The Locate dashboard step would have raised before we got here.
-        raise RuntimeError("dashboard directory was not resolved before foreground start")
+    # The Locate dashboard step above raises if this is None, so the assertion
+    # is purely for the type checker and as a defensive invariant.
+    assert abysscope_directory is not None  # noqa: S101
     pid_file = _dashboard_pid_file()
     try:
         subprocess.run(
@@ -569,11 +569,16 @@ def dashboard_restart(
         except (ProcessLookupError, PermissionError):
             try:
                 os.kill(pid, signal.SIGTERM)
-            except (ProcessLookupError, PermissionError):
-                # The process is already gone or unkillable from this user;
-                # the unlink below + dashboard_start's own running-check will
-                # catch any inconsistency.
-                pass
+            except (ProcessLookupError, PermissionError) as error:
+                # Both signal paths failed: the process is already gone or
+                # unkillable from this user. The unlink below and
+                # dashboard_start's own running-check will catch any
+                # remaining inconsistency, so it's safe to log and proceed.
+                import logging
+
+                logging.getLogger(__name__).debug(
+                    "dashboard restart could not signal PID %s: %s", pid, error
+                )
         _dashboard_pid_file().unlink(missing_ok=True)
         # Render a single confirmation row in the same vocabulary as the
         # build checklist to keep the UX consistent.
