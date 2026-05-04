@@ -49,3 +49,6 @@ export const DEFAULT_SILENCE_TIMEOUT_MS = 1200;
 // Audio container headers can occupy ~1-2 KB on their own; require enough
 // bytes to be confident a real recording exists before we transcribe.
 export const MIN_RECORDING_BYTES = 5000;
+// Peak RMS during a take must clear this for the audio to plausibly contain
+// real speech. Below this Whisper falls back to subtitle boilerplate.
+export const QUIET_PEAK_RMS_THRESHOLD = 8;

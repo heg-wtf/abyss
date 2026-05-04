@@ -11,6 +11,7 @@ import {
   DEFAULT_RMS_THRESHOLD,
   DEFAULT_SILENCE_TIMEOUT_MS,
   MIN_RECORDING_BYTES,
+  QUIET_PEAK_RMS_THRESHOLD,
   computeTimeDomainRms,
   normalizeAmplitude,
 } from "@/lib/voice-rms";
@@ -219,25 +220,41 @@ export function useVoicePipeline(
   // stop button (manual) or because silence-detection fired (auto). On
   // manual stop we trust the user and skip the speech-detected gate.
   const stopReasonRef = useRef<"auto" | "manual">("auto");
+  // Peak RMS observed during the current take — used to detect "audio is
+  // way too quiet, Whisper will only hallucinate" and skip transcription.
+  const peakRmsRef = useRef<number>(0);
 
   const handleStop = useCallback(async () => {
     const blobType = recorderMimeRef.current || "audio/webm";
     const blob = new Blob(chunksRef.current, { type: blobType });
     const userActuallySpoke = hasSpokenRef.current;
     const reason = stopReasonRef.current;
+    const peakRms = peakRmsRef.current;
     chunksRef.current = [];
     hasSpokenRef.current = false;
     stopReasonRef.current = "auto";
+    peakRmsRef.current = 0;
 
-    // Manual stop: trust the user — only require enough bytes to plausibly
-    // contain audio. Auto stop (silence timeout): also require that RMS
-    // crossed the speech threshold during the take, so we don't transcribe
-    // a take where nothing was actually said.
     const tooShort = blob.size < MIN_RECORDING_BYTES;
-    const skip = tooShort || (reason === "auto" && !userActuallySpoke);
-    if (skip) {
+    const tooQuiet = peakRms < QUIET_PEAK_RMS_THRESHOLD;
+    // Auto-stop without speech detection -> nothing was said, skip silently.
+    if (reason === "auto" && !userActuallySpoke) {
       setState("idle");
       setAmplitude(0);
+      return;
+    }
+    if (tooShort) {
+      setState("idle");
+      setAmplitude(0);
+      onError?.(new Error("녹음이 너무 짧습니다."));
+      return;
+    }
+    // Manual stop with extremely quiet take -> Whisper will just hallucinate
+    // YouTube boilerplate. Surface a real hint instead of swallowing.
+    if (tooQuiet) {
+      setState("idle");
+      setAmplitude(0);
+      onError?.(new Error("음성이 너무 작습니다. 마이크를 가까이 하고 다시 시도해주세요."));
       return;
     }
 
@@ -245,11 +262,19 @@ export function useVoicePipeline(
     try {
       const result = await transcribe(blob);
       const text = result.text.trim();
-      if (text && !isLikelyWhisperHallucination(text)) {
-        onTranscript?.(text);
-      } else {
+      if (!text) {
         setState("idle");
+        onError?.(new Error("음성을 인식하지 못했어요. 다시 시도해주세요."));
+        return;
       }
+      if (isLikelyWhisperHallucination(text)) {
+        setState("idle");
+        onError?.(
+          new Error("음성을 알아듣지 못했어요. 더 가까이서 또렷하게 말해주세요.")
+        );
+        return;
+      }
+      onTranscript?.(text);
     } catch (err) {
       const error =
         err instanceof VoiceboxError
@@ -333,6 +358,7 @@ export function useVoicePipeline(
       currentAnalyser.getByteTimeDomainData(buffer);
       const rms = computeTimeDomainRms(buffer);
       setAmplitude(normalizeAmplitude(rms));
+      if (rms > peakRmsRef.current) peakRmsRef.current = rms;
 
       if (rms > rmsThreshold) {
         hasSpokenRef.current = true;
