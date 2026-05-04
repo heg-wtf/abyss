@@ -1,18 +1,20 @@
 "use client";
 
 import * as React from "react";
+import { Menu } from "@base-ui/react/menu";
 import { MessageSquarePlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BotAvatar } from "@/components/bot-avatar";
 import { cn } from "@/lib/utils";
-import type { ChatSession } from "@/lib/abyss-api";
+import type { BotSummary, ChatSession } from "@/lib/abyss-api";
 
 interface Props {
   sessions: ChatSession[];
+  bots: BotSummary[];
   activeId: string | null;
   onSelect: (session: ChatSession) => void;
-  onCreate: () => void;
+  onCreate: (botName: string) => void;
   onDelete: (session: ChatSession) => void;
   loading?: boolean;
 }
@@ -29,20 +31,48 @@ function formatRelative(iso: string): string {
 
 export function ChatSessionList({
   sessions,
+  bots,
   activeId,
   onSelect,
   onCreate,
   onDelete,
   loading,
 }: Props) {
+  const noBots = bots.length === 0;
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r bg-muted/40">
       <div className="flex h-14 items-center justify-between border-b px-3">
         <span className="text-sm font-medium">Chats</span>
-        <Button size="sm" variant="outline" onClick={onCreate}>
-          <MessageSquarePlus className="size-4" />
-          New
-        </Button>
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button size="sm" variant="outline" disabled={noBots}>
+                <MessageSquarePlus className="size-4" />
+                New
+              </Button>
+            }
+          />
+          <Menu.Portal>
+            <Menu.Positioner sideOffset={6} align="end">
+              <Menu.Popup className="min-w-[200px] rounded-md border bg-popover p-1 text-sm shadow-md outline-none">
+                {bots.map((bot) => (
+                  <Menu.Item
+                    key={bot.name}
+                    onClick={() => onCreate(bot.name)}
+                    className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-highlighted:bg-muted"
+                  >
+                    <BotAvatar
+                      botName={bot.name}
+                      displayName={bot.display_name}
+                      size="xs"
+                    />
+                    <span className="truncate">{bot.display_name}</span>
+                  </Menu.Item>
+                ))}
+              </Menu.Popup>
+            </Menu.Positioner>
+          </Menu.Portal>
+        </Menu.Root>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {loading && (

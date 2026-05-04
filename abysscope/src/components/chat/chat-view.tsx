@@ -3,8 +3,8 @@
 import * as React from "react";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { BotAvatar } from "@/components/bot-avatar";
 import {
   cancelChat,
   type BotSummary,
@@ -12,7 +12,6 @@ import {
   type ChatSession,
   type UploadedAttachment,
 } from "@/lib/abyss-api";
-import { BotSelector } from "./bot-selector";
 import { ChatMessage } from "./chat-message";
 import { ChatSessionList } from "./chat-session-list";
 import { PromptInput } from "./prompt-input";
@@ -34,9 +33,6 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const [bots] = React.useState<BotSummary[]>(initialBots);
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = React.useState<ChatSession | null>(null);
-  const [activeBot, setActiveBot] = React.useState<string | null>(
-    initialBots[0]?.name ?? null
-  );
   const [messages, setMessages] = React.useState<ConversationMessage[]>([]);
   const [sessionsLoading, setSessionsLoading] = React.useState(false);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
@@ -97,15 +93,15 @@ export function ChatView({ initialBots, apiOnline }: Props) {
     region.scrollTop = region.scrollHeight;
   }, [messages, stream.text]);
 
-  const handleNewChat = async () => {
-    if (!activeBot) {
+  const handleNewChat = async (botName: string) => {
+    if (!botName) {
       setTransientError("Select a bot first");
       return;
     }
     const response = await fetch("/api/chat/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bot: activeBot }),
+      body: JSON.stringify({ bot: botName }),
     });
     if (!response.ok) {
       setTransientError(`Failed to create session: ${response.status}`);
@@ -231,35 +227,34 @@ export function ChatView({ initialBots, apiOnline }: Props) {
     <div className="flex h-full">
       <ChatSessionList
         sessions={sessions}
+        bots={bots}
         activeId={activeSession?.id ?? null}
         loading={sessionsLoading}
-        onSelect={(session) => {
-          setActiveBot(session.bot);
-          setActiveSession(session);
-        }}
+        onSelect={(session) => setActiveSession(session)}
         onCreate={handleNewChat}
         onDelete={handleDelete}
       />
       <main className="flex min-h-0 flex-1 flex-col">
         <header className="flex h-14 items-center justify-between border-b bg-background px-4">
           <div className="flex items-center gap-3">
-            <BotSelector
-              bots={bots}
-              value={activeBot}
-              onChange={setActiveBot}
-              disabled={!!activeSession}
-            />
             {activeSession && (
-              <span className="text-xs text-muted-foreground">
-                Session <code>{activeSession.id}</code>
-              </span>
+              <>
+                <BotAvatar
+                  botName={activeSession.bot}
+                  displayName={
+                    activeSession.bot_display_name ?? activeSession.bot
+                  }
+                  size="xs"
+                />
+                <span className="text-sm font-medium">
+                  {activeSession.bot_display_name ?? activeSession.bot}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  Session <code>{activeSession.id}</code>
+                </span>
+              </>
             )}
           </div>
-          {!activeSession && activeBot && (
-            <Button size="sm" onClick={handleNewChat}>
-              Start chat
-            </Button>
-          )}
         </header>
         {transientError && (
           <div className="bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -308,9 +303,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
           placeholder={
             activeSession
               ? `Message ${activeSession.bot_display_name || activeSession.bot}…`
-              : activeBot
-                ? "Click 'Start chat' to begin"
-                : "Pick a bot first"
+              : "Click 'New' on the left to start a chat"
           }
         />
       </main>
