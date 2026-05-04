@@ -37,7 +37,7 @@ export function ChatSessionList({
 }: Props) {
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r bg-muted/40">
-      <div className="flex items-center justify-between border-b px-3 py-2">
+      <div className="flex h-14 items-center justify-between border-b px-3">
         <span className="text-sm font-medium">Chats</span>
         <Button size="sm" variant="outline" onClick={onCreate}>
           <MessageSquarePlus className="size-4" />
