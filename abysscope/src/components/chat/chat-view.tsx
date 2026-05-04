@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertCircle, Mic } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -12,13 +12,11 @@ import {
   type ChatSession,
   type UploadedAttachment,
 } from "@/lib/abyss-api";
-import { checkVoiceboxHealth } from "@/lib/voicebox";
 import { BotSelector } from "./bot-selector";
 import { ChatMessage } from "./chat-message";
 import { ChatSessionList } from "./chat-session-list";
 import { PromptInput } from "./prompt-input";
 import { useChatStream } from "./use-chat-stream";
-import { VoiceMode } from "./voice-mode";
 
 interface ConversationMessage extends ChatMessageType {
   id: string;
@@ -43,27 +41,8 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const [sessionsLoading, setSessionsLoading] = React.useState(false);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const [transientError, setTransientError] = React.useState<string | null>(null);
-  const [voiceModeOn, setVoiceModeOn] = React.useState(false);
-  const [voiceboxAvailable, setVoiceboxAvailable] = React.useState(false);
 
   const stream = useChatStream();
-
-  // Probe Voicebox availability on mount and whenever the session switches.
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const ok = await checkVoiceboxHealth();
-      if (!cancelled) setVoiceboxAvailable(ok);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSession?.id]);
-
-  // Exit voice mode automatically when the active session changes.
-  React.useEffect(() => {
-    setVoiceModeOn(false);
-  }, [activeSession?.id]);
   const scrollRegionRef = React.useRef<HTMLDivElement>(null);
 
   // Refresh session lists for all bots
@@ -220,32 +199,6 @@ export function ChatView({ initialBots, apiOnline }: Props) {
     }
   };
 
-  const handleVoiceTranscript = React.useCallback(
-    (text: string) => {
-      void handleSubmit({ text, attachments: [] });
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeSession?.id, activeSession?.bot]
-  );
-
-  const toggleVoiceMode = React.useCallback(async () => {
-    if (voiceModeOn) {
-      setVoiceModeOn(false);
-      return;
-    }
-    // Re-check on click in case the user just started Voicebox.
-    const ok = await checkVoiceboxHealth();
-    setVoiceboxAvailable(ok);
-    if (!ok) {
-      setTransientError(
-        "Voicebox 서버가 실행 중이 아닙니다 (localhost:47390)."
-      );
-      return;
-    }
-    setTransientError(null);
-    setVoiceModeOn(true);
-  }, [voiceModeOn]);
-
   // Reflect streaming text into the in-flight assistant message
   React.useEffect(() => {
     if (!stream.streaming) return;
@@ -302,31 +255,11 @@ export function ChatView({ initialBots, apiOnline }: Props) {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {activeSession && (
-              <Button
-                size="sm"
-                variant={voiceModeOn ? "default" : "outline"}
-                onClick={() => void toggleVoiceMode()}
-                disabled={!voiceboxAvailable && !voiceModeOn}
-                title={
-                  voiceboxAvailable
-                    ? voiceModeOn
-                      ? "텍스트 모드로 전환"
-                      : "음성 모드로 전환"
-                    : "Voicebox 서버가 실행 중이 아닙니다"
-                }
-              >
-                <Mic className="size-4" />
-                <span className="ml-1">{voiceModeOn ? "음성 ON" : "음성"}</span>
-              </Button>
-            )}
-            {!activeSession && activeBot && (
-              <Button size="sm" onClick={handleNewChat}>
-                Start chat
-              </Button>
-            )}
-          </div>
+          {!activeSession && activeBot && (
+            <Button size="sm" onClick={handleNewChat}>
+              Start chat
+            </Button>
+          )}
         </header>
         {transientError && (
           <div className="bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -338,64 +271,48 @@ export function ChatView({ initialBots, apiOnline }: Props) {
             {stream.error}
           </div>
         )}
-        {voiceModeOn && activeSession ? (
-          <VoiceMode
-            streamingText={stream.text}
-            isStreaming={stream.streaming}
-            onTranscript={handleVoiceTranscript}
-            onExit={() => setVoiceModeOn(false)}
-            hint={`${activeSession.bot_display_name || activeSession.bot}와 음성으로 대화`}
-          />
-        ) : (
-          <>
-            <ScrollArea className="flex-1">
-              <div ref={scrollRegionRef} className="flex h-full flex-col">
-                {messagesLoading && (
-                  <div className="px-4 py-3 text-sm text-muted-foreground">
-                    Loading…
-                  </div>
-                )}
-                {!messagesLoading && messages.length === 0 && (
-                  <div className="flex flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground">
-                    {activeSession
-                      ? "Send a message to start the conversation."
-                      : "Pick a chat from the left or start a new one."}
-                  </div>
-                )}
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    role={message.role}
-                    content={message.content}
-                    streaming={message.streaming && stream.streaming}
-                    botName={activeSession?.bot ?? null}
-                    botDisplayName={
-                      activeSession?.bot_display_name ??
-                      activeSession?.bot ??
-                      null
-                    }
-                    attachments={message.attachments}
-                  />
-                ))}
+        <ScrollArea className="flex-1">
+          <div ref={scrollRegionRef} className="flex h-full flex-col">
+            {messagesLoading && (
+              <div className="px-4 py-3 text-sm text-muted-foreground">Loading…</div>
+            )}
+            {!messagesLoading && messages.length === 0 && (
+              <div className="flex flex-1 items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                {activeSession
+                  ? "Send a message to start the conversation."
+                  : "Pick a chat from the left or start a new one."}
               </div>
-            </ScrollArea>
-            <PromptInput
-              bot={activeSession?.bot ?? null}
-              sessionId={activeSession?.id ?? null}
-              onSubmit={handleSubmit}
-              onCancel={handleCancel}
-              streaming={stream.streaming}
-              disabled={!activeSession || stream.streaming}
-              placeholder={
-                activeSession
-                  ? `Message ${activeSession.bot_display_name || activeSession.bot}…`
-                  : activeBot
-                    ? "Click 'Start chat' to begin"
-                    : "Pick a bot first"
-              }
-            />
-          </>
-        )}
+            )}
+            {messages.map((message) => (
+              <ChatMessage
+                key={message.id}
+                role={message.role}
+                content={message.content}
+                streaming={message.streaming && stream.streaming}
+                botName={activeSession?.bot ?? null}
+                botDisplayName={
+                  activeSession?.bot_display_name ?? activeSession?.bot ?? null
+                }
+                attachments={message.attachments}
+              />
+            ))}
+          </div>
+        </ScrollArea>
+        <PromptInput
+          bot={activeSession?.bot ?? null}
+          sessionId={activeSession?.id ?? null}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          streaming={stream.streaming}
+          disabled={!activeSession || stream.streaming}
+          placeholder={
+            activeSession
+              ? `Message ${activeSession.bot_display_name || activeSession.bot}…`
+              : activeBot
+                ? "Click 'Start chat' to begin"
+                : "Pick a bot first"
+          }
+        />
       </main>
     </div>
   );
