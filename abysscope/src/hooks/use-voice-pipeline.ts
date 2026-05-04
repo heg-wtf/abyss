@@ -11,7 +11,7 @@ import {
   DEFAULT_RMS_THRESHOLD,
   DEFAULT_SILENCE_TIMEOUT_MS,
   MIN_RECORDING_BYTES,
-  computeRms,
+  computeTimeDomainRms,
   normalizeAmplitude,
 } from "@/lib/voice-rms";
 
@@ -113,7 +113,9 @@ export function useVoicePipeline(
     }
     audioCtxRef.current = null;
     analyserRef.current = null;
-    hasSpokenRef.current = false;
+    // NOTE: hasSpokenRef is NOT cleared here — handleStop runs async after
+    // recorder.onstop and needs to read its final value. handleStop resets
+    // it once consumed.
   }, []);
 
   const releasePlayback = useCallback(() => {
@@ -213,19 +215,27 @@ export function useVoicePipeline(
   // ------------------------------------------------------------------
 
   const recorderMimeRef = useRef<string>("");
+  // Tracks whether the in-flight take ends because the user pressed the
+  // stop button (manual) or because silence-detection fired (auto). On
+  // manual stop we trust the user and skip the speech-detected gate.
+  const stopReasonRef = useRef<"auto" | "manual">("auto");
 
   const handleStop = useCallback(async () => {
     const blobType = recorderMimeRef.current || "audio/webm";
     const blob = new Blob(chunksRef.current, { type: blobType });
     const userActuallySpoke = hasSpokenRef.current;
+    const reason = stopReasonRef.current;
     chunksRef.current = [];
     hasSpokenRef.current = false;
+    stopReasonRef.current = "auto";
 
-    // Two gates against Whisper hallucinating from silence:
-    //  1. Encoded blob too small — typically a header-only take (m4a/webm
-    //     headers can be ~1KB even with no audio).
-    //  2. RMS never crossed the speech threshold during the recording.
-    if (!userActuallySpoke || blob.size < MIN_RECORDING_BYTES) {
+    // Manual stop: trust the user — only require enough bytes to plausibly
+    // contain audio. Auto stop (silence timeout): also require that RMS
+    // crossed the speech threshold during the take, so we don't transcribe
+    // a take where nothing was actually said.
+    const tooShort = blob.size < MIN_RECORDING_BYTES;
+    const skip = tooShort || (reason === "auto" && !userActuallySpoke);
+    if (skip) {
       setState("idle");
       setAmplitude(0);
       return;
@@ -312,14 +322,16 @@ export function useVoicePipeline(
 
     recorder.start();
 
-    const buffer = new Uint8Array(analyser.frequencyBinCount);
+    // Time-domain VAD — much more reliable than frequency-bin RMS for
+    // detecting "is the user speaking right now".
+    const buffer = new Uint8Array(analyser.fftSize);
     const tick = () => {
       const currentAnalyser = analyserRef.current;
       const currentRecorder = recorderRef.current;
       if (!currentAnalyser || !currentRecorder) return;
 
-      currentAnalyser.getByteFrequencyData(buffer);
-      const rms = computeRms(buffer);
+      currentAnalyser.getByteTimeDomainData(buffer);
+      const rms = computeTimeDomainRms(buffer);
       setAmplitude(normalizeAmplitude(rms));
 
       if (rms > rmsThreshold) {
@@ -351,6 +363,11 @@ export function useVoicePipeline(
   }, [handleStop, isActive, onError, rmsThreshold, silenceTimeoutMs]);
 
   const stop = useCallback(() => {
+    // Tell handleStop the user explicitly ended the take, so it bypasses
+    // the silence-detection gate even if RMS never crossed the threshold.
+    stopReasonRef.current = "manual";
+    // releaseMicResources stops the recorder, which queues an onstop event
+    // -> handleStop in the next microtask; chunks survive on chunksRef.
     releaseMicResources();
     setIsActive(false);
     setAmplitude(0);
