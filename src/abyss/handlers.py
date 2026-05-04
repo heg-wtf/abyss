@@ -97,6 +97,96 @@ def _is_mentioned(message: Any, bot_username: str) -> bool:
     return f"@{username}" in text
 
 
+def _collect_mentioned_member_names(message_text: str, group_config: dict[str, Any]) -> list[str]:
+    """Return the list of group member bot names @mentioned in the message text.
+
+    Used by the orchestrator routing rule: when a user (or another bot) directly
+    addresses one or more specific members, the orchestrator stays silent so the
+    members can answer in-band.
+
+    Args:
+        message_text: Raw text of the inbound Telegram message.
+        group_config: Group configuration dict (from group.yaml).
+    """
+    if not message_text:
+        return []
+    from abyss.config import load_bot_config
+
+    mentioned: list[str] = []
+    for member_name in group_config.get("members", []):
+        member_config = load_bot_config(member_name)
+        if not member_config:
+            continue
+        member_username = (member_config.get("telegram_username", "") or "").lstrip("@")
+        if member_username and f"@{member_username}" in message_text:
+            mentioned.append(member_name)
+    return mentioned
+
+
+def should_handle_group_message(
+    update: Any,
+    group_config: dict[str, Any],
+    *,
+    bot_name: str,
+    bot_username: str,
+) -> bool:
+    """Direct-first group routing decision.
+
+    Rules (Phase 1):
+    - **Member**: respond to any @mention (user, orchestrator, or peer member).
+    - **Orchestrator (user message)**: handle unless the user directly @mentioned
+      one or more members without also mentioning the orchestrator. Without an
+      @mention the orchestrator is the default responder.
+    - **Orchestrator (bot message)**: only act when itself is @mentioned by a
+      known group member — peer-to-peer member traffic no longer triggers an
+      orchestrator Claude run (shared conversation still records it).
+
+    Returns True if this bot should process the message.
+    """
+    from abyss.group import get_my_role
+
+    my_role = get_my_role(group_config, bot_name)
+    if my_role is None:
+        return False
+
+    message = update.effective_message
+    message_text = getattr(message, "text", None) or ""
+    from_user = message.from_user
+    sender_is_bot = getattr(from_user, "is_bot", False)
+
+    if my_role == "orchestrator":
+        orchestrator_mentioned = _is_mentioned(message, bot_username)
+        mentioned_members = _collect_mentioned_member_names(message_text, group_config)
+
+        if not sender_is_bot:
+            # User addresses specific members directly -> step aside.
+            if mentioned_members and not orchestrator_mentioned:
+                return False
+            return True
+
+        # Bot sender — only act if this orchestrator is explicitly @mentioned
+        # AND the sender is a known group member (avoid responding to bots
+        # outside the group that happen to share the chat).
+        if not orchestrator_mentioned:
+            return False
+        sender_username = getattr(from_user, "username", "") or ""
+        from abyss.config import load_bot_config
+
+        for member_name in group_config.get("members", []):
+            member_config = load_bot_config(member_name)
+            if member_config:
+                member_username = member_config.get("telegram_username", "").lstrip("@")
+                if member_username and member_username == sender_username:
+                    return True
+        return False
+
+    if my_role == "member":
+        # Respond to @mention from anyone (user, orchestrator, peer member).
+        return _is_mentioned(message, bot_username)
+
+    return False
+
+
 def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> list:
     """Create Telegram handlers for a bot.
 
@@ -781,46 +871,13 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             )
 
     def _should_handle_group_message(update: Update, group_config: dict[str, Any]) -> bool:
-        """Determine if this bot should process a group message.
-
-        Group branching rules:
-        - Orchestrator: handles user (non-bot) messages and member bot messages
-        - Member: only handles messages where it is @mentioned by a bot (not user)
-        - If the bot is not in the group, it should not handle the message
-
-        Returns True if this bot should process the message.
-        """
-        my_role = get_my_role(group_config, bot_name)
-        if my_role is None:
-            return False
-
-        from_user = update.effective_message.from_user
-        sender_is_bot = getattr(from_user, "is_bot", False)
-
-        if my_role == "orchestrator":
-            if not sender_is_bot:
-                # User (boss) message -> orchestrator handles
-                return True
-            # Bot message -> orchestrator checks if sender is a group member
-            sender_username = getattr(from_user, "username", "") or ""
-            members = group_config.get("members", [])
-            for member_name in members:
-                from abyss.config import load_bot_config
-
-                member_config = load_bot_config(member_name)
-                if member_config:
-                    member_username = member_config.get("telegram_username", "").lstrip("@")
-                    if member_username and member_username == sender_username:
-                        return True
-            return False
-
-        if my_role == "member":
-            # Member only responds when @mentioned by a bot (orchestrator)
-            if sender_is_bot and _is_mentioned(update.effective_message, bot_username):
-                return True
-            return False
-
-        return False
+        """Closure delegating to module-level ``should_handle_group_message``."""
+        return should_handle_group_message(
+            update,
+            group_config,
+            bot_name=bot_name,
+            bot_username=bot_username,
+        )
 
     async def _process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Core message processing logic — shared between individual and group modes."""
