@@ -211,8 +211,11 @@ export function useVoicePipeline(
   // Mic loop
   // ------------------------------------------------------------------
 
+  const recorderMimeRef = useRef<string>("");
+
   const handleStop = useCallback(async () => {
-    const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+    const blobType = recorderMimeRef.current || "audio/webm";
+    const blob = new Blob(chunksRef.current, { type: blobType });
     chunksRef.current = [];
 
     if (blob.size < MIN_RECORDING_BYTES) {
@@ -270,7 +273,20 @@ export function useVoicePipeline(
     analyser.fftSize = 256;
     source.connect(analyser);
 
-    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    // Prefer MP4/AAC because Voicebox v0.5.0 reliably decodes it; webm/opus
+    // sometimes hits "Could not decode" depending on the bundled ffmpeg build.
+    const mimeCandidates = [
+      "audio/mp4;codecs=mp4a.40.2",
+      "audio/mp4",
+      "audio/webm;codecs=opus",
+      "audio/webm",
+    ];
+    const pickedMime =
+      mimeCandidates.find((type) => MediaRecorder.isTypeSupported(type)) ?? "";
+    recorderMimeRef.current = pickedMime;
+    const recorder = pickedMime
+      ? new MediaRecorder(stream, { mimeType: pickedMime })
+      : new MediaRecorder(stream);
     chunksRef.current = [];
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) chunksRef.current.push(event.data);

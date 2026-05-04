@@ -102,8 +102,11 @@ export async function transcribe(
   options: TranscribeOptions = {}
 ): Promise<TranscribeResult> {
   const form = new FormData();
-  // Voicebox expects the binary part to be named `file` (not `audio`).
-  form.append("file", audio, "recording.webm");
+  // Voicebox expects the binary part to be named `file` (not `audio`). Pick
+  // the filename extension from the blob's MIME so Voicebox's content sniff
+  // (and ffmpeg) picks the right decoder.
+  const filename = pickRecordingFilename(audio.type);
+  form.append("file", audio, filename);
   form.append("language", options.language ?? STT_LANGUAGE);
   form.append("model", options.model ?? STT_MODEL);
 
@@ -166,4 +169,13 @@ async function safeText(response: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+function pickRecordingFilename(mime: string): string {
+  const lower = mime.toLowerCase();
+  if (lower.includes("mp4")) return "recording.m4a";
+  if (lower.includes("ogg")) return "recording.ogg";
+  if (lower.includes("wav")) return "recording.wav";
+  if (lower.includes("mpeg")) return "recording.mp3";
+  return "recording.webm";
 }
