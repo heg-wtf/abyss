@@ -44,7 +44,7 @@ export function ChatSessionList({
           New
         </Button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         {loading && (
           <div className="px-3 py-4 text-sm text-muted-foreground">Loading…</div>
         )}
