@@ -7,7 +7,7 @@ export default async function ChatPage() {
   const apiOnline = await checkHealth();
   const bots = apiOnline ? await listChatBots().catch(() => []) : [];
   return (
-    <div className="h-[calc(100vh-3rem)]">
+    <div className="-m-6 h-screen">
       <ChatView initialBots={bots} apiOnline={apiOnline} />
     </div>
   );
