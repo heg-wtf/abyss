@@ -243,7 +243,7 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 - Session management: per-session delete in bot detail, per-conversation-file delete in conversation viewer
 - Memory editor: markdown rendering in view mode (react-markdown + @tailwindcss/typography), raw edit mode
 - Sidebar: collapsible Bots/Skills sections (localStorage-persisted), theme toggle with emoji icon
-- Dashboard chat: in-browser chat UI talks to internal `ChatServer` (aiohttp, started by `bot_manager`). SSE token streaming via `/chat`, image + PDF uploads via `/upload`, served back via `/files/{id}`. Uses the same SDK pool / session continuity as Telegram via `chat_core`
+- Dashboard chat: in-browser chat UI talks to internal `ChatServer` (aiohttp, started by `bot_manager`). SSE token streaming via `/chat`, image + PDF uploads via `/upload`, served back via `/files/{id}`. Uses the same SDK pool / session continuity as Telegram via `chat_core`. Single entry point — sidebar `New` opens a base-ui `Menu` listing all bots; clicking one creates the session for that bot. The right-panel header shows the active session's bot avatar + display name + session ID. `display_name` falls back through `display_name → telegram_botname → bot_name`, applied in both `/chat/bots` and `/chat/sessions` responses so the picker, session list, and message header stay consistent with the sidebar
 - `abyss dashboard start/restart` shows a Rich `BuildProgress` checklist (install deps → build Next.js → boot server) instead of streaming raw `next build` output
 
 ## Tool Metrics + Hooks

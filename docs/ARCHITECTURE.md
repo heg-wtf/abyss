@@ -267,6 +267,8 @@ Abysscope can talk to bots in the browser via the same SDK pool that serves Tele
 - **Concurrency** — per-session asyncio locks for chat (sequential turns) and a separate per-session upload lock. Path traversal is blocked by validating bot/session names and `_is_path_under` checks
 - **Session reuse** — `chat_core.process_chat_message` reuses the SDK pool client keyed by `bot:chat_id`, so a dashboard message and a Telegram message on the same chat ID share one persistent Claude session. Bootstrap fallback runs the same `_run_with_resume_fallback` used by Telegram
 - **Attachments** — uploads land in `sessions/chat_<id>/uploads/<8hex>__<safe>.<ext>` and are referenced from the user turn the same way Telegram file handlers compose them, so the conversation log is identical regardless of source
+- **Display names** — `/chat/bots` and `/chat/sessions` both apply the fallback chain `display_name → telegram_botname → bot_name` (`_bot_display_name` in `chat_server.py`), matching the dashboard sidebar so a bot whose `display_name` is empty (e.g. `''`) still appears as its Korean Telegram name in the chat picker, session list, and message header instead of falling all the way back to the bot ID
+- **UX** — the dashboard chat has a single entry point: the left sidebar shows a `Chats` panel with a `New` button. `New` opens a base-ui `Menu` listing every bot; clicking one immediately creates a `chat_web_<uuid>` session and selects it. The right-panel header carries no controls — only the active session's bot avatar, display name, and session ID. The previous `BotSelector` + `Start chat` button in the right panel was removed to eliminate the two-step flow
 
 ### 14. Session Continuity
 
