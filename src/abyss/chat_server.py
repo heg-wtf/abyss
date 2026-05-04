@@ -319,7 +319,7 @@ def _parse_conversation_messages(
 
 def _bot_display_name(bot_name: str) -> str:
     cfg = load_bot_config(bot_name) or {}
-    return cfg.get("display_name") or bot_name
+    return cfg.get("display_name") or cfg.get("telegram_botname") or bot_name
 
 
 def _session_metadata(
@@ -460,7 +460,11 @@ class ChatServer:
             out.append(
                 {
                     "name": name,
-                    "display_name": cfg.get("display_name") or name,
+                    "display_name": (
+                        cfg.get("display_name")
+                        or cfg.get("telegram_botname")
+                        or name
+                    ),
                     "type": backend_cfg.get("type", "claude_code"),
                 }
             )
