@@ -14,7 +14,7 @@ export async function GET() {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
-    const upstream = await fetch(`${VOICEBOX_BASE}/api/status`, {
+    const upstream = await fetch(`${VOICEBOX_BASE}/health`, {
       method: "GET",
       signal: controller.signal,
     });

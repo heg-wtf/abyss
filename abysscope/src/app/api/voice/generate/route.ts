@@ -5,16 +5,20 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/voice/generate — JSON proxy to Voicebox `/api/generate`.
+ * POST /api/voice/generate — JSON proxy to Voicebox `/generate/stream`.
  *
- * Body: `{ text, voice_id?, engine?, language? }`. Returns audio binary
- * (Content-Type from upstream, typically `audio/wav` or `audio/mp3`).
- * Voicebox URL is hardcoded to localhost (SSRF guard).
+ * Body: `GenerationRequest` JSON — `{ profile_id, text, language, engine?,
+ * model_size? }`. Returns audio binary (typically `audio/wav`). Voicebox URL
+ * is hardcoded to localhost (SSRF guard).
+ *
+ * `/generate/stream` returns audio synchronously without persisting the
+ * generation, which suits the dashboard chat path where we just want to play
+ * the result and discard.
  */
 export async function POST(request: NextRequest) {
   let upstream: Response;
   try {
-    upstream = await fetch(`${VOICEBOX_BASE}/api/generate`, {
+    upstream = await fetch(`${VOICEBOX_BASE}/generate/stream`, {
       method: "POST",
       body: request.body,
       duplex: "half",
@@ -43,7 +47,6 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Stream the binary audio body straight through.
   return new Response(upstream.body, {
     status: 200,
     headers: {

@@ -1,28 +1,29 @@
 /**
- * Voicebox client helpers.
+ * Voicebox client helpers (Voicebox v0.5.0+).
  *
  * Voicebox runs locally as a separate process (https://voicebox.sh). The
- * dashboard proxies STT/TTS calls through Next.js API routes so the browser
- * does not need direct access to localhost:47390 (uniform origin, easier to
- * mock in tests).
+ * dashboard proxies all calls through Next.js API routes so the browser does
+ * not need direct access to localhost — easier to mock in tests, uniform
+ * origin, single SSRF guard.
  *
- * SSRF guard: VOICEBOX_BASE is a hardcoded localhost URL — never derived from
- * user input.
+ * NOTE: TTS in v0.5.0 requires a `profile_id`. Voice profiles are created in
+ * the Voicebox UI (or via `POST /profiles`). The dashboard auto-picks the
+ * first available profile; if none exists, the Voice button surfaces a hint.
  */
 
-export const VOICEBOX_BASE = "http://localhost:47390";
+export const VOICEBOX_BASE = "http://127.0.0.1:17493";
 
 export const STT_LANGUAGE = "ko";
-// Whisper large-v3 — best Korean accuracy, also strong English. Trades ~1-2s
-// extra latency on M-series for noticeably better Korean transcription.
-export const STT_MODEL = "large-v3";
+// Whisper variants: base | small | medium | large | turbo. `large` for best
+// Korean accuracy; switch to `turbo` for ~2-3x speed at slight accuracy cost.
+export const STT_MODEL = "large";
 
-// Qwen3-TTS — most consistent quality across Korean + English (one of its 10
-// official languages). Switch to "chatterbox" if you want stronger emotional
-// expressiveness or zero-shot voice cloning at the cost of cross-language
-// uniformity.
-export const TTS_ENGINE = "qwen3-tts";
+// Voicebox engine codes: qwen | qwen_custom_voice | luxtts | chatterbox |
+// chatterbox_turbo | tada | kokoro. `qwen` (Qwen3-TTS) is most balanced for
+// Korean + English; `chatterbox` for stronger voice cloning.
+export const TTS_ENGINE = "qwen";
 export const TTS_LANGUAGE = "ko";
+export const TTS_MODEL_SIZE = "1.7B"; // Qwen3-TTS variant
 
 export const HEALTH_TIMEOUT_MS = 2000;
 
@@ -37,15 +38,11 @@ export class VoiceboxError extends Error {
   }
 }
 
-/**
- * Probe Voicebox via the dashboard proxy. Returns true when the server is
- * reachable and healthy.
- */
+/** Probe Voicebox via the dashboard proxy. */
 export async function checkVoiceboxHealth(signal?: AbortSignal): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
-    // Chain the caller's signal so component unmounts can abort early.
     signal?.addEventListener("abort", () => controller.abort(), { once: true });
     const response = await fetch("/api/voice/status", {
       method: "GET",
@@ -60,6 +57,31 @@ export async function checkVoiceboxHealth(signal?: AbortSignal): Promise<boolean
   }
 }
 
+export interface VoiceProfile {
+  id: string;
+  name: string;
+  language: string;
+  voice_type?: string;
+  default_engine?: string | null;
+}
+
+/** List voice profiles available in Voicebox. */
+export async function listVoiceProfiles(
+  signal?: AbortSignal
+): Promise<VoiceProfile[]> {
+  const response = await fetch("/api/voice/profiles", {
+    method: "GET",
+    signal,
+  });
+  if (!response.ok) {
+    const body = await safeText(response);
+    throw new VoiceboxError(response.status, body, "Failed to list profiles");
+  }
+  const data = await response.json();
+  if (!Array.isArray(data)) return [];
+  return data as VoiceProfile[];
+}
+
 export interface TranscribeOptions {
   language?: string;
   model?: string;
@@ -68,20 +90,22 @@ export interface TranscribeOptions {
 
 export interface TranscribeResult {
   text: string;
+  duration?: number;
 }
 
 /**
- * POST audio blob → text via the dashboard proxy. The blob can be any format
- * Voicebox accepts (`audio/webm`, `audio/wav`, `audio/mp4`, ...).
+ * POST audio blob → text. Voicebox `/transcribe` expects multipart with
+ * fields: `file` (binary), `language` (optional), `model` (optional).
  */
 export async function transcribe(
   audio: Blob,
   options: TranscribeOptions = {}
 ): Promise<TranscribeResult> {
   const form = new FormData();
-  form.append("audio", audio, "recording.webm");
+  // Voicebox expects the binary part to be named `file` (not `audio`).
+  form.append("file", audio, "recording.webm");
   form.append("language", options.language ?? STT_LANGUAGE);
-  form.append("model_size", options.model ?? STT_MODEL);
+  form.append("model", options.model ?? STT_MODEL);
 
   const response = await fetch("/api/voice/transcribe", {
     method: "POST",
@@ -94,32 +118,36 @@ export async function transcribe(
     throw new VoiceboxError(response.status, body, `Transcribe failed: ${response.status}`);
   }
 
-  const data = (await response.json()) as { text?: string };
-  return { text: data.text ?? "" };
+  const data = (await response.json()) as { text?: string; duration?: number };
+  return { text: data.text ?? "", duration: data.duration };
 }
 
 export interface SynthesizeOptions {
-  voiceId?: string;
+  /** Voice profile ID (required by Voicebox v0.5.0). */
+  profileId: string;
   engine?: string;
   language?: string;
+  modelSize?: string;
   signal?: AbortSignal;
 }
 
 /**
- * POST text → audio (binary blob) via the dashboard proxy.
+ * POST text → audio (binary blob). Uses Voicebox `/generate/stream` so the
+ * audio bytes come back synchronously (no polling). Requires `profileId`.
  */
 export async function synthesize(
   text: string,
-  options: SynthesizeOptions = {}
+  options: SynthesizeOptions
 ): Promise<Blob> {
   const response = await fetch("/api/voice/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      profile_id: options.profileId,
       text,
-      voice_id: options.voiceId,
       engine: options.engine ?? TTS_ENGINE,
       language: options.language ?? TTS_LANGUAGE,
+      model_size: options.modelSize ?? TTS_MODEL_SIZE,
     }),
     signal: options.signal,
   });

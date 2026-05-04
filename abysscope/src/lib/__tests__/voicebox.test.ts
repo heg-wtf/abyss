@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   checkVoiceboxHealth,
+  listVoiceProfiles,
   synthesize,
   transcribe,
   VoiceboxError,
@@ -50,10 +51,43 @@ describe("checkVoiceboxHealth", () => {
   });
 });
 
-describe("transcribe", () => {
-  it("posts FormData with default ko + large-v3 and returns text", async () => {
+describe("listVoiceProfiles", () => {
+  it("returns the profile array verbatim", async () => {
+    const fakeProfiles = [
+      { id: "p1", name: "Default", language: "ko" },
+      { id: "p2", name: "Narrator", language: "en" },
+    ];
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ text: "안녕" }), {
+      new Response(JSON.stringify(fakeProfiles), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    const result = await listVoiceProfiles();
+    expect(result).toEqual(fakeProfiles);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/voice/profiles",
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
+  it("returns empty array when payload is not an array", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({}), { status: 200 })
+    );
+    expect(await listVoiceProfiles()).toEqual([]);
+  });
+
+  it("throws VoiceboxError on non-2xx", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("oops", { status: 503 }));
+    await expect(listVoiceProfiles()).rejects.toBeInstanceOf(VoiceboxError);
+  });
+});
+
+describe("transcribe", () => {
+  it("posts FormData with default ko + large and returns text", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ text: "안녕", duration: 1.2 }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       })
@@ -62,14 +96,17 @@ describe("transcribe", () => {
     const result = await transcribe(blob);
 
     expect(result.text).toBe("안녕");
+    expect(result.duration).toBe(1.2);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/voice/transcribe");
     expect(init.method).toBe("POST");
     const body = init.body as FormData;
     expect(body.get("language")).toBe("ko");
-    expect(body.get("model_size")).toBe("large-v3");
-    expect(body.get("audio")).toBeInstanceOf(Blob);
+    expect(body.get("model")).toBe("large");
+    // Voicebox expects the binary part to be named `file`.
+    expect(body.get("file")).toBeInstanceOf(Blob);
+    expect(body.get("audio")).toBeNull();
   });
 
   it("honors language and model overrides", async () => {
@@ -78,11 +115,11 @@ describe("transcribe", () => {
     );
     await transcribe(new Blob(["a"], { type: "audio/webm" }), {
       language: "en",
-      model: "large-v3",
+      model: "turbo",
     });
     const body = fetchMock.mock.calls[0][1].body as FormData;
     expect(body.get("language")).toBe("en");
-    expect(body.get("model_size")).toBe("large-v3");
+    expect(body.get("model")).toBe("turbo");
   });
 
   it("throws VoiceboxError on non-2xx", async () => {
@@ -104,7 +141,7 @@ describe("transcribe", () => {
 });
 
 describe("synthesize", () => {
-  it("posts JSON with qwen3-tts/ko defaults and returns audio blob", async () => {
+  it("posts JSON with qwen/ko defaults and profile_id, returns audio blob", async () => {
     const audioPayload = new Uint8Array([1, 2, 3]);
     fetchMock.mockResolvedValueOnce(
       new Response(audioPayload, {
@@ -113,7 +150,7 @@ describe("synthesize", () => {
       })
     );
 
-    const blob = await synthesize("안녕");
+    const blob = await synthesize("안녕", { profileId: "profile-x" });
     expect(blob).toBeInstanceOf(Blob);
     expect(blob.size).toBe(3);
 
@@ -123,25 +160,37 @@ describe("synthesize", () => {
     expect(init.headers).toMatchObject({ "Content-Type": "application/json" });
     const body = JSON.parse(init.body as string);
     expect(body).toMatchObject({
+      profile_id: "profile-x",
       text: "안녕",
-      engine: "qwen3-tts",
+      engine: "qwen",
       language: "ko",
+      model_size: "1.7B",
     });
+    expect(body.voice_id).toBeUndefined();
   });
 
-  it("forwards voice_id when provided", async () => {
+  it("honors engine + language + modelSize overrides", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(new Uint8Array([0]), { status: 200 })
     );
-    await synthesize("hi", { voiceId: "custom-voice" });
+    await synthesize("hi", {
+      profileId: "p",
+      engine: "chatterbox",
+      language: "en",
+      modelSize: "0.6B",
+    });
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body.voice_id).toBe("custom-voice");
+    expect(body.engine).toBe("chatterbox");
+    expect(body.language).toBe("en");
+    expect(body.model_size).toBe("0.6B");
   });
 
   it("throws VoiceboxError on 4xx", async () => {
     fetchMock.mockResolvedValueOnce(
       new Response("bad request", { status: 400 })
     );
-    await expect(synthesize("hi")).rejects.toBeInstanceOf(VoiceboxError);
+    await expect(
+      synthesize("hi", { profileId: "p" })
+    ).rejects.toBeInstanceOf(VoiceboxError);
   });
 });

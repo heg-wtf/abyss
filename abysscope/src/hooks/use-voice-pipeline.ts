@@ -25,6 +25,12 @@ export interface UseVoicePipelineOptions {
   rmsThreshold?: number;
   /** Override default silence timeout in milliseconds. */
   silenceTimeoutMs?: number;
+  /**
+   * Voice profile ID required by Voicebox `/generate/stream`. When unset,
+   * `speak(text)` is a no-op (so the listening half still works while the
+   * caller is loading profiles).
+   */
+  profileId?: string | null;
 }
 
 export interface VoicePipeline {
@@ -53,7 +59,12 @@ export function useVoicePipeline(
     onError,
     rmsThreshold = DEFAULT_RMS_THRESHOLD,
     silenceTimeoutMs = DEFAULT_SILENCE_TIMEOUT_MS,
+    profileId = null,
   } = options;
+  // Keep latest profileId in a ref so the speech queue picks it up without
+  // forcing the queue closure to be recreated on every render.
+  const profileIdRef = useRef<string | null>(profileId);
+  profileIdRef.current = profileId;
 
   const [state, setState] = useState<VoiceState>("idle");
   const [amplitude, setAmplitude] = useState(0);
@@ -132,8 +143,23 @@ export function useVoicePipeline(
     isPlayingRef.current = true;
     setState("speaking");
 
+    const currentProfileId = profileIdRef.current;
+    if (!currentProfileId) {
+      const error = new Error("Voicebox voice profile not configured");
+      next.reject(error);
+      onError?.(error);
+      isPlayingRef.current = false;
+      // Drain the rest of the queue with the same error so callers don't hang.
+      while (speechQueueRef.current.length > 0) {
+        const pending = speechQueueRef.current.shift();
+        pending?.reject(error);
+      }
+      setState((prev) => (prev === "speaking" ? "idle" : prev));
+      return;
+    }
+
     try {
-      const blob = await synthesize(next.text);
+      const blob = await synthesize(next.text, { profileId: currentProfileId });
       const url = URL.createObjectURL(blob);
       playbackUrlRef.current = url;
       const audio = new Audio(url);

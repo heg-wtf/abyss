@@ -5,15 +5,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * POST /api/voice/transcribe — multipart proxy to Voicebox `/api/transcribe`.
+ * POST /api/voice/transcribe — multipart proxy to Voicebox `/transcribe`.
  *
- * Forwards the original `FormData` payload (audio blob + language + model)
+ * Forwards the original `FormData` payload (file + language + model)
  * untouched. Voicebox URL is hardcoded to localhost (SSRF guard).
  */
 export async function POST(request: NextRequest) {
   let upstream: Response;
   try {
-    upstream = await fetch(`${VOICEBOX_BASE}/api/transcribe`, {
+    upstream = await fetch(`${VOICEBOX_BASE}/transcribe`, {
       method: "POST",
       body: request.body,
       duplex: "half",
