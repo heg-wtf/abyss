@@ -62,7 +62,13 @@ from typing import Any
 from aiohttp import web
 
 from abyss.chat_core import process_chat_message
-from abyss.config import abyss_home, bot_directory, load_bot_config, load_config
+from abyss.config import (
+    abyss_home,
+    bot_directory,
+    get_elevenlabs_api_key,
+    load_bot_config,
+    load_config,
+)
 from abyss.llm import get_or_create
 from abyss.session import (
     WEB_SESSION_PREFIX,
@@ -77,7 +83,7 @@ logger = logging.getLogger(__name__)
 CHAT_SERVER_HOST = "127.0.0.1"
 CHAT_SERVER_PORT = int(os.environ.get("ABYSS_CHAT_PORT", "3848"))
 
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_API_KEY = get_elevenlabs_api_key()
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 ELEVENLABS_DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam
@@ -844,7 +850,6 @@ class ChatServer:
             headers["Content-Disposition"] = f'inline; filename="{candidate.name}"'
         return web.FileResponse(candidate, headers=headers)
 
-
     async def _handle_transcribe(self, request: web.Request) -> web.Response:
         """Transcribe audio via ElevenLabs Scribe v2.
 
@@ -988,6 +993,7 @@ class ChatServer:
                 content_type="application/json",
                 status=502,
             )
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton (used by bot_manager)
