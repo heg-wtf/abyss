@@ -128,3 +128,49 @@
     @apply font-sans;
   }
 }
+
+/* VoiceOrbVoid keyframes */
+@keyframes voice-orb-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes voice-orb-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes voice-orb-wave {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.95;
+  }
+}
+
+@keyframes voice-orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 0.75;
+  }
+}
