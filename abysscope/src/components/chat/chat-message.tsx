@@ -27,7 +27,12 @@ export function ChatMessage({
   const isUser = role === "user";
   const displayName = botDisplayName || botName || "Bot";
   return (
-    <div className={cn("flex gap-3 px-4 py-3", isUser && "bg-muted/30")}>
+    <div
+      className={cn(
+        "flex gap-3 border-b px-4 py-3 last:border-b-0",
+        isUser && "bg-muted/30",
+      )}
+    >
       <div className="mt-1">
         {isUser ? (
           <User className="size-5 text-muted-foreground" />
