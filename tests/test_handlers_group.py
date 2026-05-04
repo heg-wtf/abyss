@@ -8,7 +8,12 @@ import pytest
 import yaml
 
 from abyss.group import bind_group, create_group, load_group_config
-from abyss.handlers import _is_mentioned, make_handlers
+from abyss.handlers import (
+    _collect_mentioned_member_names,
+    _is_mentioned,
+    make_handlers,
+    should_handle_group_message,
+)
 
 
 @pytest.fixture()
@@ -142,6 +147,277 @@ def test_is_mentioned_empty_text():
     message = MagicMock()
     message.text = None
     assert _is_mentioned(message, "@coder_bot") is False
+
+
+# --- Direct-first group routing ---
+
+
+def _routing_update(
+    text: str,
+    *,
+    is_bot: bool,
+    username: str = "human_user",
+) -> MagicMock:
+    """Minimal Update mock for ``should_handle_group_message`` tests."""
+    update = MagicMock()
+    update.effective_message.text = text
+    update.effective_message.from_user.is_bot = is_bot
+    update.effective_message.from_user.username = username
+    return update
+
+
+def test_collect_mentioned_member_names(temp_abyss_home, dev_team_group):
+    """Helper returns names of group members @mentioned in the text."""
+    group_config = load_group_config(dev_team_group)
+    assert _collect_mentioned_member_names("@coder_bot please push", group_config) == ["coder"]
+    assert sorted(
+        _collect_mentioned_member_names("@coder_bot @tester_bot 같이 봐", group_config)
+    ) == ["coder", "tester"]
+    assert _collect_mentioned_member_names("no mentions here", group_config) == []
+
+
+def test_routing_user_mentions_member_orchestrator_skips(temp_abyss_home, dev_team_group):
+    """User @member -> orchestrator stays silent, member answers."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@coder_bot 최근 작업 뭐야", is_bot=False)
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is False
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="coder",
+            bot_username="@coder_bot",
+        )
+        is True
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="tester",
+            bot_username="@tester_bot",
+        )
+        is False
+    )
+
+
+def test_routing_user_mentions_multiple_members(temp_abyss_home, dev_team_group):
+    """User @memberA @memberB -> both answer, orchestrator silent."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@coder_bot @tester_bot 동시에", is_bot=False)
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is False
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="coder",
+            bot_username="@coder_bot",
+        )
+        is True
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="tester",
+            bot_username="@tester_bot",
+        )
+        is True
+    )
+
+
+def test_routing_user_mentions_orchestrator_only(temp_abyss_home, dev_team_group):
+    """User @orchestrator -> orchestrator answers, members silent."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@dev_lead_bot 큰 그림 알려줘", is_bot=False)
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is True
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="coder",
+            bot_username="@coder_bot",
+        )
+        is False
+    )
+
+
+def test_routing_user_mentions_orchestrator_and_member(temp_abyss_home, dev_team_group):
+    """User @orchestrator @member -> both respond."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@dev_lead_bot @coder_bot 같이 회의", is_bot=False)
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is True
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="coder",
+            bot_username="@coder_bot",
+        )
+        is True
+    )
+
+
+def test_routing_user_no_mention_orchestrator_default(temp_abyss_home, dev_team_group):
+    """User message with no @mention -> orchestrator default responder."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("뭐 하고 있어", is_bot=False)
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is True
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="coder",
+            bot_username="@coder_bot",
+        )
+        is False
+    )
+
+
+def test_routing_member_to_member_peer_collab(temp_abyss_home, dev_team_group):
+    """Member @other_member -> peer responds, orchestrator silent."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@tester_bot 이거 같이 봐줘", is_bot=True, username="coder_bot")
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is False
+    )
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="tester",
+            bot_username="@tester_bot",
+        )
+        is True
+    )
+
+
+def test_routing_orchestrator_to_member(temp_abyss_home, dev_team_group):
+    """Orchestrator @member -> member responds, orchestrator silent."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@coder_bot 작업 분석", is_bot=True, username="dev_lead_bot")
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="coder",
+            bot_username="@coder_bot",
+        )
+        is True
+    )
+    # Orchestrator should NOT re-process its own delegation.
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is False
+    )
+
+
+def test_routing_member_responds_to_orchestrator_via_mention(temp_abyss_home, dev_team_group):
+    """Member -> @orchestrator (escalation/report) -> orchestrator processes."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("@dev_lead_bot 완료했음", is_bot=True, username="coder_bot")
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is True
+    )
+
+
+def test_routing_member_chatter_without_mention_orchestrator_silent(
+    temp_abyss_home, dev_team_group
+):
+    """Member sends free-form message (no @mention) -> orchestrator no-op."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("그냥 혼잣말", is_bot=True, username="coder_bot")
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="dev_lead",
+            bot_username="@dev_lead_bot",
+        )
+        is False
+    )
+
+
+def test_routing_unknown_bot_returns_false(temp_abyss_home, dev_team_group):
+    """Bot not in any group role -> always False."""
+    group_config = load_group_config(dev_team_group)
+    update = _routing_update("hi", is_bot=False)
+
+    assert (
+        should_handle_group_message(
+            update,
+            group_config,
+            bot_name="stranger",
+            bot_username="@stranger_bot",
+        )
+        is False
+    )
 
 
 # --- /bind handler ---
@@ -381,8 +657,8 @@ async def test_group_message_orchestrator_mentions_member(temp_abyss_home, dev_t
 
 
 @pytest.mark.asyncio
-async def test_group_message_user_mentions_member_ignored(temp_abyss_home, dev_team_group):
-    """User directly @mentioning a member is ignored by member (orchestrator bypass)."""
+async def test_group_message_user_mentions_member_direct_first(temp_abyss_home, dev_team_group):
+    """Direct-first routing: user @member -> member answers, no orchestrator hop."""
     handlers = _make_bot_handlers(temp_abyss_home, "coder")
     msg_handler = handlers[MESSAGE_HANDLER_INDEX]
 
@@ -395,11 +671,12 @@ async def test_group_message_user_mentions_member_ignored(temp_abyss_home, dev_t
     )
 
     with patch("abyss.claude_runner.run_claude_with_sdk", new_callable=AsyncMock) as mock_claude:
+        mock_claude.return_value = "Working on it."
         mock_context = MagicMock()
         await msg_handler.callback(update, mock_context)
 
-    # Member should NOT call Claude — only bot @mentions trigger member
-    mock_claude.assert_not_called()
+    # Member should answer the user directly — no orchestrator middleman.
+    mock_claude.assert_called_once()
 
 
 @pytest.mark.asyncio
