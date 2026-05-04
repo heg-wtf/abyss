@@ -437,7 +437,7 @@ def dashboard_start(
             with progress.step("Start server") as step:
                 if daemon:
                     process = subprocess.Popen(
-                        ["npx", "next", "start", "--port", str(port)],
+                        ["npx", "next", "start", "--port", str(port), "--hostname", "0.0.0.0"],
                         cwd=abysscope_directory,
                         env=next_env,
                         stdout=subprocess.DEVNULL,
@@ -475,7 +475,7 @@ def dashboard_start(
     pid_file = _dashboard_pid_file()
     try:
         subprocess.run(
-            ["npx", "next", "start", "--port", str(port)],
+            ["npx", "next", "start", "--port", str(port), "--hostname", "0.0.0.0"],
             cwd=abysscope_directory,
             env=next_env,
             check=True,
