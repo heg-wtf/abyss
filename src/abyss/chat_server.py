@@ -883,7 +883,7 @@ class ChatServer:
         form.add_field("model_id", ELEVENLABS_STT_MODEL)
         form.add_field("language_code", "ko")
         form.add_field(
-            "audio",
+            "file",
             audio_bytes,
             filename="audio.webm",
             content_type="audio/webm",
