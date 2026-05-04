@@ -6,6 +6,7 @@ import {
   transcribe,
   VoiceboxError,
 } from "@/lib/voicebox";
+import { isLikelyWhisperHallucination } from "@/lib/whisper-hallucination";
 import {
   DEFAULT_RMS_THRESHOLD,
   DEFAULT_SILENCE_TIMEOUT_MS,
@@ -145,14 +146,14 @@ export function useVoicePipeline(
 
     const currentProfileId = profileIdRef.current;
     if (!currentProfileId) {
-      const error = new Error("Voicebox voice profile not configured");
-      next.reject(error);
-      onError?.(error);
+      // Profile not yet loaded (or none exists) — silently drop without
+      // surfacing as an error. The UI already shows a separate hint when
+      // the profile list is empty.
+      next.resolve();
       isPlayingRef.current = false;
-      // Drain the rest of the queue with the same error so callers don't hang.
       while (speechQueueRef.current.length > 0) {
         const pending = speechQueueRef.current.shift();
-        pending?.reject(error);
+        pending?.resolve();
       }
       setState((prev) => (prev === "speaking" ? "idle" : prev));
       return;
@@ -216,9 +217,15 @@ export function useVoicePipeline(
   const handleStop = useCallback(async () => {
     const blobType = recorderMimeRef.current || "audio/webm";
     const blob = new Blob(chunksRef.current, { type: blobType });
+    const userActuallySpoke = hasSpokenRef.current;
     chunksRef.current = [];
+    hasSpokenRef.current = false;
 
-    if (blob.size < MIN_RECORDING_BYTES) {
+    // Two gates against Whisper hallucinating from silence:
+    //  1. Encoded blob too small — typically a header-only take (m4a/webm
+    //     headers can be ~1KB even with no audio).
+    //  2. RMS never crossed the speech threshold during the recording.
+    if (!userActuallySpoke || blob.size < MIN_RECORDING_BYTES) {
       setState("idle");
       setAmplitude(0);
       return;
@@ -228,7 +235,7 @@ export function useVoicePipeline(
     try {
       const result = await transcribe(blob);
       const text = result.text.trim();
-      if (text) {
+      if (text && !isLikelyWhisperHallucination(text)) {
         onTranscript?.(text);
       } else {
         setState("idle");

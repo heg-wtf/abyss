@@ -35,7 +35,9 @@ export function VoiceMode({
   );
   const [profilesLoading, setProfilesLoading] = React.useState(true);
   const [profilesError, setProfilesError] = React.useState<string | null>(null);
-  const lastSpokenLenRef = React.useRef(0);
+  // Snapshot the streaming text length at mount so we don't re-speak
+  // anything the LLM had already produced before voice mode was entered.
+  const lastSpokenLenRef = React.useRef(streamingText.length);
   const streamCompleteRef = React.useRef(true);
   const chunkerRef = React.useRef<SentenceChunker | null>(null);
   if (chunkerRef.current === null) {

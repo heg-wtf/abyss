@@ -166,6 +166,7 @@ describe("synthesize", () => {
       language: "ko",
       model_size: "1.7B",
     });
+    expect(typeof body.seed).toBe("number");
     expect(body.voice_id).toBeUndefined();
   });
 

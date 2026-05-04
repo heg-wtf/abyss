@@ -131,8 +131,21 @@ export interface SynthesizeOptions {
   engine?: string;
   language?: string;
   modelSize?: string;
+  /**
+   * Generation seed. Setting this is important for `designed` voice profiles
+   * — without it Voicebox re-rolls a different voice on every call, which
+   * makes streaming sentences sound like multiple speakers.
+   */
+  seed?: number;
   signal?: AbortSignal;
 }
+
+/**
+ * Default seed for synthesize calls. Stable across the dashboard session so
+ * `designed` voices return the same speaker for consecutive sentences.
+ * Picked once and frozen — change requires a redeploy.
+ */
+export const DEFAULT_TTS_SEED = 4242;
 
 /**
  * POST text → audio (binary blob). Uses Voicebox `/generate/stream` so the
@@ -151,6 +164,7 @@ export async function synthesize(
       engine: options.engine ?? TTS_ENGINE,
       language: options.language ?? TTS_LANGUAGE,
       model_size: options.modelSize ?? TTS_MODEL_SIZE,
+      seed: options.seed ?? DEFAULT_TTS_SEED,
     }),
     signal: options.signal,
   });
