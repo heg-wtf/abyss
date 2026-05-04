@@ -33,6 +33,13 @@ Endpoints
 ``GET /chat/sessions/<bot>/<session_id>/messages``
     Returns ``{"messages": [{"role", "content", "timestamp"}, ...]}``.
 
+``POST /chat/transcribe``
+    Body: multipart/form-data with ``audio`` field (webm/ogg/wav, max 10 MB).
+    Returns ``{"text": "..."}`` — empty string when audio is silence/noise.
+
+``POST /chat/speak``
+    Body: ``{"text": str, "voice_id"?: str}``. Streams ``audio/mpeg`` MP3.
+
 ``GET /healthz``
     Always 200.
 """
@@ -69,6 +76,17 @@ logger = logging.getLogger(__name__)
 
 CHAT_SERVER_HOST = "127.0.0.1"
 CHAT_SERVER_PORT = int(os.environ.get("ABYSS_CHAT_PORT", "3848"))
+
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+ELEVENLABS_DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam
+ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
+ELEVENLABS_STT_MODEL = "scribe_v2"
+
+MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_TTS_TEXT_LENGTH = 5_000
+MIN_STT_LANGUAGE_PROBABILITY = 0.5
 
 ALLOWED_ORIGINS = {
     "http://127.0.0.1:3847",
@@ -405,6 +423,8 @@ class ChatServer:
         router.add_get("/chat/sessions/{bot}/{session_id}/messages", self._handle_get_messages)
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
+        router.add_post("/chat/transcribe", self._handle_transcribe)
+        router.add_post("/chat/speak", self._handle_speak)
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -824,6 +844,150 @@ class ChatServer:
             headers["Content-Disposition"] = f'inline; filename="{candidate.name}"'
         return web.FileResponse(candidate, headers=headers)
 
+
+    async def _handle_transcribe(self, request: web.Request) -> web.Response:
+        """Transcribe audio via ElevenLabs Scribe v2.
+
+        Expects multipart/form-data with an ``audio`` field containing raw
+        audio bytes (webm/ogg/wav).  Returns ``{"text": "..."}`` or
+        ``{"text": ""}`` when the language probability is too low (silence /
+        noise guard against Whisper-style hallucinations).
+        """
+        if not ELEVENLABS_API_KEY:
+            return web.json_response({"error": "ELEVENLABS_API_KEY not set"}, status=503)
+
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return web.json_response({"error": "invalid multipart"}, status=400)
+
+        audio_bytes: bytes | None = None
+        async for field in reader:
+            if field.name == "audio":
+                audio_bytes = await field.read(decode=True)
+                break
+
+        if not audio_bytes:
+            return web.json_response({"error": "missing audio field"}, status=400)
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            return web.json_response({"error": "audio too large"}, status=413)
+
+        import aiohttp as _aiohttp
+
+        form = _aiohttp.FormData()
+        form.add_field("model_id", ELEVENLABS_STT_MODEL)
+        form.add_field("language_code", "ko")
+        form.add_field(
+            "audio",
+            audio_bytes,
+            filename="audio.webm",
+            content_type="audio/webm",
+        )
+
+        try:
+            async with _aiohttp.ClientSession() as session:
+                async with session.post(
+                    ELEVENLABS_STT_URL,
+                    headers={"xi-api-key": ELEVENLABS_API_KEY},
+                    data=form,
+                ) as response:
+                    if response.status != 200:
+                        body = await response.text()
+                        logger.warning("ElevenLabs STT error %d: %s", response.status, body)
+                        return web.json_response(
+                            {"error": f"upstream {response.status}"}, status=502
+                        )
+                    data = await response.json()
+        except Exception as exc:
+            logger.exception("ElevenLabs STT request failed")
+            return web.json_response({"error": str(exc)}, status=502)
+
+        language_probability = data.get("language_probability", 1.0)
+        text = data.get("text", "").strip()
+        if language_probability < MIN_STT_LANGUAGE_PROBABILITY:
+            text = ""
+
+        return web.json_response({"text": text})
+
+    async def _handle_speak(self, request: web.Request) -> web.StreamResponse:
+        """Synthesize speech via ElevenLabs TTS and stream MP3 bytes.
+
+        Expects JSON body ``{"text": str, "voice_id"?: str}``.
+        Streams ``audio/mpeg`` back so the browser can start playing early.
+        """
+        if not ELEVENLABS_API_KEY:
+            return web.Response(
+                text=json.dumps({"error": "ELEVENLABS_API_KEY not set"}),
+                content_type="application/json",
+                status=503,
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(
+                text=json.dumps({"error": "invalid JSON"}),
+                content_type="application/json",
+                status=400,
+            )
+
+        text: str = body.get("text", "").strip()
+        if not text:
+            return web.Response(
+                text=json.dumps({"error": "text is required"}),
+                content_type="application/json",
+                status=400,
+            )
+        if len(text) > MAX_TTS_TEXT_LENGTH:
+            text = text[:MAX_TTS_TEXT_LENGTH]
+
+        voice_id: str = body.get("voice_id") or ELEVENLABS_DEFAULT_VOICE_ID
+        url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
+
+        import aiohttp as _aiohttp
+
+        try:
+            async with _aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    headers={
+                        "xi-api-key": ELEVENLABS_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "text": text,
+                        "model_id": ELEVENLABS_TTS_MODEL,
+                        "output_format": "mp3_44100_128",
+                    },
+                ) as upstream:
+                    if upstream.status != 200:
+                        err_body = await upstream.text()
+                        logger.warning("ElevenLabs TTS error %d: %s", upstream.status, err_body)
+                        return web.Response(
+                            text=json.dumps({"error": f"upstream {upstream.status}"}),
+                            content_type="application/json",
+                            status=502,
+                        )
+
+                    stream_response = web.StreamResponse(
+                        status=200,
+                        headers={
+                            "Content-Type": "audio/mpeg",
+                            "Cache-Control": "no-store",
+                        },
+                    )
+                    await stream_response.prepare(request)
+                    async for chunk in upstream.content.iter_chunked(8192):
+                        await stream_response.write(chunk)
+                    await stream_response.write_eof()
+                    return stream_response
+        except Exception as exc:
+            logger.exception("ElevenLabs TTS request failed")
+            return web.Response(
+                text=json.dumps({"error": str(exc)}),
+                content_type="application/json",
+                status=502,
+            )
 
 # ---------------------------------------------------------------------------
 # Module-level singleton (used by bot_manager)
