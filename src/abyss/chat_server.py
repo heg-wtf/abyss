@@ -317,7 +317,16 @@ def _parse_conversation_messages(
     return messages
 
 
-def _session_metadata(bot_name: str, session_dir: Path) -> dict[str, Any]:
+def _bot_display_name(bot_name: str) -> str:
+    cfg = load_bot_config(bot_name) or {}
+    return cfg.get("display_name") or bot_name
+
+
+def _session_metadata(
+    bot_name: str,
+    session_dir: Path,
+    bot_display_name: str | None = None,
+) -> dict[str, Any]:
     files = sorted(session_dir.glob("conversation-*.md"))
     if not files:
         legacy = session_dir / "conversation.md"
@@ -343,6 +352,7 @@ def _session_metadata(bot_name: str, session_dir: Path) -> dict[str, Any]:
     return {
         "id": session_dir.name,
         "bot": bot_name,
+        "bot_display_name": bot_display_name or _bot_display_name(bot_name),
         "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
         "preview": preview,
     }
@@ -465,10 +475,11 @@ class ChatServer:
         if not bot_path.exists():
             return web.json_response({"error": "bot not found"}, status=404)
 
+        display = _bot_display_name(bot_name)
         sessions = []
         for sid in collect_web_session_ids(bot_path):
             session_dir = bot_path / "sessions" / sid
-            sessions.append(_session_metadata(bot_name, session_dir))
+            sessions.append(_session_metadata(bot_name, session_dir, display))
         sessions.sort(key=lambda s: s["updated_at"], reverse=True)
         return web.json_response({"sessions": sessions})
 
@@ -493,6 +504,7 @@ class ChatServer:
             {
                 "id": session_id,
                 "bot": bot_name,
+                "bot_display_name": _bot_display_name(bot_name),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "preview": "",
             }
