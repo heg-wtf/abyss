@@ -461,9 +461,7 @@ class ChatServer:
                 {
                     "name": name,
                     "display_name": (
-                        cfg.get("display_name")
-                        or cfg.get("telegram_botname")
-                        or name
+                        cfg.get("display_name") or cfg.get("telegram_botname") or name
                     ),
                     "type": backend_cfg.get("type", "claude_code"),
                 }
