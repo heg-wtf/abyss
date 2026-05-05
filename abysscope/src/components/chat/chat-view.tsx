@@ -17,7 +17,7 @@ import { ChatMessage } from "./chat-message";
 import { ChatSessionList } from "./chat-session-list";
 import { PromptInput } from "./prompt-input";
 import { useChatStream } from "./use-chat-stream";
-import { useVoiceMode } from "./use-voice-mode";
+import { useVoiceMode, type VoiceState } from "./use-voice-mode";
 import { VoiceScreen } from "./voice-screen";
 
 interface ConversationMessage extends ChatMessageType {
@@ -215,7 +215,22 @@ export function ChatView({ initialBots, apiOnline }: Props) {
       }
     }
     prevStreamingRef.current = stream.streaming;
-  }, [stream.streaming, voiceMode, messages, voice]);
+  }, [stream.streaming, voiceMode, messages, voice.speak]);
+
+  // Auto-restart recording after bot finishes speaking.
+  const prevVoiceStateRef = React.useRef<VoiceState>("idle");
+  React.useEffect(() => {
+    const prev = prevVoiceStateRef.current;
+    prevVoiceStateRef.current = voice.voiceState;
+    if (prev === "speaking" && voice.voiceState === "idle" && voiceMode) {
+      void voice.start();
+    }
+  }, [voice.voiceState, voiceMode, voice.start]);
+
+  const handleVoiceOpen = () => {
+    setVoiceMode(true);
+    void voice.start();
+  };
 
   const handleVoiceClose = () => {
     voice.cancel();
@@ -267,17 +282,9 @@ export function ChatView({ initialBots, apiOnline }: Props) {
             botName={activeSession.bot}
             botDisplayName={activeSession.bot_display_name ?? activeSession.bot}
             voiceState={voice.voiceState}
+            partialTranscript={voice.partialTranscript}
             error={voice.error}
             onClose={handleVoiceClose}
-            onOrbClick={() => {
-              if (voice.voiceState === "idle") {
-                voice.start();
-              } else if (voice.voiceState === "recording") {
-                voice.stop();
-              } else {
-                voice.cancel();
-              }
-            }}
           />
         ) : (
         <>
@@ -305,7 +312,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
             variant="ghost"
             size="icon"
             disabled={!activeSession || stream.streaming}
-            onClick={() => setVoiceMode(true)}
+            onClick={handleVoiceOpen}
             title="음성 모드"
             aria-label="음성 모드 전환"
           >
