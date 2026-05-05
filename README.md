@@ -416,6 +416,7 @@ cd abysscope && npx next build && npx next start --port 3847
 | Logs | Date picker, text filter, delete (single/bulk/by-age), daemon log truncate |
 | Conversations | Per-chat conversation viewer with date navigation, individual file delete |
 | Chat | In-browser chat with any bot — same SDK session pool as Telegram, SSE token streaming, image + PDF uploads |
+| Voice Chat | Mic button opens voice sidebar with animated Orb — ElevenLabs Scribe v2 STT → bot reply → ElevenLabs TTS playback, auto-restart loop, theme-aware Orb colors |
 | Tool Metrics | Per-bot tool call latency (p50/p95/p99) and counts from Claude Code `PostToolUse` hooks |
 
 **Tech Stack**: Next.js 16 + shadcn/ui + Tailwind CSS + js-yaml. Reads `~/.abyss/` directly (no database). Chat / upload uses the internal aiohttp `ChatServer` started by `abyss start`.

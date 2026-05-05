@@ -270,6 +270,18 @@ Abysscope can talk to bots in the browser via the same SDK pool that serves Tele
 - **Display names** — `/chat/bots` and `/chat/sessions` both apply the fallback chain `display_name → telegram_botname → bot_name` (`_bot_display_name` in `chat_server.py`), matching the dashboard sidebar so a bot whose `display_name` is empty (e.g. `''`) still appears as its Korean Telegram name in the chat picker, session list, and message header instead of falling all the way back to the bot ID
 - **UX** — the dashboard chat has a single entry point: the left sidebar shows a `Chats` panel with a `New` button. `New` opens a base-ui `Menu` listing every bot; clicking one immediately creates a `chat_web_<uuid>` session and selects it. The right-panel header carries no controls — only the active session's bot avatar, display name, and session ID. The previous `BotSelector` + `Start chat` button in the right panel was removed to eliminate the two-step flow
 
+### 13.8. Voice Mode (STT/TTS)
+
+The dashboard chat mic button triggers a full duplex voice loop: speech → transcript → LLM reply → synthesized audio.
+
+- **Frontend hook** (`use-voice-mode.ts`) manages the state machine: `idle → recording → processing → speaking → idle`. After speaking ends, it auto-restarts recording so the user can speak again without pressing anything
+- **STT** — ElevenLabs Scribe v2 WebSocket. The frontend obtains a short-lived signed token from `/api/chat/scribe-token` (Next.js proxy → `chat_server.py` `/scribe-token`). A `WebSocket` connects directly to `wss://api.elevenlabs.io/v1/speech-to-text/stream-input`. Audio chunks are sent in 250 ms slices; the server returns `partial_transcript` and `final_transcript` events. On final transcript the hook calls `onTranscript(text)`
+- **`voice_mode` flag** — `onTranscript` calls `handleSubmit` with `voiceMode: true`. `use-chat-stream.ts` forwards `body.voice_mode = true` to `/api/chat`. `chat_server.py` `_handle_chat` extracts `voice_mode` and appends a Korean spoken-style instruction to `effective_message`:
+  > `[응답 지침: 음성으로 전달됩니다. 자연스러운 구어체 한국어로 답변하세요. ...]`
+- **TTS** — after the SSE stream completes, `voice.speak(text)` calls `/api/chat/speak` which proxies to ElevenLabs `/v1/text-to-speech/{voice_id}/stream`. MP3 bytes are piped back and decoded/played via the Web Audio API
+- **Shared `aiohttp.ClientSession`** — `chat_server.py` creates one session in `start()` and shares it across `/transcribe`, `/speak`, and `/scribe-token` handlers; closed in `stop()`. Tests inject a `MagicMock` directly onto `server_instance._http_session` since `TestServer` does not call `start()`
+- **Orb UI** — right sidebar `VoiceScreen` component uses `ElevenLabs Orb` (`@11labs/react`). `agentState` maps `recording→listening`, `processing→thinking`, `speaking→talking`. `colors` prop is theme-aware via `useTheme` from `next-themes`: dark mode → `["#cccccc", "#ffffff"]`, light mode → `["#111111", "#2a2a2a"]`
+
 ### 14. Session Continuity
 
 Each message runs `claude -p` as a new process, but maintains conversation context.

@@ -1181,3 +1181,98 @@ registered for that key. ``close()`` calls ``httpx.AsyncClient.aclose``.
 * Token compaction (``token_compact.py``) still uses the direct
   ``run_claude`` subprocess path because it's a system utility, not a
   bot turn.
+
+## Voice Mode (Dashboard Chat STT/TTS)
+
+### Overview
+
+Mic button in the dashboard chat header triggers a full-duplex voice loop managed by `use-voice-mode.ts`:
+
+```
+recording → (ElevenLabs Scribe WebSocket) → transcript
+  → handleSubmit(voice_mode=true)
+  → SSE stream (bot reply)
+  → TTS playback (ElevenLabs /speak)
+  → back to recording
+```
+
+### State Machine
+
+`VoiceState` = `idle | recording | processing | speaking`
+
+`useVoiceMode` transitions:
+- `idle` → `recording`: `start()` opens WebSocket, begins VAD capture
+- `recording` → `processing`: final transcript received, sends to chat
+- `processing` → `speaking`: SSE stream done, TTS begins
+- `speaking` → `idle`: audio playback complete
+- `idle` (after speaking) → `recording`: auto-restart via `useEffect` watching `voiceState` transition from `speaking` to `idle`
+
+### STT — ElevenLabs Scribe v2 WebSocket
+
+1. Frontend calls `GET /api/chat/scribe-token` → Next.js proxy → `chat_server.py` `/scribe-token` → ElevenLabs signed token API
+2. `WebSocket` connects directly to `wss://api.elevenlabs.io/v1/speech-to-text/stream-input?model_id=scribe_v2&language_code=ko`
+3. MediaRecorder captures audio in 250 ms slices; each slice sent as binary WebSocket frame
+4. Server emits `{ type: "partial_transcript", text }` and `{ type: "final_transcript", text }` events
+5. On final transcript: `onTranscript(text)` callback fires → `handleSubmit`
+
+### voice_mode Flag Threading
+
+```
+VoiceMode.onTranscript
+  → handleSubmit({ text, voiceMode: true })
+  → useChatStream.send(bot, sessionId, text, [], voiceMode=true)
+  → fetch /api/chat  body: { ..., voice_mode: true }
+  → Next.js /api/chat proxy (pass-through)
+  → chat_server.py _handle_chat
+  → voice_mode = bool(body.get("voice_mode", False))
+  → effective_message += "[응답 지침: 음성으로 전달됩니다. ...]"
+  → chat_core.process_chat_message(effective_message)
+```
+
+Korean spoken-style instruction appended:
+```python
+"[응답 지침: 음성으로 전달됩니다. 자연스러운 구어체 한국어로 답변하세요. "
+'"없음" → "없어요", 마크다운/불릿/이모지 없이 말하듯 짧고 자연스럽게.]'
+```
+
+### TTS — ElevenLabs Streaming
+
+After SSE stream completes, `voice.speak(text)` is called:
+1. `POST /api/chat/speak` with `{ text, bot, session_id }`
+2. Next.js proxy → `chat_server.py` `/speak`
+3. Server calls `ElevenLabs /v1/text-to-speech/{voice_id}/stream` with MP3 output
+4. MP3 bytes piped back to browser
+5. Frontend decodes with `AudioContext.decodeAudioData`, plays via `AudioBufferSourceNode`
+
+Default voice: `ELEVENLABS_DEFAULT_VOICE_ID = "8jHHF8rMqMlg8if2mOUe"`. Override via `config.yaml` `elevenlabs_voice_id`.
+
+### Shared aiohttp.ClientSession
+
+`chat_server.py` creates one `aiohttp.ClientSession` in `start()`:
+```python
+self._http_session = aiohttp.ClientSession()
+```
+All three voice routes (`/transcribe`, `/speak`, `/scribe-token`) share this session. Closed in `stop()`.
+
+**Test pattern**: `TestServer` does not call `start()`, so `_http_session` is `None`. Tests inject directly:
+```python
+server_instance._http_session = MagicMock()
+server_instance._http_session.post = MagicMock(return_value=fake_cm)
+```
+
+### Orb Component
+
+`VoiceScreen` uses `<Orb>` from `@11labs/react`:
+- `agentState` maps: `recording→"listening"`, `processing→"thinking"`, `speaking→"talking"`, `idle→null`
+- `colors: [string, string]` — primary and secondary shader colors
+- Theme-aware via `useTheme` from `next-themes`:
+  ```typescript
+  const orbColors: [string, string] = resolvedTheme === "dark"
+    ? ["#cccccc", "#ffffff"]
+    : ["#111111", "#2a2a2a"];
+  ```
+- `resolvedTheme` used (not `theme`) to avoid SSR hydration mismatch
+
+### UI Layout
+
+Voice mode opens as a right sidebar (`w-72 shrink-0 border-l`) alongside the chat, not as a full-screen overlay. Chat messages remain visible during voice interaction. Header shows "Voice" label (not bot avatar). Messages show messenger-style timestamps (`toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true })`), hidden while streaming.
