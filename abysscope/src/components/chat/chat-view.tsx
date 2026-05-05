@@ -43,7 +43,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const [voiceMode, setVoiceMode] = React.useState(false);
 
   const stream = useChatStream();
-  const scrollRegionRef = React.useRef<HTMLDivElement>(null);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
 
   // Refresh session lists for all bots
   const reloadAllSessions = React.useCallback(async () => {
@@ -92,9 +92,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
 
   // Auto-scroll to bottom on new content
   React.useEffect(() => {
-    const region = scrollRegionRef.current;
-    if (!region) return;
-    region.scrollTop = region.scrollHeight;
+    bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, stream.text]);
 
   const handleNewChat = async (botName: string) => {
@@ -322,7 +320,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
           </div>
         )}
         <ScrollArea className="min-h-0 flex-1">
-          <div ref={scrollRegionRef} className="flex min-h-full flex-col">
+          <div className="flex min-h-full flex-col">
             {messagesLoading && (
               <div className="px-4 py-3 text-sm text-muted-foreground">Loading…</div>
             )}
@@ -347,6 +345,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
                 timestamp={message.timestamp}
               />
             ))}
+            <div ref={bottomRef} />
           </div>
         </ScrollArea>
         <PromptInput
