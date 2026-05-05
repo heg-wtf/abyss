@@ -1084,9 +1084,9 @@ in the scope. Header formats:
 ### Limits
 
 - Keyword (BM25) only — no semantic / embedding search yet.
-- No Korean morpheme analysis. Prefix queries hit, but suffix matches
-  do not (e.g. `짬뽕집` does not match a search for `짬뽕`; `짬뽕`
-  matches `짬뽕집`).
+- No morpheme analysis. Prefix queries hit, but suffix matches
+  do not (e.g. `ramen-shop` does not match a search for `ramen`; `ramen`
+  matches `ramen-shop`).
 - Group conversations are indexed but the auto-injected MCP server
   currently exposes only the bot's own DB. Group-scope search via MCP
   is future work.
@@ -1225,14 +1225,13 @@ VoiceMode.onTranscript
   → Next.js /api/chat proxy (pass-through)
   → chat_server.py _handle_chat
   → voice_mode = bool(body.get("voice_mode", False))
-  → effective_message += "[응답 지침: 음성으로 전달됩니다. ...]"
+  → effective_message += "[voice instruction: respond in natural spoken Korean, no markdown]"
   → chat_core.process_chat_message(effective_message)
 ```
 
-Korean spoken-style instruction appended:
+Spoken-style instruction appended (instructs bot to respond in natural conversational Korean, no markdown/bullets/emoji):
 ```python
-"[응답 지침: 음성으로 전달됩니다. 자연스러운 구어체 한국어로 답변하세요. "
-'"없음" → "없어요", 마크다운/불릿/이모지 없이 말하듯 짧고 자연스럽게.]'
+"[Voice response mode: respond naturally in spoken Korean without markdown, bullets, or emoji]"
 ```
 
 ### TTS — ElevenLabs Streaming

@@ -276,8 +276,7 @@ The dashboard chat mic button triggers a full duplex voice loop: speech → tran
 
 - **Frontend hook** (`use-voice-mode.ts`) manages the state machine: `idle → recording → processing → speaking → idle`. After speaking ends, it auto-restarts recording so the user can speak again without pressing anything
 - **STT** — ElevenLabs Scribe v2 WebSocket. The frontend obtains a short-lived signed token from `/api/chat/scribe-token` (Next.js proxy → `chat_server.py` `/scribe-token`). A `WebSocket` connects directly to `wss://api.elevenlabs.io/v1/speech-to-text/stream-input`. Audio chunks are sent in 250 ms slices; the server returns `partial_transcript` and `final_transcript` events. On final transcript the hook calls `onTranscript(text)`
-- **`voice_mode` flag** — `onTranscript` calls `handleSubmit` with `voiceMode: true`. `use-chat-stream.ts` forwards `body.voice_mode = true` to `/api/chat`. `chat_server.py` `_handle_chat` extracts `voice_mode` and appends a Korean spoken-style instruction to `effective_message`:
-  > `[응답 지침: 음성으로 전달됩니다. 자연스러운 구어체 한국어로 답변하세요. ...]`
+- **`voice_mode` flag** — `onTranscript` calls `handleSubmit` with `voiceMode: true`. `use-chat-stream.ts` forwards `body.voice_mode = true` to `/api/chat`. `chat_server.py` `_handle_chat` extracts `voice_mode` and appends a spoken-style instruction telling the bot to respond in natural conversational Korean without markdown or bullets
 - **TTS** — after the SSE stream completes, `voice.speak(text)` calls `/api/chat/speak` which proxies to ElevenLabs `/v1/text-to-speech/{voice_id}/stream`. MP3 bytes are piped back and decoded/played via the Web Audio API
 - **Shared `aiohttp.ClientSession`** — `chat_server.py` creates one session in `start()` and shares it across `/transcribe`, `/speak`, and `/scribe-token` handlers; closed in `stop()`. Tests inject a `MagicMock` directly onto `server_instance._http_session` since `TestServer` does not call `start()`
 - **Orb UI** — right sidebar `VoiceScreen` component uses `ElevenLabs Orb` (`@11labs/react`). `agentState` maps `recording→listening`, `processing→thinking`, `speaking→talking`. `colors` prop is theme-aware via `useTheme` from `next-themes`: dark mode → `["#cccccc", "#ffffff"]`, light mode → `["#111111", "#2a2a2a"]`
@@ -526,7 +525,7 @@ graph TD
 
 ```mermaid
 graph LR
-    INPUT["/cron add 매일 아침 9시 이메일 요약"] --> TZ["resolve_default_timezone()
+    INPUT["/cron add daily 9am email summary"] --> TZ["resolve_default_timezone()
     (from config.yaml)"]
     TZ --> PARSE["parse_natural_language_schedule()
     via claude -p (haiku)"]
