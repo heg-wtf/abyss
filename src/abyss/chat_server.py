@@ -87,7 +87,7 @@ CHAT_SERVER_PORT = int(os.environ.get("ABYSS_CHAT_PORT", "3848"))
 ELEVENLABS_API_KEY = get_elevenlabs_api_key()
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-ELEVENLABS_DEFAULT_VOICE_ID = "mccGHFrBO09cxheYa6RV"
+ELEVENLABS_DEFAULT_VOICE_ID = "8jHHF8rMqMlg8if2mOUe"
 ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
 ELEVENLABS_STT_MODEL = "scribe_v2"
 
