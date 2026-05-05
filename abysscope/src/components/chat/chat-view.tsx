@@ -279,16 +279,6 @@ export function ChatView({ initialBots, apiOnline }: Props) {
         onDelete={handleDelete}
       />
       <main className="flex min-h-0 flex-1 flex-col">
-        {voiceMode && activeSession ? (
-          <VoiceScreen
-            botName={activeSession.bot}
-            botDisplayName={activeSession.bot_display_name ?? activeSession.bot}
-            voiceState={voice.voiceState}
-            partialTranscript={voice.partialTranscript}
-            error={voice.error}
-            onClose={handleVoiceClose}
-          />
-        ) : (
         <>
         <header className="flex h-14 items-center justify-between border-b bg-background px-4">
           <div className="flex items-center gap-3">
@@ -372,8 +362,19 @@ export function ChatView({ initialBots, apiOnline }: Props) {
           }
         />
         </>
-        )}
       </main>
+      {voiceMode && activeSession && (
+        <aside className="w-72 shrink-0 border-l bg-background">
+          <VoiceScreen
+            botName={activeSession.bot}
+            botDisplayName={activeSession.bot_display_name ?? activeSession.bot}
+            voiceState={voice.voiceState}
+            partialTranscript={voice.partialTranscript}
+            error={voice.error}
+            onClose={handleVoiceClose}
+          />
+        </aside>
+      )}
     </div>
   );
 }
