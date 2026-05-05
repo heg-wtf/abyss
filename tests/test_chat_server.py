@@ -70,9 +70,17 @@ def patch_backend(monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def client(abyss_home, patch_backend):
-    server = ChatServer()
-    test_server = TestServer(server._app)
+async def server_instance(abyss_home, patch_backend):
+    from unittest.mock import MagicMock
+
+    s = ChatServer()
+    s._http_session = MagicMock()
+    yield s
+
+
+@pytest_asyncio.fixture
+async def client(server_instance):
+    test_server = TestServer(server_instance._app)
     test_client = TestClient(test_server)
     await test_client.start_server()
     try:
@@ -690,6 +698,7 @@ async def test_chat_rejects_too_many_attachments(client):
 # /chat/transcribe
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_transcribe_no_api_key(client, monkeypatch):
     monkeypatch.setattr(chat_server, "ELEVENLABS_API_KEY", "")
@@ -717,8 +726,8 @@ async def test_transcribe_audio_too_large(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_transcribe_filters_low_probability(client, monkeypatch):
-    from unittest.mock import AsyncMock, MagicMock, patch
+async def test_transcribe_filters_low_probability(client, server_instance, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
 
     monkeypatch.setattr(chat_server, "ELEVENLABS_API_KEY", "test-key")
 
@@ -730,17 +739,11 @@ async def test_transcribe_filters_low_probability(client, monkeypatch):
     fake_response.__aenter__ = AsyncMock(return_value=fake_response)
     fake_response.__aexit__ = AsyncMock(return_value=False)
 
-    fake_session = MagicMock()
-    fake_session.post = MagicMock(return_value=fake_response)
-    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
-    fake_session.__aexit__ = AsyncMock(return_value=False)
+    server_instance._http_session.post = MagicMock(return_value=fake_response)
 
-    with patch("aiohttp.ClientSession", return_value=fake_session):
-        form_data = aiohttp.FormData()
-        form_data.add_field(
-            "audio", b"audio_data", filename="audio.webm", content_type="audio/webm"
-        )
-        resp = await client.post("/chat/transcribe", data=form_data)
+    form_data = aiohttp.FormData()
+    form_data.add_field("audio", b"audio_data", filename="audio.webm", content_type="audio/webm")
+    resp = await client.post("/chat/transcribe", data=form_data)
 
     assert resp.status == 200
     data = await resp.json()
@@ -748,8 +751,8 @@ async def test_transcribe_filters_low_probability(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_transcribe_returns_text(client, monkeypatch):
-    from unittest.mock import AsyncMock, MagicMock, patch
+async def test_transcribe_returns_text(client, server_instance, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
 
     monkeypatch.setattr(chat_server, "ELEVENLABS_API_KEY", "test-key")
 
@@ -761,17 +764,11 @@ async def test_transcribe_returns_text(client, monkeypatch):
     fake_response.__aenter__ = AsyncMock(return_value=fake_response)
     fake_response.__aexit__ = AsyncMock(return_value=False)
 
-    fake_session = MagicMock()
-    fake_session.post = MagicMock(return_value=fake_response)
-    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
-    fake_session.__aexit__ = AsyncMock(return_value=False)
+    server_instance._http_session.post = MagicMock(return_value=fake_response)
 
-    with patch("aiohttp.ClientSession", return_value=fake_session):
-        form_data = aiohttp.FormData()
-        form_data.add_field(
-            "audio", b"audio_data", filename="audio.webm", content_type="audio/webm"
-        )
-        resp = await client.post("/chat/transcribe", data=form_data)
+    form_data = aiohttp.FormData()
+    form_data.add_field("audio", b"audio_data", filename="audio.webm", content_type="audio/webm")
+    resp = await client.post("/chat/transcribe", data=form_data)
 
     assert resp.status == 200
     data = await resp.json()
@@ -781,6 +778,7 @@ async def test_transcribe_returns_text(client, monkeypatch):
 # ---------------------------------------------------------------------------
 # /chat/speak
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_speak_no_api_key(client, monkeypatch):
@@ -808,8 +806,8 @@ async def test_speak_invalid_json(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_speak_streams_audio(client, monkeypatch):
-    from unittest.mock import AsyncMock, MagicMock, patch
+async def test_speak_streams_audio(client, server_instance, monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
 
     monkeypatch.setattr(chat_server, "ELEVENLABS_API_KEY", "test-key")
 
@@ -825,13 +823,9 @@ async def test_speak_streams_audio(client, monkeypatch):
     fake_response.__aenter__ = AsyncMock(return_value=fake_response)
     fake_response.__aexit__ = AsyncMock(return_value=False)
 
-    fake_session = MagicMock()
-    fake_session.post = MagicMock(return_value=fake_response)
-    fake_session.__aenter__ = AsyncMock(return_value=fake_session)
-    fake_session.__aexit__ = AsyncMock(return_value=False)
+    server_instance._http_session.post = MagicMock(return_value=fake_response)
 
-    with patch("aiohttp.ClientSession", return_value=fake_session):
-        resp = await client.post("/chat/speak", json={"text": "안녕하세요"})
+    resp = await client.post("/chat/speak", json={"text": "안녕하세요"})
 
     assert resp.status == 200
     assert "audio/mpeg" in resp.headers["Content-Type"]

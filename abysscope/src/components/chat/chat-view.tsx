@@ -134,6 +134,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const handleSubmit = async (payload: {
     text: string;
     attachments: UploadedAttachment[];
+    voiceMode?: boolean;
   }) => {
     if (!activeSession) {
       setTransientError("Pick or create a chat first");
@@ -178,7 +179,8 @@ export function ChatView({ initialBots, apiOnline }: Props) {
       session.bot,
       session.id,
       payload.text,
-      payload.attachments.map((attachment) => attachment.path)
+      payload.attachments.map((attachment) => attachment.path),
+      payload.voiceMode ?? false
     );
     setMessages((prev) =>
       prev.map((message) =>
@@ -201,7 +203,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
 
   const voice = useVoiceMode({
     onTranscript: (text) => {
-      void handleSubmit({ text, attachments: [] });
+      void handleSubmit({ text, attachments: [], voiceMode: true });
     },
   });
 

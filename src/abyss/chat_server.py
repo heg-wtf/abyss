@@ -87,7 +87,7 @@ CHAT_SERVER_PORT = int(os.environ.get("ABYSS_CHAT_PORT", "3848"))
 ELEVENLABS_API_KEY = get_elevenlabs_api_key()
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-ELEVENLABS_DEFAULT_VOICE_ID = "FGY2WhTYpPnrIDTdsKH5"  # Laura
+ELEVENLABS_DEFAULT_VOICE_ID = "mccGHFrBO09cxheYa6RV"
 ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
 ELEVENLABS_STT_MODEL = "scribe_v2"
 
@@ -591,6 +591,7 @@ class ChatServer:
         session_id = (body.get("session_id") or "").strip()
         message = (body.get("message") or "").strip()
         raw_attachments = body.get("attachments") or []
+        voice_mode: bool = bool(body.get("voice_mode", False))
 
         try:
             _validate_bot_name(bot_name)
@@ -640,6 +641,13 @@ class ChatServer:
             with suppress(Exception):
                 await _sse_write(sse, {"type": "chunk", "text": chunk})
 
+        effective_message = message
+        if voice_mode:
+            effective_message += (
+                "\n\n[응답 지침: 음성으로 전달됩니다. 자연스러운 구어체 한국어로 답변하세요. "
+                '"없음" → "없어요", 마크다운/불릿/이모지 없이 말하듯 짧고 자연스럽게.]'
+            )
+
         lock = self._lock_for(bot_name, session_id)
         full_text = ""
         try:
@@ -649,7 +657,7 @@ class ChatServer:
                     bot_path=bot_path,
                     bot_config=bot_config,
                     chat_id=session_id,
-                    user_message=message,
+                    user_message=effective_message,
                     on_chunk=on_chunk,
                     session_key=f"{bot_name}:{session_id}",
                     attachments=attachment_paths,
@@ -902,13 +910,11 @@ class ChatServer:
                 headers={"xi-api-key": ELEVENLABS_API_KEY},
                 data=form,
             ) as response:
-                    if response.status != 200:
-                        body = await response.text()
-                        logger.warning("ElevenLabs STT error %d: %s", response.status, body)
-                        return web.json_response(
-                            {"error": f"upstream {response.status}"}, status=502
-                        )
-                    data = await response.json()
+                if response.status != 200:
+                    body = await response.text()
+                    logger.warning("ElevenLabs STT error %d: %s", response.status, body)
+                    return web.json_response({"error": f"upstream {response.status}"}, status=502)
+                data = await response.json()
         except Exception as exc:
             logger.exception("ElevenLabs STT request failed")
             return web.json_response({"error": str(exc)}, status=502)
@@ -931,16 +937,12 @@ class ChatServer:
                 "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
                 headers={"xi-api-key": ELEVENLABS_API_KEY},
             ) as response:
-                    if response.status != 200:
-                        body = await response.text()
-                        logger.warning(
-                            "ElevenLabs scribe token error %d: %s", response.status, body
-                        )
-                        return web.json_response(
-                            {"error": f"upstream {response.status}"}, status=502
-                        )
-                    data = await response.json()
-                    return web.json_response({"token": data["token"]})
+                if response.status != 200:
+                    body = await response.text()
+                    logger.warning("ElevenLabs scribe token error %d: %s", response.status, body)
+                    return web.json_response({"error": f"upstream {response.status}"}, status=502)
+                data = await response.json()
+                return web.json_response({"token": data["token"]})
         except Exception as exc:
             logger.exception("ElevenLabs scribe token request failed")
             return web.json_response({"error": str(exc)}, status=502)
@@ -980,6 +982,7 @@ class ChatServer:
                     "text": text,
                     "model_id": ELEVENLABS_TTS_MODEL,
                     "output_format": "mp3_44100_128",
+                    "voice_settings": {"speed": 1.1},
                 },
             ) as upstream:
                 if upstream.status != 200:
