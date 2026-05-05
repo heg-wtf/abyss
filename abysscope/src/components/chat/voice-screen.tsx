@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { X } from "lucide-react";
+import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Orb, type AgentState } from "@/components/ui/orb";
 import type { VoiceState } from "./use-voice-mode";
@@ -29,7 +30,12 @@ function toAgentState(state: VoiceState): AgentState {
   return null;
 }
 
-export function VoiceScreen({ botName, botDisplayName, voiceState, partialTranscript, error, onClose }: Props) {
+export function VoiceScreen({ botName: _botName, botDisplayName: _botDisplayName, voiceState, partialTranscript, error, onClose }: Props) {
+  const { resolvedTheme } = useTheme();
+  const orbColors: [string, string] = resolvedTheme === "dark"
+    ? ["#cccccc", "#ffffff"]
+    : ["#111111", "#2a2a2a"];
+
   return (
     <div className="flex h-full flex-col items-center justify-between bg-background px-4 py-5">
       <div className="flex w-full items-center justify-between">
@@ -40,7 +46,7 @@ export function VoiceScreen({ botName, botDisplayName, voiceState, partialTransc
       </div>
 
       <div className="size-44">
-        <Orb agentState={toAgentState(voiceState)} />
+        <Orb agentState={toAgentState(voiceState)} colors={orbColors} />
       </div>
 
       <div className="flex flex-col items-center gap-1 px-2 text-center">
