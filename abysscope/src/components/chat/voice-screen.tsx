@@ -3,7 +3,6 @@
 import * as React from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { BotAvatar } from "@/components/bot-avatar";
 import { Orb, type AgentState } from "@/components/ui/orb";
 import type { VoiceState } from "./use-voice-mode";
 
@@ -34,10 +33,7 @@ export function VoiceScreen({ botName, botDisplayName, voiceState, partialTransc
   return (
     <div className="flex h-full flex-col items-center justify-between bg-background px-4 py-5">
       <div className="flex w-full items-center justify-between">
-        <div className="flex items-center gap-2">
-          <BotAvatar botName={botName} displayName={botDisplayName} size="xs" />
-          <span className="text-sm font-medium">{botDisplayName}</span>
-        </div>
+        <span className="text-sm font-medium text-muted-foreground">Voice</span>
         <Button variant="ghost" size="icon" onClick={onClose} aria-label="음성 모드 종료">
           <X className="size-4" />
         </Button>

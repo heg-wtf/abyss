@@ -344,6 +344,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
                   activeSession?.bot_display_name ?? activeSession?.bot ?? null
                 }
                 attachments={message.attachments}
+                timestamp={message.timestamp}
               />
             ))}
           </div>
