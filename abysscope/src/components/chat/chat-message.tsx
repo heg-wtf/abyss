@@ -14,6 +14,13 @@ interface Props {
   botName?: string | null;
   botDisplayName?: string | null;
   attachments?: ChatAttachmentRef[];
+  timestamp?: string | null;
+}
+
+function formatTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
 export function ChatMessage({
@@ -23,9 +30,11 @@ export function ChatMessage({
   botName,
   botDisplayName,
   attachments,
+  timestamp,
 }: Props) {
   const isUser = role === "user";
   const displayName = botDisplayName || botName || "Bot";
+  const timeLabel = !streaming && timestamp ? formatTime(timestamp) : null;
   return (
     <div
       className={cn(
@@ -45,11 +54,12 @@ export function ChatMessage({
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="mb-1 text-xs font-medium text-muted-foreground">
-          {isUser ? "You" : displayName}
+        <div className="mb-1 flex items-baseline gap-2 text-xs font-medium text-muted-foreground">
+          <span>{isUser ? "You" : displayName}</span>
           {streaming && (
-            <span className="ml-2 inline-block animate-pulse">●</span>
+            <span className="inline-block animate-pulse">●</span>
           )}
+          {timeLabel && <span className="font-normal">{timeLabel}</span>}
         </div>
         {attachments && attachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">

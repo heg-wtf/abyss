@@ -416,3 +416,13 @@ def get_language() -> str:
     if not config:
         return DEFAULT_LANGUAGE
     return config.get("language", DEFAULT_LANGUAGE)
+
+
+def get_elevenlabs_api_key() -> str:
+    """Return the ElevenLabs API key from config.yaml, falling back to env var."""
+    config = load_config()
+    if config:
+        key = config.get("elevenlabs_api_key", "")
+        if key:
+            return str(key)
+    return os.environ.get("ELEVENLABS_API_KEY", "")

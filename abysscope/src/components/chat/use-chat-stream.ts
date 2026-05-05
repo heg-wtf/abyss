@@ -10,7 +10,8 @@ export interface StreamHandle {
     bot: string,
     sessionId: string,
     message: string,
-    attachmentPaths?: string[]
+    attachmentPaths?: string[],
+    voiceMode?: boolean
   ) => Promise<string>;
   cancel: () => void;
   error: string | null;
@@ -29,7 +30,8 @@ export function useChatStream(
       bot: string,
       sessionId: string,
       message: string,
-      attachmentPaths: string[] = []
+      attachmentPaths: string[] = [],
+      voiceMode = false
     ) => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -47,6 +49,9 @@ export function useChatStream(
         };
         if (attachmentPaths.length > 0) {
           body.attachments = attachmentPaths;
+        }
+        if (voiceMode) {
+          body.voice_mode = true;
         }
         const response = await fetch("/api/chat", {
           method: "POST",

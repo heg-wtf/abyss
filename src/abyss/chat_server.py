@@ -33,6 +33,13 @@ Endpoints
 ``GET /chat/sessions/<bot>/<session_id>/messages``
     Returns ``{"messages": [{"role", "content", "timestamp"}, ...]}``.
 
+``POST /chat/transcribe``
+    Body: multipart/form-data with ``audio`` field (webm/ogg/wav, max 10 MB).
+    Returns ``{"text": "..."}`` — empty string when audio is silence/noise.
+
+``POST /chat/speak``
+    Body: ``{"text": str, "voice_id"?: str}``. Streams ``audio/mpeg`` MP3.
+
 ``GET /healthz``
     Always 200.
 """
@@ -52,10 +59,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from abyss.chat_core import process_chat_message
-from abyss.config import abyss_home, bot_directory, load_bot_config, load_config
+from abyss.config import (
+    abyss_home,
+    bot_directory,
+    get_elevenlabs_api_key,
+    load_bot_config,
+    load_config,
+)
 from abyss.llm import get_or_create
 from abyss.session import (
     WEB_SESSION_PREFIX,
@@ -69,6 +83,17 @@ logger = logging.getLogger(__name__)
 
 CHAT_SERVER_HOST = "127.0.0.1"
 CHAT_SERVER_PORT = int(os.environ.get("ABYSS_CHAT_PORT", "3848"))
+
+ELEVENLABS_API_KEY = get_elevenlabs_api_key()
+ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+ELEVENLABS_DEFAULT_VOICE_ID = "8jHHF8rMqMlg8if2mOUe"
+ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
+ELEVENLABS_STT_MODEL = "scribe_v2"
+
+MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_TTS_TEXT_LENGTH = 5_000
+MIN_STT_LANGUAGE_PROBABILITY = 0.5
 
 ALLOWED_ORIGINS = {
     "http://127.0.0.1:3847",
@@ -384,6 +409,7 @@ class ChatServer:
         # concurrent uploads can both observe a count below the cap and
         # both proceed, exceeding ``MAX_UPLOADS_PER_SESSION``.
         self._upload_locks: dict[str, asyncio.Lock] = {}
+        self._http_session: aiohttp.ClientSession | None = None
         self._register_routes()
 
     @property
@@ -405,9 +431,13 @@ class ChatServer:
         router.add_get("/chat/sessions/{bot}/{session_id}/messages", self._handle_get_messages)
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
+        router.add_post("/chat/transcribe", self._handle_transcribe)
+        router.add_post("/chat/speak", self._handle_speak)
+        router.add_post("/chat/scribe-token", self._handle_scribe_token)
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
+        self._http_session = aiohttp.ClientSession()
         self._runner = web.AppRunner(self._app)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, self._host, self._port)
@@ -415,6 +445,10 @@ class ChatServer:
         logger.info("Chat server listening on http://%s:%d", self._host, self._port)
 
     async def stop(self) -> None:
+        if self._http_session:
+            with suppress(Exception):
+                await self._http_session.close()
+            self._http_session = None
         if self._runner:
             with suppress(Exception):
                 await self._runner.cleanup()
@@ -557,6 +591,7 @@ class ChatServer:
         session_id = (body.get("session_id") or "").strip()
         message = (body.get("message") or "").strip()
         raw_attachments = body.get("attachments") or []
+        voice_mode: bool = bool(body.get("voice_mode", False))
 
         try:
             _validate_bot_name(bot_name)
@@ -606,6 +641,13 @@ class ChatServer:
             with suppress(Exception):
                 await _sse_write(sse, {"type": "chunk", "text": chunk})
 
+        effective_message = message
+        if voice_mode:
+            effective_message += (
+                "\n\n[응답 지침: 음성으로 전달됩니다. 자연스러운 구어체 한국어로 답변하세요. "
+                '"없음" → "없어요", 마크다운/불릿/이모지 없이 말하듯 짧고 자연스럽게.]'
+            )
+
         lock = self._lock_for(bot_name, session_id)
         full_text = ""
         try:
@@ -615,7 +657,7 @@ class ChatServer:
                     bot_path=bot_path,
                     bot_config=bot_config,
                     chat_id=session_id,
-                    user_message=message,
+                    user_message=effective_message,
                     on_chunk=on_chunk,
                     session_key=f"{bot_name}:{session_id}",
                     attachments=attachment_paths,
@@ -823,6 +865,146 @@ class ChatServer:
         if mime == "application/pdf":
             headers["Content-Disposition"] = f'inline; filename="{candidate.name}"'
         return web.FileResponse(candidate, headers=headers)
+
+    async def _handle_transcribe(self, request: web.Request) -> web.Response:
+        """Transcribe audio via ElevenLabs Scribe v2.
+
+        Expects multipart/form-data with an ``audio`` field containing raw
+        audio bytes (webm/ogg/wav).  Returns ``{"text": "..."}`` or
+        ``{"text": ""}`` when the language probability is too low (silence /
+        noise guard against Whisper-style hallucinations).
+        """
+        if not ELEVENLABS_API_KEY:
+            return web.json_response({"error": "ELEVENLABS_API_KEY not set"}, status=503)
+
+        try:
+            reader = await request.multipart()
+        except Exception:
+            return web.json_response({"error": "invalid multipart"}, status=400)
+
+        audio_bytes: bytes | None = None
+        async for field in reader:
+            if field.name == "audio":
+                audio_bytes = await field.read(decode=True)
+                break
+
+        if not audio_bytes:
+            return web.json_response({"error": "missing audio field"}, status=400)
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            return web.json_response({"error": "audio too large"}, status=413)
+
+        form = aiohttp.FormData()
+        form.add_field("model_id", ELEVENLABS_STT_MODEL)
+        form.add_field("language_code", "ko")
+        form.add_field(
+            "file",
+            audio_bytes,
+            filename="audio.webm",
+            content_type="audio/webm",
+        )
+
+        try:
+            assert self._http_session is not None
+            async with self._http_session.post(
+                ELEVENLABS_STT_URL,
+                headers={"xi-api-key": ELEVENLABS_API_KEY},
+                data=form,
+            ) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    logger.warning("ElevenLabs STT error %d: %s", response.status, body)
+                    return web.json_response({"error": f"upstream {response.status}"}, status=502)
+                data = await response.json()
+        except Exception as exc:
+            logger.exception("ElevenLabs STT request failed")
+            return web.json_response({"error": str(exc)}, status=502)
+
+        language_probability = data.get("language_probability", 1.0)
+        text = data.get("text", "").strip()
+        if language_probability < MIN_STT_LANGUAGE_PROBABILITY:
+            text = ""
+
+        return web.json_response({"text": text})
+
+    async def _handle_scribe_token(self, request: web.Request) -> web.Response:
+        """Issue a single-use ElevenLabs Scribe realtime token for the browser."""
+        if not ELEVENLABS_API_KEY:
+            return web.json_response({"error": "ELEVENLABS_API_KEY not set"}, status=503)
+
+        try:
+            assert self._http_session is not None
+            async with self._http_session.post(
+                "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
+                headers={"xi-api-key": ELEVENLABS_API_KEY},
+            ) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    logger.warning("ElevenLabs scribe token error %d: %s", response.status, body)
+                    return web.json_response({"error": f"upstream {response.status}"}, status=502)
+                data = await response.json()
+                return web.json_response({"token": data["token"]})
+        except Exception as exc:
+            logger.exception("ElevenLabs scribe token request failed")
+            return web.json_response({"error": str(exc)}, status=502)
+
+    async def _handle_speak(self, request: web.Request) -> web.StreamResponse:
+        """Synthesize speech via ElevenLabs TTS and stream MP3 bytes.
+
+        Expects JSON body ``{"text": str, "voice_id"?: str}``.
+        Streams ``audio/mpeg`` back so the browser can start playing early.
+        """
+        if not ELEVENLABS_API_KEY:
+            return web.json_response({"error": "ELEVENLABS_API_KEY not set"}, status=503)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        text: str = body.get("text", "").strip()
+        if not text:
+            return web.json_response({"error": "text is required"}, status=400)
+        if len(text) > MAX_TTS_TEXT_LENGTH:
+            text = text[:MAX_TTS_TEXT_LENGTH]
+
+        voice_id: str = body.get("voice_id") or ELEVENLABS_DEFAULT_VOICE_ID
+        url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
+
+        try:
+            assert self._http_session is not None
+            async with self._http_session.post(
+                url,
+                headers={
+                    "xi-api-key": ELEVENLABS_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "text": text,
+                    "model_id": ELEVENLABS_TTS_MODEL,
+                    "output_format": "mp3_44100_128",
+                    "voice_settings": {"speed": 1.1},
+                },
+            ) as upstream:
+                if upstream.status != 200:
+                    err_body = await upstream.text()
+                    logger.warning("ElevenLabs TTS error %d: %s", upstream.status, err_body)
+                    return web.json_response({"error": f"upstream {upstream.status}"}, status=502)
+
+                stream_response = web.StreamResponse(
+                    status=200,
+                    headers={
+                        "Content-Type": "audio/mpeg",
+                        "Cache-Control": "no-store",
+                    },
+                )
+                await stream_response.prepare(request)
+                async for chunk in upstream.content.iter_chunked(8192):
+                    await stream_response.write(chunk)
+                await stream_response.write_eof()
+                return stream_response
+        except Exception as exc:
+            logger.exception("ElevenLabs TTS request failed")
+            return web.json_response({"error": str(exc)}, status=502)
 
 
 # ---------------------------------------------------------------------------

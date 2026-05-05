@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Mic } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { BotAvatar } from "@/components/bot-avatar";
 import {
   cancelChat,
@@ -16,6 +17,8 @@ import { ChatMessage } from "./chat-message";
 import { ChatSessionList } from "./chat-session-list";
 import { PromptInput } from "./prompt-input";
 import { useChatStream } from "./use-chat-stream";
+import { useVoiceMode, type VoiceState } from "./use-voice-mode";
+import { VoiceScreen } from "./voice-screen";
 
 interface ConversationMessage extends ChatMessageType {
   id: string;
@@ -37,9 +40,10 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const [sessionsLoading, setSessionsLoading] = React.useState(false);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const [transientError, setTransientError] = React.useState<string | null>(null);
+  const [voiceMode, setVoiceMode] = React.useState(false);
 
   const stream = useChatStream();
-  const scrollRegionRef = React.useRef<HTMLDivElement>(null);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
 
   // Refresh session lists for all bots
   const reloadAllSessions = React.useCallback(async () => {
@@ -88,9 +92,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
 
   // Auto-scroll to bottom on new content
   React.useEffect(() => {
-    const region = scrollRegionRef.current;
-    if (!region) return;
-    region.scrollTop = region.scrollHeight;
+    bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages, stream.text]);
 
   const handleNewChat = async (botName: string) => {
@@ -130,6 +132,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const handleSubmit = async (payload: {
     text: string;
     attachments: UploadedAttachment[];
+    voiceMode?: boolean;
   }) => {
     if (!activeSession) {
       setTransientError("Pick or create a chat first");
@@ -174,7 +177,8 @@ export function ChatView({ initialBots, apiOnline }: Props) {
       session.bot,
       session.id,
       payload.text,
-      payload.attachments.map((attachment) => attachment.path)
+      payload.attachments.map((attachment) => attachment.path),
+      payload.voiceMode ?? false
     );
     setMessages((prev) =>
       prev.map((message) =>
@@ -193,6 +197,44 @@ export function ChatView({ initialBots, apiOnline }: Props) {
         /* ignore */
       });
     }
+  };
+
+  const voice = useVoiceMode({
+    onTranscript: (text) => {
+      void handleSubmit({ text, attachments: [], voiceMode: true });
+    },
+  });
+
+  // Auto-speak the assistant reply when streaming completes in voice mode.
+  const prevStreamingRef = React.useRef(false);
+  React.useEffect(() => {
+    if (prevStreamingRef.current && !stream.streaming && voiceMode) {
+      const last = messages[messages.length - 1];
+      if (last?.role === "assistant" && last.content) {
+        void voice.speak(last.content);
+      }
+    }
+    prevStreamingRef.current = stream.streaming;
+  }, [stream.streaming, voiceMode, messages, voice.speak]);
+
+  // Auto-restart recording after bot finishes speaking.
+  const prevVoiceStateRef = React.useRef<VoiceState>("idle");
+  React.useEffect(() => {
+    const prev = prevVoiceStateRef.current;
+    prevVoiceStateRef.current = voice.voiceState;
+    if (prev === "speaking" && voice.voiceState === "idle" && voiceMode) {
+      void voice.start();
+    }
+  }, [voice.voiceState, voiceMode, voice.start]);
+
+  const handleVoiceOpen = () => {
+    setVoiceMode(true);
+    void voice.start();
+  };
+
+  const handleVoiceClose = () => {
+    voice.cancel();
+    setVoiceMode(false);
   };
 
   // Reflect streaming text into the in-flight assistant message
@@ -235,6 +277,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
         onDelete={handleDelete}
       />
       <main className="flex min-h-0 flex-1 flex-col">
+        <>
         <header className="flex h-14 items-center justify-between border-b bg-background px-4">
           <div className="flex items-center gap-3">
             {activeSession && (
@@ -255,6 +298,16 @@ export function ChatView({ initialBots, apiOnline }: Props) {
               </>
             )}
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!activeSession || stream.streaming}
+            onClick={handleVoiceOpen}
+            title="음성 모드"
+            aria-label="음성 모드 전환"
+          >
+            <Mic className="size-4" />
+          </Button>
         </header>
         {transientError && (
           <div className="bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -267,7 +320,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
           </div>
         )}
         <ScrollArea className="min-h-0 flex-1">
-          <div ref={scrollRegionRef} className="flex min-h-full flex-col">
+          <div className="flex min-h-full flex-col">
             {messagesLoading && (
               <div className="px-4 py-3 text-sm text-muted-foreground">Loading…</div>
             )}
@@ -289,8 +342,10 @@ export function ChatView({ initialBots, apiOnline }: Props) {
                   activeSession?.bot_display_name ?? activeSession?.bot ?? null
                 }
                 attachments={message.attachments}
+                timestamp={message.timestamp}
               />
             ))}
+            <div ref={bottomRef} />
           </div>
         </ScrollArea>
         <PromptInput
@@ -306,7 +361,20 @@ export function ChatView({ initialBots, apiOnline }: Props) {
               : "Click 'New' on the left to start a chat"
           }
         />
+        </>
       </main>
+      {voiceMode && activeSession && (
+        <aside className="w-72 shrink-0 border-l bg-background">
+          <VoiceScreen
+            botName={activeSession.bot}
+            botDisplayName={activeSession.bot_display_name ?? activeSession.bot}
+            voiceState={voice.voiceState}
+            partialTranscript={voice.partialTranscript}
+            error={voice.error}
+            onClose={handleVoiceClose}
+          />
+        </aside>
+      )}
     </div>
   );
 }
