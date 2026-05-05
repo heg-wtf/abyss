@@ -581,7 +581,7 @@
         "operatingSystem": "macOS",
         "url": "https://abyss.heg.wtf",
         "downloadUrl": "https://github.com/heg-wtf/abyss",
-        "softwareVersion": "2026.05.03",
+        "softwareVersion": "2026.05.05",
         "author": {
           "@type": "Organization",
           "name": "HEG",
@@ -598,7 +598,7 @@
         <div class="header-left">
           <img src="logo.png" alt="abyss" />
           <span>abyss</span>
-          <span class="version-badge">v2026.05.03</span>
+          <span class="version-badge">v2026.05.05</span>
         </div>
         <div class="header-links">
           <a href="#features">Features</a>
@@ -794,6 +794,14 @@
               endpoint. Per-bot opt-in via <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">bot.yaml</code>.
             </p>
           </div>
+          <div class="feature-card">
+            <div class="icon">🎙️</div>
+            <h3>Voice Chat</h3>
+            <p>
+              Speak to your bot in the dashboard. ElevenLabs Scribe v2 STT,
+              animated Orb visualization, TTS reply — full hands-free loop.
+            </p>
+          </div>
         </div>
       </div>
     </section>
@@ -891,6 +899,20 @@
       <div class="container">
         <h2>What's New</h2>
         <div class="changelog">
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.05.05</span>
+            <span class="changelog-desc"
+              ><strong>Voice Chat</strong> — mic button in the dashboard chat
+              opens a right sidebar with an animated ElevenLabs Orb.
+              <strong>ElevenLabs Scribe v2</strong> WebSocket STT transcribes
+              speech in real time; transcript is sent to the bot with a
+              spoken-style instruction so replies sound natural.
+              <strong>TTS streaming</strong> plays the bot reply via Web Audio
+              API. Orb color is theme-aware (white on dark, black on light).
+              Auto-restart loop keeps the mic hot after each reply.
+              Messenger-style timestamps on all chat messages.</span
+            >
+          </div>
           <div class="changelog-item">
             <span class="changelog-ver">v2026.05.03</span>
             <span class="changelog-desc"
