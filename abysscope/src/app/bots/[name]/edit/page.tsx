@@ -103,7 +103,7 @@ export default function BotEditPage() {
             href={`/bots/${name}`}
             className="text-muted-foreground hover:text-foreground text-sm"
           >
-            {name}
+            {form.display_name || name}
           </Link>
           <span className="text-muted-foreground">/</span>
           <h1 className="text-2xl font-bold">Edit</h1>
