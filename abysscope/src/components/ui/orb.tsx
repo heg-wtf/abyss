@@ -129,8 +129,10 @@ function Scene({
     )
   }, [manualOutput, outputVolumeRef, getOutputVolume])
 
+  // eslint-disable-next-line react-hooks/purity
+  const initialSeed = useRef(Math.floor(Math.random() * 2 ** 32))
   const random = useMemo(
-    () => splitmix32(seed ?? Math.floor(Math.random() * 2 ** 32)),
+    () => splitmix32(seed ?? initialSeed.current),
     [seed]
   )
   const offsets = useMemo(
@@ -170,6 +172,7 @@ function Scene({
       if (live[1]) targetColor2Ref.current.set(live[1])
     }
     const u = mat.uniforms
+    // eslint-disable-next-line react-hooks/immutability
     u.uTime.value += delta * 0.5
 
     if (u.uOpacity.value < 1) {
@@ -230,9 +233,13 @@ function Scene({
       canvas.removeEventListener("webglcontextlost", onContextLost, false)
   }, [gl])
 
-  const uniforms = useMemo(() => {
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability
     perlinNoiseTexture.wrapS = THREE.RepeatWrapping
     perlinNoiseTexture.wrapT = THREE.RepeatWrapping
+  }, [perlinNoiseTexture])
+
+  const uniforms = useMemo(() => {
     const isDark =
       typeof document !== "undefined" &&
       document.documentElement.classList.contains("dark")
