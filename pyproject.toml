@@ -1,6 +1,6 @@
 [project]
 name = "abyss"
-version = "2026.05.05"
+version = "2026.05.08"
 description = "Telegram + Claude Code personal AI assistant"
 requires-python = ">=3.11"
 dependencies = [

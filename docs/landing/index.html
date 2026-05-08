@@ -598,7 +598,7 @@
         <div class="header-left">
           <img src="logo.png" alt="abyss" />
           <span>abyss</span>
-          <span class="version-badge">v2026.05.05</span>
+          <span class="version-badge">v2026.05.08</span>
         </div>
         <div class="header-links">
           <a href="#features">Features</a>
@@ -899,6 +899,27 @@
       <div class="container">
         <h2>What's New</h2>
         <div class="changelog">
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.05.08</span>
+            <span class="changelog-desc"
+              ><strong>Bot-to-Bot Communication Mode</strong> — group member
+              bots no longer need Group Privacy OFF. Enable
+              <strong>Bot-to-Bot Communication Mode</strong> in BotFather
+              MiniApp per member bot; only the orchestrator requires Privacy
+              OFF.
+              <code style="font-family: 'JetBrains Mono', monospace;">group.yaml</code>
+              gains a <code style="font-family: 'JetBrains Mono', monospace;">bot_to_bot_mode</code>
+              field;
+              <code style="font-family: 'JetBrains Mono', monospace;">abyss doctor</code>
+              warns when bound groups have not set it.
+              <strong>Streaming: typing indicator</strong> — shows
+              <em>typing…</em> immediately on message receipt, cancelled when
+              the first draft chunk arrives (covers Claude cold-start gap).
+              <strong>Tool metrics rotation fix</strong> — <code style="font-family: 'JetBrains Mono', monospace;">_rotate()</code>
+              now uses the event timestamp instead of wall clock, preventing
+              test-mode events from being pruned immediately.</span
+            >
+          </div>
           <div class="changelog-item">
             <span class="changelog-ver">v2026.05.05</span>
             <span class="changelog-desc"
