@@ -581,7 +581,7 @@ def run_doctor() -> None:
                 f"  {bound_status} {group_name}"
                 f" (orchestrator: {orchestrator}, members: {', '.join(members)})"
             )
-            if not bot_to_bot_mode:
+            if chat_id and not bot_to_bot_mode:
                 console.print(
                     f"       [yellow]⚠[/yellow]  bot_to_bot_mode not set"
                     f" — member bots ({', '.join(members)}) require Group Privacy OFF"
