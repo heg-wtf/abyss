@@ -84,6 +84,7 @@ def create_group(
         "telegram_chat_id": None,
         "orchestrator": orchestrator,
         "members": members,
+        "bot_to_bot_mode": None,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
     }
     save_group_config(name, config)

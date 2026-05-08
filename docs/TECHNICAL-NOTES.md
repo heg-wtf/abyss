@@ -918,8 +918,8 @@ Each group has one orchestrator and zero or more members. The orchestrator recei
 
 Role-based filtering in `handlers.py`:
 
-- **Orchestrator**: Handles user messages (`not is_bot`) and member bot @mentions (bot message mentioning orchestrator's username)
-- **Member**: Only handles messages from bots that @mention the member's username
+- **Orchestrator**: Handles user messages (`not is_bot`) and member bot @mentions (bot message mentioning orchestrator's username). Requires Group Privacy OFF in BotFather.
+- **Member**: Only handles messages that @mention the member's username (from any sender — human or bot). With Telegram's **Bot-to-Bot Communication Mode** enabled in BotFather MiniApp, members receive orchestrator @mentions without Group Privacy OFF. Members can also receive peer @mentions from other members this way, enabling direct member-to-member delegation.
 - **Self-message**: All bots ignore their own messages (sender user_id == bot.id)
 
 ### Authorization Bypass for Bots

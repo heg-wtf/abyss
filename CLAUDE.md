@@ -141,7 +141,7 @@ Multi-bot collaboration via Telegram groups using an orchestrator pattern:
 - `/reset` in group: orchestrator resets all bots' sessions + clears shared conversation, preserves workspace
 - `/cancel` in group: orchestrator cancels all bots' running processes
 - `/bind <group>` and `/unbind`: associate Telegram chat with a group config
-- BotFather Group Privacy must be OFF for bots to receive group messages
+- BotFather setup is role-based: orchestrator needs Group Privacy OFF; member bots need Bot-to-Bot Communication Mode ON in BotFather MiniApp (Group Privacy can stay ON — members only receive @mentions from the orchestrator)
 
 ### Telegram Message Rules
 

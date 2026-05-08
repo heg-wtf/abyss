@@ -2004,6 +2004,17 @@ def group_create(
     console.print(
         f"\nNext: Add bots to a Telegram group, then run [green]/bind {name}[/green] in the group."
     )
+    console.print("\n[bold]BotFather Setup:[/bold]")
+    console.print(f"  [cyan]{orchestrator}[/cyan] (orchestrator):")
+    console.print("    → BotFather → Edit Bot → Group Privacy → [yellow]DISABLE[/yellow]")
+    console.print(f"  [cyan]{', '.join(member_list)}[/cyan] (members):")
+    console.print(
+        "    → BotFather MiniApp → Bot Settings"
+        " → Bot-to-Bot Communication Mode → [green]ENABLE[/green]"
+    )
+    console.print(
+        "    (Group Privacy can stay ON — members only need @mentions from the orchestrator)"
+    )
 
 
 @group_app.command("list")

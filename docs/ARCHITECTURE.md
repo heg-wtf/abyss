@@ -369,7 +369,8 @@ Multi-bot collaboration via Telegram groups using an orchestrator-member pattern
 - **Shared conversation log**: All messages (user, bot inputs, Claude responses) logged to date-based files (`groups/<name>/conversation/YYMMDD.md`)
 - **Shared workspace**: Persistent file workspace across all group members, preserved on `/reset`
 - **CLAUDE.md injection**: `compose_group_claude_md()` injects team roster + rules for orchestrator, role context + shared conversation history for members
-- **Data model**: `groups/<name>/group.yaml` stores name, orchestrator, members list, telegram_chat_id
+- **Data model**: `groups/<name>/group.yaml` stores name, orchestrator, members list, telegram_chat_id, bot_to_bot_mode
+- **BotFather setup**: Orchestrator needs Group Privacy OFF. Member bots need Bot-to-Bot Communication Mode ON (BotFather MiniApp → Bot Settings). Members can keep Group Privacy ON — they only receive @mentions. `abyss doctor` warns when bot_to_bot_mode is not set.
 - **CLI**: `abyss group create/list/show/delete/status`
 - **Telegram**: `/bind <group>`, `/unbind` to associate chat with group config
 

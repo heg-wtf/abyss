@@ -563,3 +563,30 @@ def run_doctor() -> None:
     # QMD status
     console.print("\n[bold]QMD:[/bold]")
     _display_qmd_status()
+
+    # Groups status
+    from abyss.group import list_groups
+
+    groups = list_groups()
+    if groups:
+        console.print(f"\n[bold]Groups ({len(groups)}):[/bold]")
+        for group_config in groups:
+            group_name = group_config.get("name", "?")
+            orchestrator = group_config.get("orchestrator", "?")
+            members = group_config.get("members", [])
+            bot_to_bot_mode = group_config.get("bot_to_bot_mode")
+            chat_id = group_config.get("telegram_chat_id")
+            bound_status = "[green]bound[/green]" if chat_id else "[yellow]unbound[/yellow]"
+            console.print(
+                f"  {bound_status} {group_name}"
+                f" (orchestrator: {orchestrator}, members: {', '.join(members)})"
+            )
+            if not bot_to_bot_mode:
+                console.print(
+                    f"       [yellow]⚠[/yellow]  bot_to_bot_mode not set"
+                    f" — member bots ({', '.join(members)}) require Group Privacy OFF"
+                )
+                console.print(
+                    "         or enable Bot-to-Bot Communication Mode in BotFather"
+                    " MiniApp for each member bot."
+                )

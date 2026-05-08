@@ -86,6 +86,8 @@ def test_create_group(temp_abyss_home):
     assert config["orchestrator"] == "dev_lead"
     assert config["members"] == ["coder", "tester"]
     assert config["telegram_chat_id"] is None
+    assert "bot_to_bot_mode" in config
+    assert config["bot_to_bot_mode"] is None
 
 
 def test_create_group_duplicate(temp_abyss_home):

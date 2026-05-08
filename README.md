@@ -172,7 +172,10 @@ abyss supports **multi-bot collaboration** via Telegram groups. One orchestrator
 abyss group create dev_team --orchestrator dev_lead --members coder,tester
 
 # 2. Add all bots to a Telegram group chat
-# 3. Disable Group Privacy in BotFather for each bot
+# 3. BotFather setup (role-based):
+#    Orchestrator: BotFather → Edit Bot → Group Privacy → DISABLE
+#    Members:      BotFather MiniApp → Bot Settings → Bot-to-Bot Communication Mode → ENABLE
+#                  (Group Privacy can stay ON — members only need @mentions)
 # 4. In the Telegram group, run:
 /bind dev_team
 
