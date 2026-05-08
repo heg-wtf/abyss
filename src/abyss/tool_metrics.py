@@ -50,9 +50,14 @@ def _today_path(bot_name: str, now: datetime | None = None) -> Path:
     return metrics_directory(bot_name) / filename
 
 
-def _rotate(metrics_dir: Path, retention_days: int = RETENTION_DAYS) -> int:
+def _rotate(
+    metrics_dir: Path,
+    retention_days: int = RETENTION_DAYS,
+    now: datetime | None = None,
+) -> int:
     """Delete jsonl files older than ``retention_days``. Returns count removed."""
-    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=retention_days)).date()
+    reference = now or datetime.now(timezone.utc)
+    cutoff_date = (reference - timedelta(days=retention_days)).date()
     removed = 0
     if not metrics_dir.exists():
         return 0
@@ -110,7 +115,7 @@ def append_event(
 
     metrics_dir = metrics_directory(bot_name)
     metrics_dir.mkdir(parents=True, exist_ok=True)
-    _rotate(metrics_dir)
+    _rotate(metrics_dir, now=when)
 
     path = _today_path(bot_name, when)
     line = json.dumps(record, ensure_ascii=False)

@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "abyss"
-version = "2026.5.3"
+version = "2026.5.5"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -34,7 +34,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "claude-agent-sdk", specifier = ">=0.1.48" },
     { name = "croniter", specifier = ">=2.0" },
-    { name = "python-telegram-bot", specifier = ">=21.0" },
+    { name = "python-telegram-bot", specifier = ">=22.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "pyzipper", specifier = ">=0.3.6" },
     { name = "rich", specifier = ">=13.0" },

@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from telegram import BotCommand, ForceReply, Update
-from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -617,10 +616,19 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         # Fallback state (editMessageText approach)
         fallback_message_id: int | None = None
         stream_stopped = False
+        typing_task: asyncio.Task | None = None
+
+        async def send_typing_until_draft() -> None:
+            try:
+                while True:
+                    await update.effective_message.chat.send_action("typing")
+                    await asyncio.sleep(4)
+            except asyncio.CancelledError:
+                pass
 
         async def on_text_chunk(chunk: str) -> None:
             nonlocal accumulated_text, last_draft_time, draft_started
-            nonlocal draft_failed, fallback_message_id, stream_stopped
+            nonlocal draft_failed, fallback_message_id, stream_stopped, typing_task
 
             if stream_stopped:
                 return
@@ -639,30 +647,21 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             display = accumulated_text[: TELEGRAM_MESSAGE_LIMIT - 2]
 
             if not draft_failed:
-                # Primary: sendMessageDraft — try HTML formatting first, fall back to plain text
-                html_display = markdown_to_telegram_html(display)
-                draft_sent = False
-                for draft_text, draft_kwargs in [
-                    (html_display + STREAMING_CURSOR, {"parse_mode": ParseMode.HTML}),
-                    (display + STREAMING_CURSOR, {}),
-                ]:
-                    try:
-                        await context.bot.send_message_draft(
-                            chat_id=chat_id,
-                            draft_id=DRAFT_ID,
-                            text=draft_text,
-                            **draft_kwargs,
-                        )
-                        draft_sent = True
-                        break
-                    except Exception as draft_error:
-                        mode = draft_kwargs.get("parse_mode", "plain")
-                        logger.debug("sendMessageDraft failed (%s): %s", mode, draft_error)
-                if draft_sent:
+                # Plain text during streaming; HTML-converting partial markdown causes flicker
+                try:
+                    await context.bot.send_message_draft(
+                        chat_id=chat_id,
+                        draft_id=DRAFT_ID,
+                        text=display + STREAMING_CURSOR,
+                    )
                     draft_started = True
                     last_draft_time = now
+                    if typing_task is not None:
+                        typing_task.cancel()
                     return
-                draft_failed = True
+                except Exception as draft_error:
+                    logger.debug("sendMessageDraft failed: %s", draft_error)
+                    draft_failed = True
                 # Fall through to editMessageText fallback
 
             # Fallback: editMessageText approach
@@ -675,6 +674,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     sent = await update.effective_message.reply_text(display + STREAMING_CURSOR)
                     fallback_message_id = sent.message_id
                     last_draft_time = now
+                    if typing_task is not None:
+                        typing_task.cancel()
                 except Exception as send_error:
                     logger.debug("Stream fallback first send failed: %s", send_error)
                     stream_stopped = True
@@ -705,7 +706,11 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             claude_session_id=claude_session_id,
             resume_session=resume_session,
         )
-        result = await backend.run_streaming(request, on_text_chunk)
+        typing_task = asyncio.create_task(send_typing_until_draft())
+        try:
+            result = await backend.run_streaming(request, on_text_chunk)
+        finally:
+            typing_task.cancel()
         response = result.text
 
         # Clear the draft by sending an empty draft before final message

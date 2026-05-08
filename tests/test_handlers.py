@@ -631,7 +631,7 @@ async def test_streaming_uses_send_message_draft(bot_path, bot_config, mock_upda
     assert first_call_kwargs["chat_id"] == 67890
     assert first_call_kwargs["draft_id"] == 1
     assert "\u258c" in first_call_kwargs["text"]  # cursor marker
-    assert first_call_kwargs.get("parse_mode") == "HTML"  # HTML formatting in draft
+    assert first_call_kwargs.get("parse_mode") is None  # plain text during streaming
 
 
 @pytest.mark.asyncio
