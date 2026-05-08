@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from telegram import BotCommand, ForceReply, Update
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -638,20 +639,31 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             display = accumulated_text[: TELEGRAM_MESSAGE_LIMIT - 2]
 
             if not draft_failed:
-                # Primary: sendMessageDraft
-                try:
-                    await context.bot.send_message_draft(
-                        chat_id=chat_id,
-                        draft_id=DRAFT_ID,
-                        text=display + STREAMING_CURSOR,
-                    )
+                # Primary: sendMessageDraft — try HTML formatting first, fall back to plain text
+                html_display = markdown_to_telegram_html(display)
+                draft_sent = False
+                for draft_text, draft_kwargs in [
+                    (html_display + STREAMING_CURSOR, {"parse_mode": ParseMode.HTML}),
+                    (display + STREAMING_CURSOR, {}),
+                ]:
+                    try:
+                        await context.bot.send_message_draft(
+                            chat_id=chat_id,
+                            draft_id=DRAFT_ID,
+                            text=draft_text,
+                            **draft_kwargs,
+                        )
+                        draft_sent = True
+                        break
+                    except Exception as draft_error:
+                        mode = draft_kwargs.get("parse_mode", "plain")
+                        logger.debug("sendMessageDraft failed (%s): %s", mode, draft_error)
+                if draft_sent:
                     draft_started = True
                     last_draft_time = now
                     return
-                except Exception as draft_error:
-                    logger.debug("sendMessageDraft failed: %s", draft_error)
-                    draft_failed = True
-                    # Fall through to editMessageText fallback
+                draft_failed = True
+                # Fall through to editMessageText fallback
 
             # Fallback: editMessageText approach
             if len(accumulated_text) > TELEGRAM_MESSAGE_LIMIT - STREAM_BUFFER_MARGIN:

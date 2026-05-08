@@ -311,8 +311,8 @@ Claude's Markdown responses are converted to Telegram HTML before sending (`util
 
 ## Streaming On/Off Toggle
 
-- `bot.yaml`'s `streaming` field: `false` (default) or `true`
-- Default constant: `DEFAULT_STREAMING = False` in `config.py`
+- `bot.yaml`'s `streaming` field: `true` (default) or `false`
+- Default constant: `DEFAULT_STREAMING = True` in `config.py`
 - Runtime changes reflected via `nonlocal streaming_enabled` in handler closure.
 - Runtime toggle via Telegram `/streaming on|off`, immediately saved via `save_bot_config()`.
 - Also changeable via CLI `abyss bot streaming <name> [on|off]`.
@@ -336,13 +336,21 @@ Three event types are processed:
 
 The `result` event text is used first; if absent, accumulated streaming text is used.
 
-### Telegram Message Editing Strategy
+### Telegram Streaming Strategy
 
-- First `reply_text()` sent after at least 10 characters (`STREAM_MIN_CHARS_BEFORE_SEND`) accumulated
-- Subsequent `edit_message_text()` calls at 0.5 second (`STREAM_THROTTLE_SECONDS`) intervals
-- Cursor marker `▌` (`STREAMING_CURSOR`) appended to text end to show progress
-- Streaming preview stops when exceeding 4096 characters (`stream_stopped = True`)
-- On completion: single chunk gets HTML-formatted message edit, multiple chunks get preview deletion + split send
+Primary path uses `sendMessageDraft` (Bot API 9.5+, all bots, `python-telegram-bot>=22.6`):
+
+- `send_message_draft(chat_id, draft_id=1, text=html+▌, parse_mode=HTML)` at 0.5s (`STREAM_THROTTLE_SECONDS`) intervals
+- Attempts HTML-formatted draft first (`markdown_to_telegram_html(display)`); falls back to plain text on error
+- Requires at least 10 characters (`STREAM_MIN_CHARS_BEFORE_SEND`) before first draft
+- Cursor marker `▌` (`STREAMING_CURSOR`) appended to show progress
+- Draft cleared with `send_message_draft(text="")` before final message send
+
+Fallback path (if `sendMessageDraft` unavailable or fails):
+
+- First `reply_text()` after 10 chars, subsequent `edit_message_text()` at 0.5s intervals
+- Streaming preview stops at 4096 characters (`stream_stopped = True`)
+- On completion: single chunk → HTML-formatted edit; multiple chunks → delete preview + split send
 
 ### Typing Action
 
