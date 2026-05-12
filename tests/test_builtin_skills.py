@@ -217,58 +217,6 @@ def test_installed_reminders_skill_starts_inactive(temp_abyss_home):
     assert skill_status("reminders") == "inactive"
 
 
-# --- Naver Map Built-in Skill Tests ---
-
-
-def test_list_builtin_skills_returns_naver_map():
-    """list_builtin_skills includes the naver-map skill."""
-    skills = list_builtin_skills()
-    names = [skill["name"] for skill in skills]
-    assert "naver-map" in names
-
-    naver_map = next(skill for skill in skills if skill["name"] == "naver-map")
-    assert naver_map["description"] != ""
-    assert naver_map["path"].is_dir()
-
-
-def test_get_builtin_skill_path_naver_map():
-    """get_builtin_skill_path returns path for naver-map skill."""
-    path = get_builtin_skill_path("naver-map")
-    assert path is not None
-    assert (path / "SKILL.md").exists()
-    assert (path / "skill.yaml").exists()
-
-
-def test_is_builtin_skill_naver_map():
-    """is_builtin_skill returns True for naver-map."""
-    assert is_builtin_skill("naver-map") is True
-
-
-def test_install_builtin_skill_naver_map(temp_abyss_home):
-    """install_builtin_skill creates the naver-map skill directory with files."""
-    directory = install_builtin_skill("naver-map")
-    assert directory.exists()
-    assert directory == temp_abyss_home / "skills" / "naver-map"
-    assert (directory / "SKILL.md").exists()
-    assert (directory / "skill.yaml").exists()
-
-    # Verify SKILL.md content
-    skill_md_content = (directory / "SKILL.md").read_text()
-    assert "map.naver.com" in skill_md_content
-
-    # Verify skill.yaml content
-    with open(directory / "skill.yaml") as file:
-        config = yaml.safe_load(file)
-    assert config["name"] == "naver-map"
-    assert config["type"] == "knowledge"
-
-
-def test_installed_naver_map_skill_starts_inactive(temp_abyss_home):
-    """Installed naver-map skill starts with inactive status."""
-    install_builtin_skill("naver-map")
-    assert skill_status("naver-map") == "inactive"
-
-
 # --- Image Built-in Skill Tests ---
 
 
@@ -322,60 +270,6 @@ def test_installed_image_skill_starts_inactive(temp_abyss_home):
     """Installed image skill starts with inactive status."""
     install_builtin_skill("image")
     assert skill_status("image") == "inactive"
-
-
-# --- Best Price Built-in Skill Tests ---
-
-
-def test_list_builtin_skills_returns_best_price():
-    """list_builtin_skills includes the best-price skill."""
-    skills = list_builtin_skills()
-    names = [skill["name"] for skill in skills]
-    assert "best-price" in names
-
-    best_price = next(skill for skill in skills if skill["name"] == "best-price")
-    assert best_price["description"] != ""
-    assert best_price["path"].is_dir()
-
-
-def test_get_builtin_skill_path_best_price():
-    """get_builtin_skill_path returns path for best-price skill."""
-    path = get_builtin_skill_path("best-price")
-    assert path is not None
-    assert (path / "SKILL.md").exists()
-    assert (path / "skill.yaml").exists()
-
-
-def test_is_builtin_skill_best_price():
-    """is_builtin_skill returns True for best-price."""
-    assert is_builtin_skill("best-price") is True
-
-
-def test_install_builtin_skill_best_price(temp_abyss_home):
-    """install_builtin_skill creates the best-price skill directory with files."""
-    directory = install_builtin_skill("best-price")
-    assert directory.exists()
-    assert directory == temp_abyss_home / "skills" / "best-price"
-    assert (directory / "SKILL.md").exists()
-    assert (directory / "skill.yaml").exists()
-
-    # Verify SKILL.md content
-    skill_md_content = (directory / "SKILL.md").read_text()
-    assert "danawa" in skill_md_content.lower()
-    assert "coupang" in skill_md_content.lower()
-    assert "naver" in skill_md_content.lower()
-
-    # Verify skill.yaml content
-    with open(directory / "skill.yaml") as file:
-        config = yaml.safe_load(file)
-    assert config["name"] == "best-price"
-    assert config["type"] == "knowledge"
-
-
-def test_installed_best_price_skill_starts_inactive(temp_abyss_home):
-    """Installed best-price skill starts with inactive status."""
-    install_builtin_skill("best-price")
-    assert skill_status("best-price") == "inactive"
 
 
 # --- Supabase Built-in Skill Tests ---
@@ -775,61 +669,6 @@ def test_jira_mcp_config_merges(temp_abyss_home):
     merged = merge_mcp_configs(["jira"])
     assert merged is not None
     assert "jira" in merged["mcpServers"]
-
-
-# --- DART Skill Tests ---
-
-
-def test_list_builtin_skills_returns_dart():
-    """list_builtin_skills includes the dart skill."""
-    skills = list_builtin_skills()
-    names = [skill["name"] for skill in skills]
-    assert "dart" in names
-
-    dart = next(skill for skill in skills if skill["name"] == "dart")
-    assert dart["description"] != ""
-    assert dart["path"].is_dir()
-
-
-def test_get_builtin_skill_path_dart():
-    """get_builtin_skill_path returns path for dart skill."""
-    path = get_builtin_skill_path("dart")
-    assert path is not None
-    assert (path / "SKILL.md").exists()
-    assert (path / "skill.yaml").exists()
-
-
-def test_is_builtin_skill_dart():
-    """is_builtin_skill returns True for dart."""
-    assert is_builtin_skill("dart") is True
-
-
-def test_install_builtin_skill_dart(temp_abyss_home):
-    """install_builtin_skill creates the dart skill directory with files."""
-    directory = install_builtin_skill("dart")
-    assert directory.exists()
-    assert directory == temp_abyss_home / "skills" / "dart"
-    assert (directory / "SKILL.md").exists()
-    assert (directory / "skill.yaml").exists()
-
-    skill_md_content = (directory / "SKILL.md").read_text()
-    assert "dartcli" in skill_md_content
-    assert "finance" in skill_md_content
-    assert "company" in skill_md_content
-
-    with open(directory / "skill.yaml") as file:
-        config = yaml.safe_load(file)
-    assert config["name"] == "dart"
-    assert config["type"] == "cli"
-    assert "dartcli" in config["required_commands"]
-    assert "DART_API_KEY" in config["environment_variables"]
-    assert "Bash(dartcli:*)" in config["allowed_tools"]
-
-
-def test_installed_dart_skill_starts_inactive(temp_abyss_home):
-    """Installed dart skill starts with inactive status."""
-    install_builtin_skill("dart")
-    assert skill_status("dart") == "inactive"
 
 
 # --- Translate Skill Tests ---

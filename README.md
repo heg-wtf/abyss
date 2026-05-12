@@ -85,8 +85,10 @@ abyss status             # Show running status
 
 abyss has a **skill system** that extends your bot's capabilities with tools and knowledge. Skills are modular — attach or detach them per bot as needed.
 
-- **Built-in skills**: Pre-packaged skill templates bundled with abyss, installable with `abyss skills install <name>`.
-- **Custom skills**: User-created skills added via `abyss skills add`. Can be markdown-only or tool-based (CLI, MCP, browser).
+**Philosophy**: Built-in skills cover **universal tooling only** (email, calendar, OS integrations, generic utilities). Domain-specific and region-specific skills (local search APIs, country-specific data sources, etc.) are intentionally **not bundled** — author your own or import via [`abyss skills import <github-url>`](docs/SKILL_AUTHORING.md).
+
+- **Built-in skills**: Pre-packaged universal skill templates bundled with abyss, installable with `abyss skills install <name>`.
+- **Custom skills**: User-created skills added via `abyss skills add` or imported from GitHub via `abyss skills import <url>`. Can be markdown-only or tool-based (CLI, MCP, browser). See [Skill Authoring Guide](docs/SKILL_AUTHORING.md).
 
 ### Built-in Skills
 
@@ -94,19 +96,13 @@ abyss has a **skill system** that extends your bot's capabilities with tools and
 |-------|-------------|-------|
 | 💬 iMessage | Read and send iMessage/SMS via [imsg](https://github.com/steipete/imsg) CLI | [Guide](docs/skills/IMESSAGE.md) |
 | ⏰ Apple Reminders | Manage macOS Reminders via [reminders-cli](https://github.com/keith/reminders-cli) | [Guide](docs/skills/REMINDERS.md) |
-| 🗺 Naver Map | Generate Naver Map web links for search and navigation | [Guide](docs/skills/NAVER-MAP.md) |
 | 🖼 Image Processing | Convert, optimize, resize, crop images via [slimg](https://github.com/clroot/slimg) CLI | [Guide](docs/skills/IMAGE.md) |
-| 💰 Best Price | Search lowest prices across Danawa, Coupang, Naver Shopping | [Guide](docs/skills/BEST-PRICE.md) |
 | 🗄 Supabase | Database, Storage, Edge Functions via Supabase MCP (no-deletion guardrails) | [Guide](docs/skills/SUPABASE.md) |
 | 📧 Gmail | Search, read, send emails via [gogcli](https://github.com/steipete/gogcli) | [Guide](docs/skills/GMAIL.md) |
 | 📅 Google Calendar | Events, scheduling, free/busy via [gogcli](https://github.com/steipete/gogcli) | [Guide](docs/skills/GCALENDAR.md) |
 | 🐦 Twitter | Post tweets, search tweets via Twitter/X API MCP | [Guide](docs/skills/TWITTER.md) |
 | 📋 Jira | Search, create, update, transition issues via Jira MCP | [Guide](docs/skills/JIRA.md) |
-| 🔍 Naver Search | Search Naver (local, book, blog, cafe, news, shopping) via [naver-cli](https://github.com/heg-wtf/naver-cli) | [Guide](docs/skills/NAVER-SEARCH.md) |
-| 📍 Kakao Local | Address/coordinate conversion, keyword place search via [kakao-cli](https://github.com/heg-wtf/kakao-cli) | [Guide](docs/skills/KAKAO-LOCAL.md) |
-| 📈 DART | Query Korean corporate disclosure (DART OpenAPI) via [dartcli](https://github.com/seapy/dartcli) | [Guide](docs/skills/DART.md) |
 | 🌐 Translate | Translate text and transcripts via [translatecli](https://github.com/seapy/translatecli) (Gemini-powered) | [Guide](docs/skills/TRANSLATE.md) |
-| 🏪 Daiso | Search Daiso Mall products via [daiso-cli](https://github.com/heg-wtf/daiso-cli) | [Guide](docs/skills/DAISO.md) |
 | 📚 QMD | Search markdown knowledge bases (BM25 + vector) via [QMD](https://github.com/tobi/qmd) MCP | [Guide](docs/skills/QMD.md) |
 | 🧠 Conversation Search | Recall past bot conversations via SQLite FTS5 (auto-injected when FTS5 is available) | — |
 | 🔎 Code Review | Run `claude ultrareview` on a PR or path and summarize findings | — |
@@ -115,6 +111,7 @@ abyss has a **skill system** that extends your bot's capabilities with tools and
 abyss skills builtins          # List available built-in skills
 abyss skills install <name>    # Install a built-in skill
 abyss skills setup <name>      # Activate (check requirements)
+abyss skills import <url>      # Import a custom skill from a GitHub repo
 ```
 
 ## LLM Backends
@@ -289,6 +286,7 @@ abyss skills edit <name>       # Edit SKILL.md ($EDITOR)
 abyss skills builtins          # List available built-in skills
 abyss skills install           # List available built-in skills
 abyss skills install <name>    # Install a built-in skill
+abyss skills import <url>      # Import a skill from a GitHub repo
 
 # Cron job management
 abyss cron list <bot>          # List cron jobs
@@ -364,26 +362,20 @@ abyss/
 │   ├── mcp_servers/        # Bundled stdio MCP servers (conversation_search)
 │   ├── hooks/              # Claude Code hooks (log_tool_metrics, precompact_hook)
 │   ├── skill.py            # Skill management (create/attach/install/MCP/CLAUDE.md composition)
-│   ├── builtin_skills/     # Built-in skill templates (imessage, reminders, ...)
+│   ├── builtin_skills/     # Built-in skill templates (universal only)
 │   │   ├── __init__.py     # Built-in skill registry
 │   │   ├── imessage/       # iMessage skill (imsg CLI)
 │   │   ├── reminders/      # Apple Reminders skill (reminders-cli)
-│   │   ├── naver-map/      # Naver Map skill (web URL links)
 │   │   ├── image/          # Image processing skill (slimg CLI)
-│   │   ├── best-price/    # Best price search skill (knowledge)
-│   │   ├── supabase/      # Supabase MCP skill (DB, Storage, Edge Functions)
-│   │   ├── gmail/         # Gmail skill (gogcli)
-│   │   ├── gcalendar/     # Google Calendar skill (gogcli)
-│   │   ├── twitter/      # Twitter/X skill (MCP, tweet posting/search)
-│   │   ├── jira/         # Jira skill (MCP, issue management)
-│   │   ├── naver-search/ # Naver Search skill (naver-cli)
-│   │   ├── kakao-local/  # Kakao Local skill (kakao-cli)
-│   │   ├── dart/         # DART corporate disclosure skill (dartcli)
-│   │   ├── translate/    # Translate skill (translatecli, Gemini)
-│   │   ├── daiso/        # Daiso Mall skill (daiso-cli)
-│   │   ├── qmd/          # QMD knowledge search skill (MCP, HTTP daemon)
+│   │   ├── supabase/       # Supabase MCP skill (DB, Storage, Edge Functions)
+│   │   ├── gmail/          # Gmail skill (gogcli)
+│   │   ├── gcalendar/      # Google Calendar skill (gogcli)
+│   │   ├── twitter/        # Twitter/X skill (MCP, tweet posting/search)
+│   │   ├── jira/           # Jira skill (MCP, issue management)
+│   │   ├── translate/      # Translate skill (translatecli, Gemini)
+│   │   ├── qmd/            # QMD knowledge search skill (MCP, HTTP daemon)
 │   │   ├── conversation_search/ # Past conversation recall (FTS5 MCP, auto-injected)
-│   │   └── code_review/  # `claude ultrareview` PR/path review
+│   │   └── code_review/    # `claude ultrareview` PR/path review
 │   ├── backup.py            # Encrypted backup (AES-256 zip)
 │   ├── token_compact.py    # Token compaction (compress MD files via Claude)
 │   ├── cron.py             # Cron schedule automation (natural language parsing)
