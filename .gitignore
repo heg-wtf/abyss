@@ -10,3 +10,4 @@ build/
 .playwright-mcp/
 .next/
 .claude/
+.coverage
