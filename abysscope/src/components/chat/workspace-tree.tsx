@@ -4,6 +4,7 @@ import * as React from "react";
 import {
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   File as FileIcon,
   Folder,
   FolderOpen,
@@ -204,6 +205,16 @@ export function WorkspaceTree({ bot, sessionId, onClose }: Props) {
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => void openInFinder()}
+            disabled={!root}
+            aria-label="Finder에서 열기"
+            title="Finder에서 열기"
+          >
+            <ExternalLink className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => void loadRoot()}
             disabled={loading}
             aria-label="새로고침"
@@ -224,18 +235,6 @@ export function WorkspaceTree({ bot, sessionId, onClose }: Props) {
           </Button>
         </div>
       </div>
-      {root && (
-        <div className="border-b px-3 py-2">
-          <button
-            type="button"
-            onClick={() => void openInFinder()}
-            className="block w-full truncate text-left font-mono text-[11px] text-blue-600 hover:underline dark:text-blue-400"
-            title={`${root} (Finder에서 열기)`}
-          >
-            {root}
-          </button>
-        </div>
-      )}
       {error && (
         <div className="border-b bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {error}
