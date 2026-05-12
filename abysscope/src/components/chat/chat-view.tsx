@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertCircle, FolderTree, Mic } from "lucide-react";
+import { AlertCircle, Folder, Mic } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -430,7 +430,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
               aria-label="작업 디렉토리 사이드 패널 토글"
               aria-pressed={workspaceOpen}
             >
-              <FolderTree className="size-4" />
+              <Folder className="size-4" />
             </Button>
             <Button
               variant="ghost"

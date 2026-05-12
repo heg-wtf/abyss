@@ -50,8 +50,8 @@ describe("ChatView workspace integration", () => {
     expect(source).toMatch(/WorkspaceTree/);
   });
 
-  it("renders a FolderTree button next to the Mic button", () => {
-    expect(source).toMatch(/FolderTree/);
+  it("renders a Folder button next to the Mic button", () => {
+    expect(source).toMatch(/\bFolder\b/);
     expect(source).toMatch(/handleWorkspaceToggle/);
   });
 
