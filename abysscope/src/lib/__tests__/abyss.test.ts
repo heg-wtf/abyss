@@ -91,7 +91,7 @@ function setupBasicConfig(): void {
     goal: "Analyze data",
     model: "opus",
     streaming: false,
-    skills: ["imessage", "dart"],
+    skills: ["imessage", "translate"],
     allowed_users: [],
   });
 }
@@ -332,7 +332,7 @@ describe("isBuiltinSkill", () => {
   it("returns true for builtin skills", () => {
     expect(isBuiltinSkill("imessage")).toBe(true);
     expect(isBuiltinSkill("supabase")).toBe(true);
-    expect(isBuiltinSkill("dart")).toBe(true);
+    expect(isBuiltinSkill("translate")).toBe(true);
     expect(isBuiltinSkill("gmail")).toBe(true);
     expect(isBuiltinSkill("qmd")).toBe(true);
   });
@@ -350,15 +350,15 @@ describe("listSkills", () => {
   });
 
   it("lists skills from skill.yaml files", () => {
-    writeYamlFile(path.join(testHome, "skills", "naver-search", "skill.yaml"), {
-      name: "naver-search",
+    writeYamlFile(path.join(testHome, "skills", "custom-search", "skill.yaml"), {
+      name: "custom-search",
       type: "cli",
       status: "active",
-      description: "Naver search",
+      description: "Custom search",
       allowed_tools: [],
       environment_variables: [],
       environment_variable_values: {},
-      required_commands: ["naver-cli"],
+      required_commands: ["custom-cli"],
       install_hints: {},
     });
     writeYamlFile(path.join(testHome, "skills", "supabase", "skill.yaml"), {
@@ -375,7 +375,7 @@ describe("listSkills", () => {
     const skills = listSkills();
     expect(skills).toHaveLength(2);
     const names = skills.map((s) => s.name);
-    expect(names).toContain("naver-search");
+    expect(names).toContain("custom-search");
     expect(names).toContain("supabase");
   });
 
@@ -873,7 +873,7 @@ describe("getSkillUsageByBots", () => {
     const usage = getSkillUsageByBots();
     expect(usage["imessage"]).toEqual(["testbot", "otherbot"]);
     expect(usage["reminders"]).toEqual(["testbot"]);
-    expect(usage["dart"]).toEqual(["otherbot"]);
+    expect(usage["translate"]).toEqual(["otherbot"]);
     expect(usage["custom-skill"]).toEqual(["testbot"]);
   });
 });
