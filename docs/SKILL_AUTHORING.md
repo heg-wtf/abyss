@@ -98,8 +98,9 @@ For `type: mcp` skills. Standard MCP server config; abyss merges this into the b
 abyss skills add               # Interactive prompt for name/type
 # Edit ~/.abyss/skills/<name>/SKILL.md and skill.yaml directly
 abyss skills setup <name>      # Check requirements, activate
-abyss skills attach <name>     # Per-bot: attach via CLI or Telegram /skills attach
 ```
+
+Attach the skill to a bot via **Telegram** (`/skills attach <name>`), the **abysscope dashboard**, or by adding the skill name to the bot's `skills:` list in `bot.yaml`. There is no `abyss skills attach` CLI subcommand.
 
 ### Share via GitHub
 

@@ -337,6 +337,8 @@ export function updateCronJobs(botName: string, jobs: CronJob[]): void {
 // --- Skills ---
 
 const BUILTIN_SKILL_NAMES = new Set([
+  "code_review",
+  "conversation_search",
   "gcalendar",
   "gmail",
   "image",
