@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { parseChatEvents } from "@/lib/abyss-api";
 
-export interface StreamHandle {
+export interface SessionStream {
   text: string;
   streaming: boolean;
+  error: string | null;
+}
+
+export interface MultiSessionStreamHandle {
+  streams: Map<string, SessionStream>;
   send: (
     bot: string,
     sessionId: string,
@@ -13,17 +18,37 @@ export interface StreamHandle {
     attachmentPaths?: string[],
     voiceMode?: boolean
   ) => Promise<string>;
-  cancel: () => void;
-  error: string | null;
+  cancel: (sessionId: string) => void;
+  cancelAll: () => void;
 }
 
-export function useChatStream(
-  onChunk?: (chunk: string) => void
-): StreamHandle {
-  const [text, setText] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+const EMPTY_STREAM: SessionStream = { text: "", streaming: false, error: null };
+
+export function getSessionStream(
+  streams: Map<string, SessionStream>,
+  sessionId: string | null | undefined
+): SessionStream {
+  if (!sessionId) return EMPTY_STREAM;
+  return streams.get(sessionId) ?? EMPTY_STREAM;
+}
+
+export function useMultiSessionChatStream(
+  onChunk?: (sessionId: string, chunk: string) => void
+): MultiSessionStreamHandle {
+  const [streams, setStreams] = useState<Map<string, SessionStream>>(new Map());
+  const controllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  const patchStream = useCallback(
+    (sessionId: string, patch: Partial<SessionStream>) => {
+      setStreams((prev) => {
+        const next = new Map(prev);
+        const current = prev.get(sessionId) ?? EMPTY_STREAM;
+        next.set(sessionId, { ...current, ...patch });
+        return next;
+      });
+    },
+    []
+  );
 
   const send = useCallback(
     async (
@@ -33,13 +58,13 @@ export function useChatStream(
       attachmentPaths: string[] = [],
       voiceMode = false
     ) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
+      // Abort prior in-flight stream for THIS session only.
+      controllersRef.current.get(sessionId)?.abort();
 
-      setText("");
-      setError(null);
-      setStreaming(true);
+      const controller = new AbortController();
+      controllersRef.current.set(sessionId, controller);
+
+      patchStream(sessionId, { text: "", streaming: true, error: null });
 
       try {
         const body: Record<string, unknown> = {
@@ -68,13 +93,13 @@ export function useChatStream(
         for await (const event of parseChatEvents(response.body)) {
           if (event.type === "chunk") {
             accumulated += event.text;
-            setText(accumulated);
-            onChunk?.(event.text);
+            patchStream(sessionId, { text: accumulated });
+            onChunk?.(sessionId, event.text);
           } else if (event.type === "error") {
-            setError(event.message);
+            patchStream(sessionId, { error: event.message });
           } else if (event.type === "done") {
             accumulated = event.text || accumulated;
-            setText(accumulated);
+            patchStream(sessionId, { text: accumulated });
           }
         }
         return accumulated;
@@ -82,21 +107,58 @@ export function useChatStream(
         if ((caught as { name?: string }).name === "AbortError") {
           return "";
         }
-        setError(caught instanceof Error ? caught.message : String(caught));
+        const message =
+          caught instanceof Error ? caught.message : String(caught);
+        patchStream(sessionId, { error: message });
         return "";
       } finally {
-        setStreaming(false);
-        abortRef.current = null;
+        patchStream(sessionId, { streaming: false });
+        if (controllersRef.current.get(sessionId) === controller) {
+          controllersRef.current.delete(sessionId);
+        }
       }
     },
-    [onChunk]
+    [onChunk, patchStream]
   );
 
-  const cancel = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setStreaming(false);
+  const cancel = useCallback(
+    (sessionId: string) => {
+      const controller = controllersRef.current.get(sessionId);
+      if (controller) {
+        controller.abort();
+        controllersRef.current.delete(sessionId);
+      }
+      patchStream(sessionId, { streaming: false });
+    },
+    [patchStream]
+  );
+
+  const cancelAll = useCallback(() => {
+    for (const controller of controllersRef.current.values()) {
+      controller.abort();
+    }
+    controllersRef.current.clear();
+    setStreams((prev) => {
+      const next = new Map(prev);
+      for (const [sessionId, stream] of prev) {
+        if (stream.streaming) {
+          next.set(sessionId, { ...stream, streaming: false });
+        }
+      }
+      return next;
+    });
   }, []);
 
-  return { text, streaming, send, cancel, error };
+  // Abort every in-flight stream when the host component unmounts.
+  useEffect(() => {
+    const controllers = controllersRef.current;
+    return () => {
+      for (const controller of controllers.values()) {
+        controller.abort();
+      }
+      controllers.clear();
+    };
+  }, []);
+
+  return { streams, send, cancel, cancelAll };
 }

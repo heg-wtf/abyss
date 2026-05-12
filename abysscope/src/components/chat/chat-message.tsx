@@ -68,7 +68,7 @@ export function ChatMessage({
             ))}
           </div>
         )}
-        <div className="prose prose-sm dark:prose-invert max-w-none break-words">
+        <div className="prose prose-sm dark:prose-invert min-w-0 max-w-none break-words [overflow-wrap:anywhere]">
           {role === "assistant" ? (
             <ReactMarkdown>{content || (streaming ? "…" : "")}</ReactMarkdown>
           ) : content ? (

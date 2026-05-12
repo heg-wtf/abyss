@@ -48,6 +48,25 @@ describe("UI regression guards", () => {
     expect(source).toMatch(/activeSession\.bot_display_name/);
   });
 
+  it("ChatView isolates stream + messages per session", () => {
+    const source = read("chat/chat-view.tsx");
+    // Must use the multi-session hook, not the legacy single-stream one.
+    expect(source).toMatch(/useMultiSessionChatStream/);
+    expect(source).not.toMatch(/\buseChatStream\b/);
+    // messages are stored per sessionId in a Map.
+    expect(source).toMatch(
+      /sessionMessages.*Map<string,\s*ConversationMessage\[\]>/s
+    );
+    // PromptInput disabled is keyed on the active session's stream only,
+    // never a global flag. The bug was `stream.streaming` blocking all
+    // sessions during any one's response.
+    expect(source).toMatch(/activeStream\.streaming/);
+    expect(source).not.toMatch(/disabled=\{!activeSession \|\| stream\.streaming\}/);
+    // Delete must cancel the session's in-flight stream so it does not
+    // keep writing into a discarded message Map.
+    expect(source).toMatch(/stream\.cancel\(session\.id\)/);
+  });
+
   it("Sidebar exposes a collapse toggle persisted to localStorage", () => {
     const source = read("sidebar.tsx");
     expect(source).toMatch(/abysscope\.sidebar\.collapsed/);
