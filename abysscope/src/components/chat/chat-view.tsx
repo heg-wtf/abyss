@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { AlertCircle, Mic } from "lucide-react";
+import { AlertCircle, FolderTree, Mic } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
 } from "./use-chat-stream";
 import { useVoiceMode, type VoiceState } from "./use-voice-mode";
 import { VoiceScreen } from "./voice-screen";
+import { WorkspaceTree } from "./workspace-tree";
 
 interface ConversationMessage extends ChatMessageType {
   id: string;
@@ -49,6 +50,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const [transientError, setTransientError] = React.useState<string | null>(null);
   const [voiceMode, setVoiceMode] = React.useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
 
   // Track the streaming-assistant message id per session, so chunk reflection
   // can update the correct placeholder even if other messages get appended.
@@ -313,6 +315,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   }, [voice.voiceState, voiceMode, voice]);
 
   const handleVoiceOpen = () => {
+    setWorkspaceOpen(false);
     setVoiceMode(true);
     void voice.start();
   };
@@ -320,6 +323,21 @@ export function ChatView({ initialBots, apiOnline }: Props) {
   const handleVoiceClose = () => {
     voice.cancel();
     setVoiceMode(false);
+  };
+
+  const handleWorkspaceToggle = () => {
+    setWorkspaceOpen((prev) => {
+      const next = !prev;
+      if (next && voiceMode) {
+        voice.cancel();
+        setVoiceMode(false);
+      }
+      return next;
+    });
+  };
+
+  const handleWorkspaceClose = () => {
+    setWorkspaceOpen(false);
   };
 
   // Reflect streaming text into each session's in-flight assistant message.
@@ -402,16 +420,29 @@ export function ChatView({ initialBots, apiOnline }: Props) {
               </>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={!activeSession || activeStream.streaming}
-            onClick={handleVoiceOpen}
-            title="음성 모드"
-            aria-label="음성 모드 전환"
-          >
-            <Mic className="size-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={!activeSession}
+              onClick={handleWorkspaceToggle}
+              title="작업 디렉토리 보기"
+              aria-label="작업 디렉토리 사이드 패널 토글"
+              aria-pressed={workspaceOpen}
+            >
+              <FolderTree className="size-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={!activeSession || activeStream.streaming}
+              onClick={handleVoiceOpen}
+              title="음성 모드"
+              aria-label="음성 모드 전환"
+            >
+              <Mic className="size-4" />
+            </Button>
+          </div>
         </header>
         {transientError && (
           <div className="bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -476,6 +507,15 @@ export function ChatView({ initialBots, apiOnline }: Props) {
             partialTranscript={voice.partialTranscript}
             error={voice.error}
             onClose={handleVoiceClose}
+          />
+        </aside>
+      )}
+      {workspaceOpen && !voiceMode && activeSession && (
+        <aside className="w-72 shrink-0 border-l bg-background">
+          <WorkspaceTree
+            bot={activeSession.bot}
+            sessionId={activeSession.id}
+            onClose={handleWorkspaceClose}
           />
         </aside>
       )}
