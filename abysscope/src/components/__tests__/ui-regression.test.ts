@@ -55,7 +55,7 @@ describe("UI regression guards", () => {
     expect(source).not.toMatch(/\buseChatStream\b/);
     // messages are stored per sessionId in a Map.
     expect(source).toMatch(
-      /sessionMessages.*Map<string,\s*ConversationMessage\[\]>/s
+      /sessionMessages[\s\S]*Map<string,\s*ConversationMessage\[\]>/
     );
     // PromptInput disabled is keyed on the active session's stream only,
     // never a global flag. The bug was `stream.streaming` blocking all
