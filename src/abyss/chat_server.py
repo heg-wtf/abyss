@@ -852,14 +852,23 @@ class ChatServer:
                     "path": str(relative),
                     "url": (f"/chat/sessions/{bot_name}/{session_id}/file/{result.file_path.name}"),
                 }
-        elif command_name in {
-            "skills",
-            "cron",
-            "heartbeat",
-            "compact",
-            "bind",
-            "unbind",
-        }:
+        elif command_name == "skills":
+            result = await commands.cmd_skills(ctx)
+        elif command_name == "heartbeat":
+            # ``/heartbeat run`` requires Telegram's send_message callback.
+            # Status / on / off work; ``run`` falls back to a clear hint.
+            if ctx.args and ctx.args[0].lower() == "run":
+                return (
+                    "⚠️ /heartbeat run requires the Telegram bot. Use the Telegram chat for now."
+                ), None
+            result = await commands.cmd_heartbeat(ctx)
+        elif command_name == "compact":
+            preview = await commands.cmd_compact_preview(ctx)
+            if not preview.targets:
+                return preview.text, None
+            run_result = await commands.cmd_compact_run(ctx)
+            return f"{preview.text}\n\n{run_result.text}", None
+        elif command_name in {"bind", "unbind", "cron"}:
             return (
                 f"⚠️ /{command_name} is not yet available on the dashboard. "
                 "Use the Telegram bot for now."

@@ -995,3 +995,89 @@ async def test_regular_message_still_streams(client, abyss_home, patch_backend):
     events = await _parse_sse_events(sse)
     assert any(e["type"] == "chunk" for e in events)
     assert any(e["type"] == "done" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# Slash command routing — Phase 1c (skills / heartbeat / compact)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_slash_skills_lists_on_dashboard(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/skills list"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    # Either "No skills attached" or a list — either is success for this test.
+    assert "skill" in result["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_slash_heartbeat_status(client, patch_backend, monkeypatch):
+    monkeypatch.setattr(
+        "abyss.heartbeat.get_heartbeat_config",
+        lambda b: {
+            "enabled": False,
+            "interval_minutes": 30,
+            "active_hours": {"start": "07:00", "end": "23:00"},
+        },
+        raising=False,
+    )
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/heartbeat"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Heartbeat" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_heartbeat_run_falls_back(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/heartbeat run"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Telegram" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_compact_no_targets(client, patch_backend, monkeypatch):
+    monkeypatch.setattr(
+        "abyss.token_compact.collect_compact_targets",
+        lambda b: [],
+        raising=False,
+    )
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/compact"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "No compactable" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_bind_unbind_still_telegram_only(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    for cmd in ("/bind team", "/unbind"):
+        sse = await client.post(
+            "/chat",
+            json={"bot": "alpha", "session_id": sid, "message": cmd},
+        )
+        events = await _parse_sse_events(sse)
+        result = next(e for e in events if e["type"] == "command_result")
+        assert "Telegram" in result["text"]

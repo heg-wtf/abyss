@@ -31,9 +31,12 @@ from abyss.config import (
     save_bot_config,
 )
 from abyss.group import (
+    bind_group,
     clear_shared_conversation,
     find_group_by_chat_id,
     get_my_role,
+    load_group_config,
+    unbind_group,
 )
 from abyss.session import (
     clear_bot_memory,
@@ -471,6 +474,382 @@ async def cmd_cancel(
     return CancelOutcome(
         result=CommandResult(text="No running process to cancel.", parse_mode=None),
     )
+
+
+# ---------------------------------------------------------------------------
+# Group binding (Telegram-only — chat_id must be int)
+# ---------------------------------------------------------------------------
+
+
+async def cmd_bind(ctx: CommandContext) -> CommandResult:
+    """Bind a group to the current Telegram chat.
+
+    Only the orchestrator processes the bind; other group members
+    silently skip via ``CommandResult.silent``. Dashboard sessions
+    (``chat_id`` is ``str``) cannot bind: the helper returns a clear
+    error rather than corrupting group state.
+    """
+
+    if not isinstance(ctx.chat_id, int):
+        return CommandResult(
+            text="Group bind is only available in Telegram chats.",
+            success=False,
+            parse_mode=None,
+        )
+
+    if not ctx.args:
+        return CommandResult(
+            text="Usage: `/bind <group_name>`",
+            success=False,
+        )
+
+    group_name = ctx.args[0]
+    group_config = load_group_config(group_name)
+    if group_config is None:
+        return CommandResult(
+            text=f"Group '{group_name}' not found.",
+            success=False,
+            parse_mode=None,
+        )
+
+    role = get_my_role(group_config, ctx.bot_name)
+    if role != "orchestrator":
+        return CommandResult(silent=True)
+
+    try:
+        bind_group(group_name, ctx.chat_id)
+    except ValueError as error:
+        return CommandResult(
+            text=f"Bind failed: {error}",
+            success=False,
+            parse_mode=None,
+        )
+
+    members = ", ".join(group_config.get("members", []))
+    return CommandResult(
+        text=(f"Group '{group_name}' activated.\nOrchestrator: {ctx.bot_name}\nMembers: {members}"),
+        parse_mode=None,
+    )
+
+
+async def cmd_unbind(ctx: CommandContext) -> CommandResult:
+    """Remove the group binding from the current Telegram chat."""
+
+    if not isinstance(ctx.chat_id, int):
+        return CommandResult(
+            text="Group unbind is only available in Telegram chats.",
+            success=False,
+            parse_mode=None,
+        )
+
+    group_config = find_group_by_chat_id(ctx.chat_id)
+    if group_config is None:
+        return CommandResult(
+            text="No group is bound to this chat.",
+            parse_mode=None,
+            success=False,
+        )
+
+    role = get_my_role(group_config, ctx.bot_name)
+    if role != "orchestrator":
+        return CommandResult(silent=True)
+
+    group_name = group_config["name"]
+    unbind_group(group_name)
+    return CommandResult(
+        text=f"Group '{group_name}' unbound from this chat.",
+        parse_mode=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Skills — list / attach / detach / import
+# ---------------------------------------------------------------------------
+
+
+async def cmd_skills(ctx: CommandContext) -> CommandResult:
+    """Manage attached skills for this bot.
+
+    Mutates ``ctx.bot_config["skills"]`` so adapters can refresh their
+    closure cache from the same dict reference.
+    """
+
+    attached = list(ctx.bot_config.get("skills") or [])
+
+    # Listing (no args): show installed + available + not-installed builtins.
+    if not ctx.args:
+        from abyss.builtin_skills import list_builtin_skills
+        from abyss.skill import list_skills
+
+        installed_skills = list_skills()
+        installed_names = {skill["name"] for skill in installed_skills}
+        builtin_skills = list_builtin_skills()
+        not_installed_builtins = [
+            skill for skill in builtin_skills if skill["name"] not in installed_names
+        ]
+
+        if not installed_skills and not not_installed_builtins:
+            return CommandResult(text="\U0001f9e9 No skills available.", parse_mode=None)
+
+        builtin_names = {skill["name"] for skill in builtin_skills}
+        my_skills = set(attached)
+
+        my_attached: list[str] = []
+        available: list[str] = []
+        not_installed: list[str] = []
+        for skill in installed_skills:
+            type_display = "builtin" if skill["name"] in builtin_names else "custom"
+            if skill["name"] in my_skills:
+                my_attached.append(f"✅ `{skill['name']}` ({type_display})")
+            else:
+                available.append(f"➖ `{skill['name']}` ({type_display})")
+        for skill in not_installed_builtins:
+            not_installed.append(f"\U0001f4e6 `{skill['name']}` (builtin)")
+
+        lines = ["\U0001f9e9 *Used Skills:*\n"]
+        if my_attached:
+            lines.extend(my_attached)
+        else:
+            lines.append("No skills attached.")
+        if available:
+            lines.append("")
+            lines.append("\U0001f4cb *Available:*\n")
+            lines.extend(available)
+        if not_installed:
+            lines.append("")
+            lines.append("\U0001f4e6 *Not Installed:*\n")
+            lines.extend(not_installed)
+        lines.append("")
+        lines.append("`/skills attach <name>` | `/skills detach <name>`")
+        return CommandResult(text="\n".join(lines))
+
+    subcommand = ctx.args[0].lower()
+
+    if subcommand == "list":
+        if not attached:
+            return CommandResult(text="\U0001f9e9 No skills attached to this bot.", parse_mode=None)
+        skill_list = "\n".join(f"  - {name}" for name in attached)
+        return CommandResult(
+            text=f"\U0001f9e9 *Attached Skills:*\n```\n{skill_list}\n```",
+        )
+
+    if subcommand == "attach":
+        if len(ctx.args) < 2:
+            return CommandResult(text="Usage: `/skills attach <name>`", success=False)
+        from abyss.skill import attach_skill_to_bot, is_skill, skill_status
+
+        skill_name = ctx.args[1]
+        if not is_skill(skill_name):
+            return CommandResult(
+                text=f"Skill '{skill_name}' not found.", parse_mode=None, success=False
+            )
+        if skill_status(skill_name) == "inactive":
+            return CommandResult(
+                text=(
+                    f"Skill '{skill_name}' is inactive. "
+                    f"Run `abyss skills setup {skill_name}` first."
+                ),
+                success=False,
+            )
+        if skill_name in attached:
+            return CommandResult(
+                text=f"Skill '{skill_name}' is already attached.",
+                parse_mode=None,
+                success=False,
+            )
+        attach_skill_to_bot(ctx.bot_name, skill_name)
+        ctx.bot_config.setdefault("skills", [])
+        if skill_name not in ctx.bot_config["skills"]:
+            ctx.bot_config["skills"].append(skill_name)
+        return CommandResult(text=f"\U0001f9e9 Skill '{skill_name}' attached.", parse_mode=None)
+
+    if subcommand == "detach":
+        if len(ctx.args) < 2:
+            return CommandResult(text="Usage: `/skills detach <name>`", success=False)
+        from abyss.skill import detach_skill_from_bot
+
+        skill_name = ctx.args[1]
+        if skill_name not in attached:
+            return CommandResult(
+                text=f"Skill '{skill_name}' is not attached.",
+                parse_mode=None,
+                success=False,
+            )
+        detach_skill_from_bot(ctx.bot_name, skill_name)
+        if skill_name in ctx.bot_config.get("skills", []):
+            ctx.bot_config["skills"].remove(skill_name)
+        return CommandResult(text=f"\U0001f9e9 Skill '{skill_name}' detached.", parse_mode=None)
+
+    if subcommand == "import":
+        if len(ctx.args) < 2:
+            return CommandResult(text="Usage: `/skills import <github-url>`", success=False)
+        from abyss.skill import (
+            activate_skill,
+            attach_skill_to_bot,
+            check_skill_requirements,
+            import_skill_from_github,
+            parse_github_url,
+        )
+
+        github_url = ctx.args[1]
+        name_override = ctx.args[2] if len(ctx.args) > 2 else None
+        try:
+            directory = import_skill_from_github(github_url, name=name_override)
+            skill_name = directory.name
+            errors = check_skill_requirements(skill_name)
+            if not errors:
+                activate_skill(skill_name)
+        except ValueError as error:
+            return CommandResult(text=f"❌ Import failed: {error}", parse_mode=None, success=False)
+        except FileExistsError:
+            components = parse_github_url(github_url)
+            skill_name = name_override or components["repo"]
+
+        if skill_name not in attached:
+            attach_skill_to_bot(ctx.bot_name, skill_name)
+            ctx.bot_config.setdefault("skills", [])
+            if skill_name not in ctx.bot_config["skills"]:
+                ctx.bot_config["skills"].append(skill_name)
+
+        return CommandResult(
+            text=f"\U0001f9e9 Skill '{skill_name}' imported and attached.",
+            parse_mode=None,
+        )
+
+    return CommandResult(
+        text="Unknown subcommand. Use: list, attach, detach, import",
+        parse_mode=None,
+        success=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat — status / on / off (``run`` stays adapter-side for now)
+# ---------------------------------------------------------------------------
+
+
+async def cmd_heartbeat_status(ctx: CommandContext) -> CommandResult:
+    """Show heartbeat settings for this bot."""
+
+    from abyss.heartbeat import get_heartbeat_config
+
+    heartbeat_config = get_heartbeat_config(ctx.bot_name)
+    enabled = heartbeat_config.get("enabled", False)
+    interval = heartbeat_config.get("interval_minutes", 30)
+    active_hours = heartbeat_config.get("active_hours", {})
+    start = active_hours.get("start", "07:00")
+    end = active_hours.get("end", "23:00")
+    status_text = "on" if enabled else "off"
+    text = (
+        f"\U0001f493 *Heartbeat Status*\n\n"
+        f"Status: *{status_text}*\n"
+        f"Interval: {interval}m\n"
+        f"Active hours: {start} - {end}\n\n"
+        "`/heartbeat on` - Enable\n"
+        "`/heartbeat off` - Disable\n"
+        "`/heartbeat run` - Run now"
+    )
+    return CommandResult(text=text)
+
+
+async def cmd_heartbeat(ctx: CommandContext) -> CommandResult:
+    """Dispatch ``/heartbeat`` non-``run`` subcommands.
+
+    ``/heartbeat run`` requires a Telegram ``send_message`` callback to
+    deliver the heartbeat message, so the Telegram adapter keeps that
+    branch. Dashboards can call ``cmd_heartbeat`` for status/on/off
+    and surface a "not yet on dashboard" hint for ``run``.
+    """
+
+    from abyss.heartbeat import disable_heartbeat, enable_heartbeat
+
+    if not ctx.args:
+        return await cmd_heartbeat_status(ctx)
+
+    subcommand = ctx.args[0].lower()
+    if subcommand == "on":
+        if enable_heartbeat(ctx.bot_name):
+            return CommandResult(text="\U0001f493 Heartbeat enabled.", parse_mode=None)
+        return CommandResult(text="Failed to enable heartbeat.", parse_mode=None, success=False)
+    if subcommand == "off":
+        if disable_heartbeat(ctx.bot_name):
+            return CommandResult(text="\U0001f493 Heartbeat disabled.", parse_mode=None)
+        return CommandResult(text="Failed to disable heartbeat.", parse_mode=None, success=False)
+    if subcommand == "run":
+        # ``run`` is platform-specific (needs a per-platform messaging
+        # callback). The adapter handles it; this branch is a marker so
+        # the dashboard adapter can show a clear message.
+        return CommandResult(
+            text="Heartbeat run is not supported on this surface.",
+            parse_mode=None,
+            success=False,
+        )
+
+    return CommandResult(
+        text="Unknown subcommand. Use: on, off, run",
+        parse_mode=None,
+        success=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Compact — show targets + run + persist (Claude-heavy, no streaming hooks)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CompactPreview:
+    """Result of ``cmd_compact_preview``: a list of target files + a
+    human-friendly summary the adapter can show before kicking off the
+    long-running compaction."""
+
+    text: str
+    targets: list[Any]  # list[CompactTarget]
+
+
+async def cmd_compact_preview(ctx: CommandContext) -> CompactPreview:
+    """Quick pre-compact summary so adapters can warn the user that the
+    operation will take a while."""
+
+    from abyss.token_compact import collect_compact_targets
+
+    targets = collect_compact_targets(ctx.bot_name)
+    if not targets:
+        return CompactPreview(text="No compactable files found.", targets=[])
+
+    target_list = "\n".join(
+        f"  - {t.label} ({t.line_count} lines, ~{t.token_count:,} tokens)" for t in targets
+    )
+    text = f"\U0001f4e6 Found {len(targets)} file(s) to compact:\n{target_list}\n\nCompacting..."
+    return CompactPreview(text=text, targets=list(targets))
+
+
+async def cmd_compact_run(ctx: CommandContext) -> CommandResult:
+    """Execute the actual compaction (long-running Claude calls)."""
+
+    from abyss.skill import regenerate_bot_claude_md, update_session_claude_md
+    from abyss.token_compact import (
+        format_compact_report,
+        run_compact,
+        save_compact_results,
+    )
+
+    model = ctx.bot_config.get("model", DEFAULT_MODEL)
+    try:
+        results = await run_compact(ctx.bot_name, model=model)
+    except Exception as error:  # noqa: BLE001
+        return CommandResult(text=f"Compact failed: {error}", parse_mode=None, success=False)
+
+    report = format_compact_report(ctx.bot_name, results)
+    successful = [r for r in results if r.error is None]
+    if successful:
+        save_compact_results(results)
+        regenerate_bot_claude_md(ctx.bot_name)
+        update_session_claude_md(ctx.bot_path)
+        report = f"{report}\n\n✅ Compacted files saved."
+    else:
+        report = f"{report}\n\nNo files were successfully compacted."
+    return CommandResult(text=report, parse_mode=None)
 
 
 # ---------------------------------------------------------------------------

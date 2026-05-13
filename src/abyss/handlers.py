@@ -31,12 +31,9 @@ from abyss.config import (
     DEFAULT_STREAMING,
 )
 from abyss.group import (
-    bind_group,
     find_group_by_chat_id,
     get_my_role,
-    load_group_config,
     log_to_shared_conversation,
-    unbind_group,
 )
 from abyss.llm import LLMRequest, cached_backend, get_or_create
 from abyss.session import (
@@ -177,7 +174,6 @@ def should_handle_group_message(
 
     Returns True if this bot should process the message.
     """
-    from abyss.group import get_my_role
 
     my_role = get_my_role(group_config, bot_name)
     if my_role is None:
@@ -231,7 +227,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     command_timeout = bot_config.get("command_timeout", 300)
     current_model = bot_config.get("model", DEFAULT_MODEL)
     streaming_enabled = bot_config.get("streaming", DEFAULT_STREAMING)
-    attached_skills = bot_config.get("skills", [])
     bot_username = bot_config.get("telegram_username", "")
     pending_cron_edits: dict[int, str] = {}  # chat_id -> job_name
 
@@ -939,177 +934,16 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         await _send_command_result(update, result)
 
     async def skills_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /skills command - list, attach, or detach skills."""
-        nonlocal attached_skills
+        """Handle /skills command - list, attach, or detach skills.
+
+        ``cmd_skills`` mutates ``bot_config['skills']`` in place, so any
+        downstream code reading ``bot_config`` (Claude prompt building,
+        CLAUDE.md regen) picks up the change without a closure cache.
+        """
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            from abyss.builtin_skills import list_builtin_skills
-            from abyss.skill import list_skills
-
-            installed_skills = list_skills()
-            installed_names = {skill["name"] for skill in installed_skills}
-            builtin_skills = list_builtin_skills()
-            not_installed_builtins = [
-                skill for skill in builtin_skills if skill["name"] not in installed_names
-            ]
-
-            if not installed_skills and not not_installed_builtins:
-                await update.effective_message.reply_text("\U0001f9e9 No skills available.")
-                return
-
-            builtin_names = {skill["name"] for skill in builtin_skills}
-            my_skills = set(attached_skills) if attached_skills else set()
-
-            my_attached = []
-            available = []
-            not_installed = []
-            for skill in installed_skills:
-                type_display = "builtin" if skill["name"] in builtin_names else "custom"
-                if skill["name"] in my_skills:
-                    my_attached.append(f"\u2705 `{skill['name']}` ({type_display})")
-                else:
-                    available.append(f"\u2796 `{skill['name']}` ({type_display})")
-
-            for skill in not_installed_builtins:
-                not_installed.append(f"\U0001f4e6 `{skill['name']}` (builtin)")
-
-            lines = ["\U0001f9e9 *Used Skills:*\n"]
-            if my_attached:
-                lines.extend(my_attached)
-            else:
-                lines.append("No skills attached.")
-            if available:
-                lines.append("")
-                lines.append("\U0001f4cb *Available:*\n")
-                lines.extend(available)
-            if not_installed:
-                lines.append("")
-                lines.append("\U0001f4e6 *Not Installed:*\n")
-                lines.extend(not_installed)
-            lines.append("")
-            lines.append("`/skills attach <name>` | `/skills detach <name>`")
-
-            await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "list":
-            if not attached_skills:
-                await update.effective_message.reply_text(
-                    "\U0001f9e9 No skills attached to this bot."
-                )
-                return
-            skill_list = "\n".join(f"  - {s}" for s in attached_skills)
-            await update.effective_message.reply_text(
-                f"\U0001f9e9 *Attached Skills:*\n```\n{skill_list}\n```",
-                parse_mode="Markdown",
-            )
-
-        elif subcommand == "attach":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/skills attach <name>`", parse_mode="Markdown"
-                )
-                return
-
-            from abyss.skill import attach_skill_to_bot, is_skill, skill_status
-
-            skill_name = context.args[1]
-            if not is_skill(skill_name):
-                await update.effective_message.reply_text(f"Skill '{skill_name}' not found.")
-                return
-
-            status = skill_status(skill_name)
-            if status == "inactive":
-                await update.effective_message.reply_text(
-                    f"Skill '{skill_name}' is inactive. "
-                    f"Run `abyss skills setup {skill_name}` first.",
-                    parse_mode="Markdown",
-                )
-                return
-
-            if skill_name in attached_skills:
-                await update.effective_message.reply_text(
-                    f"Skill '{skill_name}' is already attached."
-                )
-                return
-
-            attach_skill_to_bot(bot_name, skill_name)
-            bot_config.setdefault("skills", [])
-            if skill_name not in bot_config["skills"]:
-                bot_config["skills"].append(skill_name)
-            attached_skills = bot_config["skills"]
-            await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' attached.")
-
-        elif subcommand == "detach":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/skills detach <name>`", parse_mode="Markdown"
-                )
-                return
-
-            from abyss.skill import detach_skill_from_bot
-
-            skill_name = context.args[1]
-            if skill_name not in attached_skills:
-                await update.effective_message.reply_text(f"Skill '{skill_name}' is not attached.")
-                return
-
-            detach_skill_from_bot(bot_name, skill_name)
-            if skill_name in bot_config.get("skills", []):
-                bot_config["skills"].remove(skill_name)
-            attached_skills = bot_config.get("skills", [])
-            await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' detached.")
-
-        elif subcommand == "import":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/skills import <github-url>`", parse_mode="Markdown"
-                )
-                return
-
-            from abyss.skill import (
-                activate_skill,
-                attach_skill_to_bot,
-                check_skill_requirements,
-                import_skill_from_github,
-                parse_github_url,
-            )
-
-            github_url = context.args[1]
-            name_override = context.args[2] if len(context.args) > 2 else None
-
-            try:
-                directory = import_skill_from_github(github_url, name=name_override)
-                skill_name = directory.name
-                errors = check_skill_requirements(skill_name)
-                if not errors:
-                    activate_skill(skill_name)
-            except ValueError as error:
-                await update.effective_message.reply_text(f"\u274c Import failed: {error}")
-                return
-            except FileExistsError:
-                components = parse_github_url(github_url)
-                skill_name = name_override or components["repo"]
-
-            if skill_name not in attached_skills:
-                attach_skill_to_bot(bot_name, skill_name)
-                bot_config.setdefault("skills", [])
-                if skill_name not in bot_config["skills"]:
-                    bot_config["skills"].append(skill_name)
-                attached_skills = bot_config["skills"]
-
-            await update.effective_message.reply_text(
-                f"\U0001f9e9 Skill '{skill_name}' imported and attached."
-            )
-
-        else:
-            await update.effective_message.reply_text(
-                "Unknown subcommand. Use: list, attach, detach, import",
-            )
+        result = await commands.cmd_skills(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def cron_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /cron command - list or run cron jobs."""
@@ -1350,52 +1184,18 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             )
 
     async def heartbeat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /heartbeat command - manage heartbeat settings."""
+        """Handle /heartbeat command - manage heartbeat settings.
+
+        ``status``/``on``/``off`` are delegated to ``commands.cmd_heartbeat``.
+        ``run`` requires a Telegram-specific ``send_message`` callback so
+        it stays in this adapter.
+        """
         if not await check_authorization(update):
             return
 
-        from abyss.heartbeat import (
-            disable_heartbeat,
-            enable_heartbeat,
-            execute_heartbeat,
-            get_heartbeat_config,
-        )
+        if context.args and context.args[0].lower() == "run":
+            from abyss.heartbeat import execute_heartbeat
 
-        if not context.args:
-            heartbeat_config = get_heartbeat_config(bot_name)
-            enabled = heartbeat_config.get("enabled", False)
-            interval = heartbeat_config.get("interval_minutes", 30)
-            active_hours = heartbeat_config.get("active_hours", {})
-            start = active_hours.get("start", "07:00")
-            end = active_hours.get("end", "23:00")
-            status_text = "on" if enabled else "off"
-            text = (
-                f"\U0001f493 *Heartbeat Status*\n\n"
-                f"Status: *{status_text}*\n"
-                f"Interval: {interval}m\n"
-                f"Active hours: {start} - {end}\n\n"
-                "`/heartbeat on` - Enable\n"
-                "`/heartbeat off` - Disable\n"
-                "`/heartbeat run` - Run now"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "on":
-            if enable_heartbeat(bot_name):
-                await update.effective_message.reply_text("\U0001f493 Heartbeat enabled.")
-            else:
-                await update.effective_message.reply_text("Failed to enable heartbeat.")
-
-        elif subcommand == "off":
-            if disable_heartbeat(bot_name):
-                await update.effective_message.reply_text("\U0001f493 Heartbeat disabled.")
-            else:
-                await update.effective_message.reply_text("Failed to disable heartbeat.")
-
-        elif subcommand == "run":
             await update.effective_message.reply_text("\U0001f493 Running heartbeat check...")
 
             async def send_typing_periodically() -> None:
@@ -1407,7 +1207,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     pass
 
             typing_task = asyncio.create_task(send_typing_periodically())
-
             try:
                 await execute_heartbeat(
                     bot_name=bot_name,
@@ -1419,35 +1218,26 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(f"Heartbeat failed: {error}")
             finally:
                 typing_task.cancel()
+            return
 
-        else:
-            await update.effective_message.reply_text(
-                "Unknown subcommand. Use: on, off, run",
-            )
+        result = await commands.cmd_heartbeat(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def compact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /compact command — compress MD files to save tokens."""
+        """Handle /compact command — compress MD files to save tokens.
+
+        Pre-message + typing indicator stay here; the actual collect →
+        run → save → regen pipeline lives in ``commands.cmd_compact_*``.
+        """
         if not await check_authorization(update):
             return
 
-        from abyss.token_compact import (
-            collect_compact_targets,
-            format_compact_report,
-            run_compact,
-            save_compact_results,
-        )
-
-        targets = collect_compact_targets(bot_name)
-        if not targets:
-            await update.effective_message.reply_text("No compactable files found.")
+        ctx = _make_context(update, context.args)
+        preview = await commands.cmd_compact_preview(ctx)
+        if not preview.targets:
+            await update.effective_message.reply_text(preview.text)
             return
-
-        target_list = "\n".join(
-            f"  - {t.label} ({t.line_count} lines, ~{t.token_count:,} tokens)" for t in targets
-        )
-        await update.effective_message.reply_text(
-            f"\U0001f4e6 Found {len(targets)} file(s) to compact:\n{target_list}\n\nCompacting..."
-        )
+        await update.effective_message.reply_text(preview.text)
 
         async def send_typing_periodically() -> None:
             try:
@@ -1458,93 +1248,26 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 pass
 
         typing_task = asyncio.create_task(send_typing_periodically())
-
         try:
-            results = await run_compact(bot_name, model=current_model)
-            report = format_compact_report(bot_name, results)
-
-            for chunk in split_message(report):
+            result = await commands.cmd_compact_run(ctx)
+            for chunk in split_message(result.text):
                 await update.effective_message.reply_text(chunk)
-
-            successful = [r for r in results if r.error is None]
-            if successful:
-                save_compact_results(results)
-
-                from abyss.skill import regenerate_bot_claude_md, update_session_claude_md
-
-                regenerate_bot_claude_md(bot_name)
-                update_session_claude_md(bot_path)
-                await update.effective_message.reply_text("\u2705 Compacted files saved.")
-            else:
-                await update.effective_message.reply_text("No files were successfully compacted.")
-        except Exception as error:
-            await update.effective_message.reply_text(f"Compact failed: {error}")
         finally:
             typing_task.cancel()
 
     async def bind_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /bind command — bind a group to a Telegram chat.
-
-        Only the orchestrator bot of the specified group processes this command.
-        Other bots in the group silently ignore it.
-        """
+        """Handle /bind command — bind a group to a Telegram chat."""
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            await update.effective_message.reply_text(
-                "Usage: `/bind <group_name>`", parse_mode="Markdown"
-            )
-            return
-
-        group_name = context.args[0]
-        group_config = load_group_config(group_name)
-
-        if group_config is None:
-            await update.effective_message.reply_text(f"Group '{group_name}' not found.")
-            return
-
-        my_role = get_my_role(group_config, bot_name)
-        if my_role != "orchestrator":
-            # Not the orchestrator — silently ignore
-            return
-
-        chat_id = update.effective_chat.id
-        try:
-            bind_group(group_name, chat_id)
-        except ValueError as error:
-            await update.effective_message.reply_text(f"Bind failed: {error}")
-            return
-
-        # Build member list display
-        members_display = ", ".join(group_config.get("members", []))
-        await update.effective_message.reply_text(
-            f"Group '{group_name}' activated.\nOrchestrator: {bot_name}\nMembers: {members_display}"
-        )
+        result = await commands.cmd_bind(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def unbind_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /unbind command — remove group binding from this chat.
-
-        Only the orchestrator of the bound group processes this command.
-        """
+        """Handle /unbind command — remove group binding from this chat."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        group_config = find_group_by_chat_id(chat_id)
-
-        if group_config is None:
-            await update.effective_message.reply_text("No group is bound to this chat.")
-            return
-
-        my_role = get_my_role(group_config, bot_name)
-        if my_role != "orchestrator":
-            # Not the orchestrator — silently ignore
-            return
-
-        group_name = group_config["name"]
-        unbind_group(group_name)
-        await update.effective_message.reply_text(f"Group '{group_name}' unbound from this chat.")
+        result = await commands.cmd_unbind(_make_context(update))
+        await _send_command_result(update, result)
 
     handlers = [
         CommandHandler("start", start_handler),

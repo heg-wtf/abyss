@@ -386,6 +386,7 @@ async def test_skills_handler_list_attached_empty(bot_path, bot_config, mock_upd
 @pytest.mark.asyncio
 async def test_skills_handler_attach(bot_path, bot_config, mock_update):
     """Skills handler attach adds a skill."""
+    bot_config["skills"] = []
     handlers = make_handlers("test-bot", bot_path, bot_config)
     skills_handler = handlers[12]
 
@@ -397,10 +398,10 @@ async def test_skills_handler_attach(bot_path, bot_config, mock_update):
         patch("abyss.skill.skill_status", return_value="active"),
         patch("abyss.skill.attach_skill_to_bot") as mock_attach,
     ):
-        bot_config["skills"] = ["test-skill"]
         await skills_handler.callback(mock_update, mock_context)
         mock_attach.assert_called_once_with("test-bot", "test-skill")
 
+    assert "test-skill" in bot_config["skills"]
     call_text = mock_update.message.reply_text.call_args[0][0]
     assert "attached" in call_text
 
@@ -432,10 +433,10 @@ async def test_skills_handler_detach(bot_path, bot_config, mock_update):
     mock_context.args = ["detach", "test-skill"]
 
     with patch("abyss.skill.detach_skill_from_bot") as mock_detach:
-        bot_config["skills"] = []
         await skills_handler.callback(mock_update, mock_context)
         mock_detach.assert_called_once_with("test-bot", "test-skill")
 
+    assert "test-skill" not in bot_config["skills"]
     call_text = mock_update.message.reply_text.call_args[0][0]
     assert "detached" in call_text
 
