@@ -37,6 +37,10 @@ Endpoints
 ``DELETE /chat/sessions/<bot>/<session_id>``
     Removes the session directory.
 
+``POST /chat/sessions/<bot>/<session_id>/rename``
+    Body: ``{"name": str}``. Stores a user-facing name in
+    ``<session_dir>/.session_meta.json``. Empty name clears the field.
+
 ``GET /chat/sessions/<bot>/<session_id>/messages``
     Returns ``{"messages": [{"role", "content", "timestamp"}, ...]}``.
 
@@ -360,6 +364,56 @@ def _bot_display_name(bot_name: str) -> str:
     return cfg.get("display_name") or cfg.get("telegram_botname") or bot_name
 
 
+# ---------------------------------------------------------------------------
+# Per-session user metadata (custom name, …)
+# ---------------------------------------------------------------------------
+
+_SESSION_META_FILENAME = ".session_meta.json"
+MAX_CUSTOM_NAME_LENGTH = 64
+
+
+def _session_meta_path(session_dir: Path) -> Path:
+    return session_dir / _SESSION_META_FILENAME
+
+
+def _load_session_meta(session_dir: Path) -> dict[str, Any]:
+    """Read the user-controlled per-session metadata.
+
+    Currently only stores ``custom_name``; the file is small and lives
+    inside the session directory so deleting the session also removes
+    the name automatically.
+    """
+    meta_path = _session_meta_path(session_dir)
+    if not meta_path.exists():
+        return {}
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_session_meta(session_dir: Path, meta: dict[str, Any]) -> None:
+    """Persist user metadata atomically (write tmp + rename)."""
+    meta_path = _session_meta_path(session_dir)
+    tmp = meta_path.with_suffix(".json.tmp")
+    payload = json.dumps(meta, ensure_ascii=False, indent=2)
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(meta_path)
+
+
+def _sanitise_custom_name(raw: str) -> str:
+    """Trim whitespace + strip control characters; cap length.
+
+    Empty result means "remove the custom name". The caller decides
+    whether to delete the field or reject the request.
+    """
+    cleaned = "".join(ch for ch in raw if ch == " " or ch.isprintable())
+    cleaned = cleaned.strip()
+    if len(cleaned) > MAX_CUSTOM_NAME_LENGTH:
+        cleaned = cleaned[:MAX_CUSTOM_NAME_LENGTH].rstrip()
+    return cleaned
+
+
 def _session_metadata(
     bot_name: str,
     session_dir: Path,
@@ -387,12 +441,14 @@ def _session_metadata(
     except OSError:
         mtime = 0.0
 
+    meta = _load_session_meta(session_dir)
     return {
         "id": session_dir.name,
         "bot": bot_name,
         "bot_display_name": bot_display_name or _bot_display_name(bot_name),
         "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
         "preview": preview,
+        "custom_name": meta.get("custom_name") or None,
     }
 
 
@@ -442,6 +498,10 @@ class ChatServer:
         router.add_get("/chat/sessions", self._handle_list_sessions)
         router.add_post("/chat/sessions", self._handle_create_session)
         router.add_delete("/chat/sessions/{bot}/{session_id}", self._handle_delete_session)
+        router.add_post(
+            "/chat/sessions/{bot}/{session_id}/rename",
+            self._handle_rename_session,
+        )
         router.add_get("/chat/sessions/{bot}/{session_id}/messages", self._handle_get_messages)
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
@@ -557,6 +617,7 @@ class ChatServer:
                 "bot_display_name": _bot_display_name(bot_name),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "preview": "",
+                "custom_name": None,
             }
         )
 
@@ -569,6 +630,45 @@ class ChatServer:
         with suppress(Exception):
             shutil.rmtree(session_dir)
         return web.json_response({"deleted": True})
+
+    async def _handle_rename_session(self, request: web.Request) -> web.Response:
+        """Set or clear a session's user-facing ``custom_name``.
+
+        Body: ``{"name": str}``. An empty / whitespace-only ``name``
+        clears the field so the UI falls back to the bot display name.
+        """
+        bot_name = request.match_info["bot"]
+        session_id = request.match_info["session_id"]
+        session_dir = _resolve_session_dir(bot_name, session_id)
+        if not session_dir.exists():
+            return web.json_response({"error": "session not found"}, status=404)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        raw_name = body.get("name")
+        if not isinstance(raw_name, str):
+            return web.json_response(
+                {"error": "name must be a string"}, status=400
+            )
+
+        cleaned = _sanitise_custom_name(raw_name)
+        meta = _load_session_meta(session_dir)
+        if cleaned:
+            meta["custom_name"] = cleaned
+        else:
+            meta.pop("custom_name", None)
+        _save_session_meta(session_dir, meta)
+
+        return web.json_response(
+            {
+                "id": session_id,
+                "bot": bot_name,
+                "custom_name": meta.get("custom_name") or None,
+            }
+        )
 
     async def _handle_get_messages(self, request: web.Request) -> web.Response:
         bot_name = request.match_info["bot"]

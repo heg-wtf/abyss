@@ -1121,3 +1121,112 @@ async def test_slash_bind_unbind_still_telegram_only(client, patch_backend):
         events = await _parse_sse_events(sse)
         result = next(e for e in events if e["type"] == "command_result")
         assert "Telegram" in result["text"]
+
+
+# ---------------------------------------------------------------------------
+# Session rename (Phase 3 — custom_name)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rename_session_sets_and_persists(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    body = await create.json()
+    assert body["custom_name"] is None
+    sid = body["id"]
+
+    rename = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "경제질문"},
+    )
+    assert rename.status == 200
+    rename_body = await rename.json()
+    assert rename_body["custom_name"] == "경제질문"
+
+    # Subsequent list reflects the new name.
+    sessions = await client.get("/chat/sessions?bot=alpha")
+    payload = await sessions.json()
+    target = next(s for s in payload["sessions"] if s["id"] == sid)
+    assert target["custom_name"] == "경제질문"
+
+
+@pytest.mark.asyncio
+async def test_rename_session_clears_with_empty_name(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "first"},
+    )
+    cleared = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "   "},
+    )
+    assert (await cleared.json())["custom_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_rename_session_strips_control_chars(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    rename = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "  hello\x00world\n  "},
+    )
+    body = await rename.json()
+    assert body["custom_name"] == "helloworld"
+
+
+@pytest.mark.asyncio
+async def test_rename_session_caps_length(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    long_name = "x" * 200
+    body = await (
+        await client.post(
+            f"/chat/sessions/alpha/{sid}/rename",
+            json={"name": long_name},
+        )
+    ).json()
+    # Cap from chat_server.MAX_CUSTOM_NAME_LENGTH.
+    from abyss.chat_server import MAX_CUSTOM_NAME_LENGTH
+
+    assert len(body["custom_name"]) == MAX_CUSTOM_NAME_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_rename_session_not_found(client):
+    resp = await client.post(
+        "/chat/sessions/alpha/chat_web_deadbeef/rename",
+        json={"name": "x"},
+    )
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_rename_session_rejects_non_string(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    resp = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": 42},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_rename_metadata_survives_session_listing(client, abyss_home):
+    """Custom name persists in the session directory and is restored on
+    fresh server reads of /chat/sessions."""
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "starred"},
+    )
+    # Confirm the file exists on disk where we expect.
+    meta_file = abyss_home / "bots" / "alpha" / "sessions" / sid / ".session_meta.json"
+    assert meta_file.exists()
+    import json as _json
+
+    assert _json.loads(meta_file.read_text())["custom_name"] == "starred"

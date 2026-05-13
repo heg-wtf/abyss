@@ -23,6 +23,12 @@ export interface ChatSession {
   bot_display_name?: string;
   updated_at: string;
   preview: string;
+  /**
+   * Optional user-chosen label (e.g. "경제질문"). When absent the UI
+   * falls back to ``bot_display_name``. Stored in
+   * ``<session_dir>/.session_meta.json`` on the backend.
+   */
+  custom_name?: string | null;
 }
 
 export interface ChatAttachmentRef {
@@ -136,6 +142,20 @@ export async function deleteChatSession(
   await jsonFetch(`/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
   });
+}
+
+export async function renameChatSession(
+  bot: string,
+  sessionId: string,
+  name: string
+): Promise<{ id: string; bot: string; custom_name: string | null }> {
+  return jsonFetch<{ id: string; bot: string; custom_name: string | null }>(
+    `/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}/rename`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }
+  );
 }
 
 export async function getChatMessages(

@@ -55,9 +55,30 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/function SidebarImpl/);
   });
 
-  it("placeholder screen calls out Phase 2 status and links back to desktop", () => {
+  it("mobile sessions screen wires bot picker, rename, and delete flows", () => {
     const source = read("components/mobile/mobile-sessions-screen.tsx");
-    expect(source).toMatch(/Phase 2 skeleton/);
-    expect(source).toMatch(/href="\/chat"/);
+    // Bot picker uses base-ui Menu (matches the desktop chat-session-list).
+    expect(source).toMatch(/Menu\.Root/);
+    expect(source).toMatch(/createChatSession/);
+    // Custom name renames go through the new API helper.
+    expect(source).toMatch(/renameChatSession/);
+    expect(source).toMatch(/deleteChatSession/);
+    // Long-press contract: touchstart + touchend cancel.
+    expect(source).toMatch(/useLongPress/);
+    expect(source).toMatch(/onTouchStart/);
+    expect(source).toMatch(/onTouchEnd/);
+    // Custom name takes priority over bot display name.
+    expect(source).toMatch(/session\.custom_name/);
+  });
+
+  it("api helper exposes renameChatSession and proxy route exists", () => {
+    const api = read("lib/abyss-api.ts");
+    expect(api).toMatch(/renameChatSession/);
+    expect(api).toMatch(/custom_name/);
+    const proxy = read(
+      "app/api/chat/sessions/[bot]/[id]/rename/route.ts"
+    );
+    expect(proxy).toMatch(/export async function POST/);
+    expect(proxy).toMatch(/renameChatSession\(bot, id/);
   });
 });
