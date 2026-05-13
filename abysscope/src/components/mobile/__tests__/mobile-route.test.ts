@@ -124,4 +124,45 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/type: "command_result"/);
     expect(source).toMatch(/file\?: \{ name: string; path: string; url: string \}/);
   });
+
+  it("chat screen renders assistant replies through ReactMarkdown", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Markdown rendering shares the desktop `prose prose-sm`
+    // typography setup so headings / lists / links / code blocks
+    // render the same on both surfaces.
+    expect(source).toMatch(/import ReactMarkdown from "react-markdown"/);
+    expect(source).toMatch(/function MarkdownBody/);
+    expect(source).toMatch(/prose prose-sm/);
+    // User bubbles stay as plain pre-wrap text — only the assistant
+    // side parses markdown.
+    expect(source).toMatch(/isUser \? \(\s*<div className="whitespace-pre-wrap">/);
+  });
+
+  it("chat screen hides the textarea scrollbar across browser engines", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    expect(source).toMatch(/\[&::-webkit-scrollbar\]:hidden/);
+    expect(source).toMatch(/scrollbarWidth: "none"/);
+    expect(source).toMatch(/msOverflowStyle: "none"/);
+  });
+
+  it("chat screen jumps to the latest message on first paint", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Long transcripts should not smooth-scroll from the top down on
+    // entry. First paint uses ``instant`` so the user lands on the
+    // newest reply immediately; subsequent updates stay smooth.
+    expect(source).toMatch(/firstScrollRef/);
+    expect(source).toMatch(/behavior: "instant"/);
+    expect(source).toMatch(/useLayoutEffect/);
+  });
+
+  it("workspace sheet defers its chrome to WorkspaceTree's own header", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // WorkspaceTree already renders a header with Workspace title +
+    // Finder + Refresh + Close buttons. Letting the Dialog render its
+    // own header / close button would surface two titles and two X
+    // buttons (the bug the user reported). We keep the title in
+    // sr-only form for a11y and disable the Dialog's built-in close.
+    expect(source).toMatch(/showCloseButton=\{false\}/);
+    expect(source).toMatch(/DialogTitle className="sr-only">Workspace/);
+  });
 });

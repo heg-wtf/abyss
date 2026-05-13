@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 import {
   ArrowUp,
   Folder,
@@ -20,6 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+// Note: DialogHeader is still used by the slash command + bot picker
+// flows below; the workspace sheet drops it because WorkspaceTree
+// provides its own header.
 import { WorkspaceTree } from "@/components/chat/workspace-tree";
 import {
   ALLOWED_UPLOAD_MIME_TYPES,
@@ -106,9 +110,26 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   const stream = useMultiSessionChatStream();
   const activeStream = getSessionStream(stream.streams, session.id);
 
-  // Auto-scroll to bottom on new messages / streaming chunks.
-  React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Auto-scroll to bottom. On first paint (entering a chat with an
+  // existing transcript) jump instantly so the user lands on the most
+  // recent message instead of watching a long smooth-scroll animation
+  // crawl through history. Subsequent updates (new messages / stream
+  // chunks) stay smooth.
+  const firstScrollRef = React.useRef(true);
+  React.useLayoutEffect(() => {
+    if (!messagesEndRef.current) return;
+    if (firstScrollRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: "instant" as ScrollBehavior,
+        block: "end",
+      });
+      firstScrollRef.current = false;
+      return;
+    }
+    messagesEndRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
   }, [messages, activeStream.text, activeStream.streaming]);
 
   // Auto-grow textarea up to a sensible cap so the input bar does not
@@ -318,7 +339,9 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           {activeStream.streaming && (
             <li className="flex justify-start">
               <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-2 text-sm">
-                {activeStream.text || (
+                {activeStream.text ? (
+                  <MarkdownBody content={activeStream.text} />
+                ) : (
                   <span className="text-muted-foreground">…</span>
                 )}
               </div>
@@ -389,8 +412,12 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             onKeyDown={handleKeyDown}
             placeholder="메시지 작성…"
             rows={1}
-            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            style={{ maxHeight: "160px" }}
+            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden"
+            style={{
+              maxHeight: "160px",
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+            }}
           />
           {hasText || pending.some((p) => p.uploaded) ? (
             <button
@@ -416,18 +443,24 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         </div>
       </footer>
 
-      {/* Workspace sheet */}
+      {/* Workspace sheet. ``WorkspaceTree`` already renders its own
+          header (title + Finder / Refresh / Close), so we strip the
+          Dialog's default chrome — no DialogHeader, no built-in close
+          X — to avoid a duplicated "Workspace" title and a second close
+          button next to WorkspaceTree's own. ``DialogTitle`` stays in
+          sr-only form so screen readers still announce the sheet. */}
       <Dialog
         open={workspaceOpen}
         onOpenChange={(open) => setWorkspaceOpen(open)}
       >
-        <DialogContent className="h-[90vh] max-w-md p-0">
-          <DialogHeader className="border-b px-4 py-3">
-            <DialogTitle>Workspace</DialogTitle>
-            <DialogDescription className="text-xs">
-              {session.bot} · {session.id}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent
+          className="h-[90vh] max-w-md overflow-hidden p-0"
+          showCloseButton={false}
+        >
+          <DialogTitle className="sr-only">Workspace</DialogTitle>
+          <DialogDescription className="sr-only">
+            Files for {session.bot} session {session.id}
+          </DialogDescription>
           <div className="h-full overflow-hidden">
             <WorkspaceTree
               bot={session.bot}
@@ -481,13 +514,17 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
   return (
     <li className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
+        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground"
         }`}
       >
-        {message.content}
+        {isUser ? (
+          <div className="whitespace-pre-wrap">{message.content}</div>
+        ) : (
+          <MarkdownBody content={message.content} />
+        )}
         {message.attachments?.length ? (
           <div className="mt-2 flex flex-wrap gap-2">
             {message.attachments.map((att) => (
@@ -508,6 +545,22 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Assistant messages may contain GitHub-flavored markdown (headings,
+ * fenced code, lists, links). We share the desktop chat's
+ * ``prose prose-sm`` tailwind-typography setup so the typography
+ * looks the same on both surfaces. ``break-words`` +
+ * ``[overflow-wrap:anywhere]`` keep long URLs / Korean text from
+ * blowing past the bubble width on narrow phones.
+ */
+function MarkdownBody({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert min-w-0 max-w-none break-words [overflow-wrap:anywhere] prose-pre:my-2 prose-pre:rounded-md prose-pre:bg-background/40 prose-pre:p-2 prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
+      <ReactMarkdown>{content || ""}</ReactMarkdown>
+    </div>
   );
 }
 
