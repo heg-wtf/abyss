@@ -17,7 +17,20 @@ interface BotSummary {
 
 const STORAGE_KEY = "abysscope.sidebar.collapsed";
 
+/**
+ * Public entry point. Skips rendering on the `/mobile` route tree so
+ * the mobile layout owns the full viewport. Wrapping the conditional
+ * outside `SidebarImpl` keeps the hooks-rules invariant intact.
+ */
 export function Sidebar() {
+  const pathname = usePathname();
+  if (pathname.startsWith("/mobile")) {
+    return null;
+  }
+  return <SidebarImpl />;
+}
+
+function SidebarImpl() {
   const pathname = usePathname();
   const [bots, setBots] = useState<BotSummary[]>([]);
   const [botsOpen, setBotsOpen] = useState(true);
