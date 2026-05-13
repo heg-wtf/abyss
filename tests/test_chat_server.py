@@ -831,3 +831,167 @@ async def test_speak_streams_audio(client, server_instance, monkeypatch):
     assert "audio/mpeg" in resp.headers["Content-Type"]
     body = await resp.read()
     assert len(body) > 0
+
+
+# ---------------------------------------------------------------------------
+# Slash command routing (Phase 1b)
+# ---------------------------------------------------------------------------
+
+
+async def _parse_sse_events(sse_response) -> list[dict]:
+    """Collect SSE ``data: <json>`` events from a streamed response."""
+
+    raw = b""
+    async for chunk in sse_response.content.iter_any():
+        raw += chunk
+    events: list[dict] = []
+    for line in raw.split(b"\n"):
+        if line.startswith(b"data: "):
+            events.append(json.loads(line[len(b"data: ") :].decode("utf-8")))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_list_commands_endpoint(client):
+    resp = await client.get("/chat/commands")
+    assert resp.status == 200
+    body = await resp.json()
+    names = [cmd["name"] for cmd in body["commands"]]
+    assert "help" in names
+    assert "status" in names
+    assert "cron" in names
+    # Each command has description + usage keys.
+    for cmd in body["commands"]:
+        assert "description" in cmd
+        assert "usage" in cmd
+
+
+@pytest.mark.asyncio
+async def test_slash_help_returns_command_list(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/help"},
+    )
+    events = await _parse_sse_events(sse)
+    result_event = next(e for e in events if e["type"] == "command_result")
+    assert result_event["command"] == "help"
+    assert "/start" in result_event["text"]
+    assert any(e["type"] == "done" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_slash_status_uses_dashboard_session(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/status"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert sid in result["text"]
+    assert "alpha" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_files_lists_workspace(client, abyss_home, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    workspace = abyss_home / "bots" / "alpha" / "sessions" / sid / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "report.md").write_text("hello")
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/files"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "report.md" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_unknown_returns_error(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/banana"},
+    )
+    events = await _parse_sse_events(sse)
+    assert any(e["type"] == "error" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_slash_unextracted_command_falls_back(client, patch_backend):
+    """/cron and friends are not yet on the dashboard — return a hint."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "not yet available" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_send_returns_file_metadata(client, abyss_home, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    workspace = abyss_home / "bots" / "alpha" / "sessions" / sid / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    target = workspace / "out.txt"
+    target.write_text("payload")
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/send out.txt"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "file" in result
+    assert result["file"]["name"] == "out.txt"
+    assert result["file"]["url"].endswith("/out.txt")
+
+
+@pytest.mark.asyncio
+async def test_slash_does_not_log_to_conversation(client, abyss_home, patch_backend):
+    """Slash command replies must not pollute the conversation log."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/help"},
+    )
+    # Drain.
+    async for _ in sse.content.iter_any():
+        pass
+
+    msgs = await client.get(f"/chat/sessions/alpha/{sid}/messages")
+    assert msgs.status == 200
+    body = await msgs.json()
+    # No user/assistant pair recorded for /help.
+    assert body["messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_regular_message_still_streams(client, abyss_home, patch_backend):
+    """Ensure the slash branch doesn't break ordinary chat flow."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "hello"},
+    )
+    events = await _parse_sse_events(sse)
+    assert any(e["type"] == "chunk" for e in events)
+    assert any(e["type"] == "done" for e in events)

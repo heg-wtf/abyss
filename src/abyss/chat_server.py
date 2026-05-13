@@ -12,6 +12,9 @@ Endpoints
 ``POST /chat``
     Body: ``{"bot": str, "session_id": str, "message": str}``. Returns
     ``text/event-stream`` with ``chunk``/``done``/``error`` events.
+    Messages starting with ``/`` are routed through ``abyss.commands``
+    instead of the LLM and emit a single ``command_result`` SSE event
+    followed by ``done`` — see ``/chat/commands`` for the catalog.
 
 ``POST /chat/cancel``
     Body: ``{"bot": str, "session_id": str}``. Cancels the in-flight backend
@@ -19,6 +22,10 @@ Endpoints
 
 ``GET /chat/bots``
     Returns ``{"bots": [{"name", "display_name", "type"}, ...]}``.
+
+``GET /chat/commands``
+    Returns ``{"commands": [{"name", "description", "usage"}, ...]}``
+    — the slash-command catalog for autocomplete UIs.
 
 ``GET /chat/sessions?bot=<name>``
     Returns ``{"sessions": [{"id", "bot", "updated_at", "preview"}, ...]}``
@@ -62,7 +69,13 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 
+from abyss import commands
 from abyss.chat_core import process_chat_message
+from abyss.claude_runner import (
+    cancel_process,
+    cancel_sdk_session,
+    is_process_running,
+)
 from abyss.config import (
     abyss_home,
     bot_directory,
@@ -70,7 +83,7 @@ from abyss.config import (
     load_bot_config,
     load_config,
 )
-from abyss.llm import get_or_create
+from abyss.llm import cached_backend, get_or_create
 from abyss.session import (
     WEB_SESSION_PREFIX,
     collect_web_session_ids,
@@ -425,6 +438,7 @@ class ChatServer:
         router.add_post("/chat", self._handle_chat)
         router.add_post("/chat/cancel", self._handle_cancel)
         router.add_get("/chat/bots", self._handle_list_bots)
+        router.add_get("/chat/commands", self._handle_list_commands)
         router.add_get("/chat/sessions", self._handle_list_sessions)
         router.add_post("/chat/sessions", self._handle_create_session)
         router.add_delete("/chat/sessions/{bot}/{session_id}", self._handle_delete_session)
@@ -622,6 +636,17 @@ class ChatServer:
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "workspace").mkdir(exist_ok=True)
 
+        # Slash commands bypass the LLM entirely.
+        if message.startswith("/") and not raw_attachments:
+            return await self._handle_slash_command(
+                request=request,
+                bot_name=bot_name,
+                bot_path=bot_path,
+                bot_config=bot_config,
+                session_id=session_id,
+                message=message,
+            )
+
         try:
             attachment_paths = self._resolve_attachments(session_dir, raw_attachments)
         except web.HTTPException as exc:
@@ -670,6 +695,194 @@ class ChatServer:
             with suppress(Exception):
                 await _sse_write(sse, {"type": "error", "message": str(error)})
         return sse
+
+    # ------------------------------------------------------------------
+    # Slash commands
+    # ------------------------------------------------------------------
+
+    async def _handle_list_commands(self, _request: web.Request) -> web.Response:
+        """Expose the slash command catalog for dashboard autocomplete."""
+
+        return web.json_response(
+            {
+                "commands": [
+                    {
+                        "name": spec.name,
+                        "description": spec.description,
+                        "usage": spec.usage,
+                    }
+                    for spec in commands.COMMAND_CATALOG
+                ]
+            }
+        )
+
+    async def _cancel_for_dashboard(self, target_bot: str, session_key: str) -> bool:
+        """Cancel primitive shared by ``cmd_cancel`` and ``/chat/cancel``.
+
+        Mirrors the Telegram adapter: backend.cancel → SDK session cancel
+        → subprocess cancel, returning ``True`` when any path succeeds.
+        """
+
+        backend = cached_backend(target_bot)
+        if backend is not None and await backend.cancel(session_key):
+            return True
+        if await cancel_sdk_session(session_key):
+            return True
+        if is_process_running(session_key) and cancel_process(session_key):
+            return True
+        return False
+
+    async def _handle_slash_command(
+        self,
+        *,
+        request: web.Request,
+        bot_name: str,
+        bot_path: Path,
+        bot_config: dict[str, Any],
+        session_id: str,
+        message: str,
+    ) -> web.StreamResponse:
+        """Dispatch ``/<name> <args...>`` to ``abyss.commands``.
+
+        The result is streamed back as a single SSE pair (``command_result``
+        + ``done``) so the dashboard UI handles slash replies uniformly
+        with regular streaming replies.
+        """
+
+        parts = message.split(maxsplit=1)
+        command_name = parts[0][1:].lower()  # strip leading '/'
+        args = parts[1].split() if len(parts) > 1 else []
+
+        sse = web.StreamResponse(
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
+        await sse.prepare(request)
+
+        ctx = commands.CommandContext(
+            bot_name=bot_name,
+            bot_path=bot_path,
+            bot_config=bot_config,
+            chat_id=session_id,
+            args=args,
+        )
+
+        try:
+            text, file_info = await self._run_dashboard_command(
+                command_name, ctx, bot_name=bot_name, session_id=session_id
+            )
+            payload: dict[str, Any] = {
+                "type": "command_result",
+                "command": command_name,
+                "text": text,
+            }
+            if file_info is not None:
+                payload["file"] = file_info
+            await _sse_write(sse, payload)
+            await _sse_write(sse, {"type": "done", "text": text})
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "chat_server: slash failed bot=%s session=%s cmd=%s: %s",
+                bot_name,
+                session_id,
+                command_name,
+                error,
+            )
+            with suppress(Exception):
+                await _sse_write(sse, {"type": "error", "message": str(error)})
+        return sse
+
+    async def _run_dashboard_command(
+        self,
+        command_name: str,
+        ctx: commands.CommandContext,
+        *,
+        bot_name: str,
+        session_id: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Run a single slash command and return ``(text, file_info)``.
+
+        Returns ``("", file_info)`` when the command produced a file
+        (``/send``); the dashboard can then offer the file as a download
+        link via ``/chat/sessions/{bot}/{session_id}/file/{name}``.
+        Returns ``(text, None)`` for text-only commands.
+        Unknown commands raise ``LookupError`` so the caller surfaces an
+        error event.
+        """
+
+        # Read-only / trivial commands.
+        if command_name == "start":
+            result = await commands.cmd_start(ctx)
+        elif command_name == "help":
+            result = await commands.cmd_help(ctx)
+        elif command_name == "version":
+            result = await commands.cmd_version(ctx)
+        elif command_name == "status":
+            result = await commands.cmd_status(ctx)
+        elif command_name == "files":
+            result = await commands.cmd_files(ctx)
+        elif command_name == "memory":
+            result = await commands.cmd_memory(ctx)
+        elif command_name == "model":
+            result = await commands.cmd_model(ctx)
+        elif command_name == "streaming":
+            result = await commands.cmd_streaming(ctx)
+        elif command_name == "reset":
+            outcome = await commands.cmd_reset(ctx)
+            await self._close_pool_sessions(outcome.affected_bots, session_id)
+            result = outcome.result
+        elif command_name == "resetall":
+            result = await commands.cmd_resetall(ctx)
+            await self._close_pool_sessions([bot_name], session_id)
+        elif command_name == "cancel":
+            outcome = await commands.cmd_cancel(ctx, cancel_for=self._cancel_for_dashboard)
+            result = outcome.result
+        elif command_name == "send":
+            result = await commands.cmd_send(ctx)
+            if result.file_path is not None:
+                relative = result.file_path.relative_to(
+                    ctx.bot_path / "sessions" / session_id / "workspace"
+                )
+                return "", {
+                    "name": result.file_path.name,
+                    "path": str(relative),
+                    "url": (f"/chat/sessions/{bot_name}/{session_id}/file/{result.file_path.name}"),
+                }
+        elif command_name in {
+            "skills",
+            "cron",
+            "heartbeat",
+            "compact",
+            "bind",
+            "unbind",
+        }:
+            return (
+                f"⚠️ /{command_name} is not yet available on the dashboard. "
+                "Use the Telegram bot for now."
+            ), None
+        else:
+            raise LookupError(f"unknown command: /{command_name}")
+
+        return result.text, None
+
+    async def _close_pool_sessions(self, bot_names: list[str], session_id: str) -> None:
+        """Close SDK pool sessions for the given bots after a reset.
+
+        Mirrors the Telegram adapter's post-reset cleanup so dashboard
+        users see a fresh Claude session next message.
+        """
+
+        from abyss.sdk_client import get_pool, is_sdk_available
+
+        if not is_sdk_available():
+            return
+        pool = get_pool()
+        for bot in bot_names:
+            await pool.close_session(f"{bot}:{session_id}")
 
     # ------------------------------------------------------------------
     # Attachments
