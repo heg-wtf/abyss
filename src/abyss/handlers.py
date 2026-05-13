@@ -794,20 +794,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             if not await check_authorization(update):
                 return
             job_name = pending_cron_edits.pop(chat_id)
-            new_message = (update.effective_message.text or "").strip()
-            if not new_message:
-                await update.effective_message.reply_text("Edit cancelled (empty message).")
-                return
-
-            from abyss.cron import edit_cron_job_message
-
-            if edit_cron_job_message(bot_name, job_name, new_message):
-                await update.effective_message.reply_text(
-                    f"\u2705 Job `{job_name}` message updated.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
+            result = await commands.cmd_cron_edit_apply(
+                _make_context(update),
+                job_name,
+                update.effective_message.text or "",
+            )
+            await _send_command_result(update, result)
             return
 
         group_config = find_group_by_chat_id(chat_id)
@@ -946,67 +938,25 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         await _send_command_result(update, result)
 
     async def cron_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /cron command - list or run cron jobs."""
+        """Handle /cron command — list / add / remove / enable / disable / run / edit.
+
+        Pure subcommands (list/add/remove/enable/disable) delegate to
+        ``commands.cmd_cron``. ``run`` (Telegram ``send_message`` callback)
+        and ``edit`` (ForceReply + ``pending_cron_edits``) stay here.
+        """
         if not await check_authorization(update):
             return
 
-        from abyss.cron import (
-            add_cron_job,
-            disable_cron_job,
-            enable_cron_job,
-            execute_cron_job,
-            generate_unique_job_name,
-            get_cron_job,
-            list_cron_jobs,
-            next_run_time,
-            parse_natural_language_schedule,
-            remove_cron_job,
-            resolve_default_timezone,
-        )
+        subcommand = context.args[0].lower() if context.args else ""
 
-        if not context.args:
-            text = (
-                "\u23f0 *Cron Commands:*\n\n"
-                "`/cron list` - Show cron jobs\n"
-                "`/cron add <description>` - Create a job\n"
-                "`/cron edit <name>` - Edit job message\n"
-                "`/cron run <name>` - Run a job now\n"
-                "`/cron remove <name>` - Remove a job\n"
-                "`/cron enable <name>` - Enable a job\n"
-                "`/cron disable <name>` - Disable a job"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "list":
-            jobs = list_cron_jobs(bot_name)
-            if not jobs:
-                await update.effective_message.reply_text("\u23f0 No cron jobs configured.")
-                return
-
-            lines = ["\u23f0 *Cron Jobs:*\n"]
-            for job in jobs:
-                enabled = job.get("enabled", True)
-                status_icon = "\u2705" if enabled else "\U0001f6d1"
-                schedule_display = job.get("schedule") or f"at: {job.get('at', 'N/A')}"
-                timezone_label = job.get("timezone", resolve_default_timezone())
-                next_time = next_run_time(job) if enabled else None
-                next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
-                message_preview = job.get("message", "")[:80]
-                lines.append(
-                    f"{status_icon} `{job['name']}` (`{schedule_display}` {timezone_label})\n"
-                    f"   Next: {next_display} | {message_preview}"
-                )
-            await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-        elif subcommand == "run":
+        if subcommand == "run":
             if len(context.args) < 2:
                 await update.effective_message.reply_text(
                     "Usage: `/cron run <name>`", parse_mode="Markdown"
                 )
                 return
+
+            from abyss.cron import execute_cron_job, get_cron_job
 
             job_name = context.args[1]
             cron_job = get_cron_job(bot_name, job_name)
@@ -1014,7 +964,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(f"Job '{job_name}' not found.")
                 return
 
-            await update.effective_message.reply_text(f"\u23f0 Running job '{job_name}'...")
+            await update.effective_message.reply_text(f"⏰ Running job '{job_name}'...")
 
             async def send_typing_periodically() -> None:
                 try:
@@ -1025,7 +975,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     pass
 
             typing_task = asyncio.create_task(send_typing_periodically())
-
             try:
                 await execute_cron_job(
                     bot_name=bot_name,
@@ -1037,151 +986,34 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(f"Job failed: {error}")
             finally:
                 typing_task.cancel()
+            return
 
-        elif subcommand == "add":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron add <description>`\n"
-                    "Example: `/cron add 매일 아침 9시에 이메일 요약해줘`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            user_input = " ".join(context.args[1:])
-            await update.effective_message.reply_text("\u23f0 Parsing schedule...")
-
-            try:
-                timezone_name = resolve_default_timezone()
-                parsed = await parse_natural_language_schedule(
-                    user_input,
-                    timezone_name,
-                )
-            except (ValueError, RuntimeError) as error:
-                await update.effective_message.reply_text(
-                    f"Failed to parse: {error}\n\n"
-                    "Example: `/cron add 매일 아침 9시에 이메일 요약해줘`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = generate_unique_job_name(bot_name, parsed["name"])
-
-            job: dict[str, Any] = {
-                "name": job_name,
-                "message": parsed["message"],
-                "timezone": timezone_name,
-                "enabled": True,
-            }
-
-            if parsed["type"] == "recurring":
-                job["schedule"] = parsed["schedule"]
-            else:
-                job["at"] = parsed["at"]
-                job["delete_after_run"] = True
-
-            try:
-                add_cron_job(bot_name, job)
-            except ValueError as error:
-                await update.effective_message.reply_text(f"Failed: {error}")
-                return
-
-            from abyss.cron import next_run_time as compute_next_run
-
-            next_time = compute_next_run(job)
-            next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
-
-            if parsed["type"] == "recurring":
-                schedule_line = f"Schedule: `{parsed['schedule']}` ({timezone_name})"
-            else:
-                schedule_line = f"Run at: {parsed['at']} ({timezone_name})"
-
-            await update.effective_message.reply_text(
-                f"\u23f0 *Cron job created:*\n\n"
-                f"  Name: `{job_name}`\n"
-                f"  {schedule_line}\n"
-                f"  Message: {parsed['message']}\n"
-                f"  Next: {next_display}",
-                parse_mode="Markdown",
-            )
-
-        elif subcommand == "remove":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron remove <name>`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = context.args[1]
-            if remove_cron_job(bot_name, job_name):
-                await update.effective_message.reply_text(
-                    f"\u23f0 Job `{job_name}` removed.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
-
-        elif subcommand == "enable":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron enable <name>`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = context.args[1]
-            if enable_cron_job(bot_name, job_name):
-                await update.effective_message.reply_text(
-                    f"\u2705 Job `{job_name}` enabled.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
-
-        elif subcommand == "disable":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron disable <name>`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = context.args[1]
-            if disable_cron_job(bot_name, job_name):
-                await update.effective_message.reply_text(
-                    f"\U0001f6d1 Job `{job_name}` disabled.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
-
-        elif subcommand == "edit":
+        if subcommand == "edit":
             if len(context.args) < 2:
                 await update.effective_message.reply_text(
                     "Usage: `/cron edit <name>`", parse_mode="Markdown"
                 )
                 return
-
             job_name = context.args[1]
-            cron_job = get_cron_job(bot_name, job_name)
-            if not cron_job:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
+            outcome = await commands.cmd_cron_edit_start(_make_context(update), job_name)
+            if isinstance(outcome, commands.CommandResult):
+                await _send_command_result(update, outcome)
                 return
-
-            current_message = cron_job.get("message", "")
-            pending_cron_edits[update.effective_chat.id] = job_name
+            pending_cron_edits[update.effective_chat.id] = outcome.job_name
             await update.effective_message.reply_text(
-                f"\u270f\ufe0f Job `{job_name}` current message:\n\n"
-                f"{current_message}\n\n"
-                "Send new message:",
+                outcome.prompt_text,
                 parse_mode="Markdown",
                 reply_markup=ForceReply(selective=True),
             )
+            return
 
-        else:
-            await update.effective_message.reply_text(
-                "Unknown subcommand. Use: list, add, edit, run, remove, enable, disable",
-            )
+        if subcommand == "add":
+            # Pre-message keeps the original Telegram UX while the
+            # Claude natural-language parse runs.
+            await update.effective_message.reply_text("⏰ Parsing schedule...")
+
+        result = await commands.cmd_cron(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def heartbeat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /heartbeat command - manage heartbeat settings.

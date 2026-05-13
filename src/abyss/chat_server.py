@@ -868,7 +868,16 @@ class ChatServer:
                 return preview.text, None
             run_result = await commands.cmd_compact_run(ctx)
             return f"{preview.text}\n\n{run_result.text}", None
-        elif command_name in {"bind", "unbind", "cron"}:
+        elif command_name == "cron":
+            # ``run`` (needs Telegram send_message) and ``edit`` (multi-step)
+            # are not available on the dashboard yet — fall back with a hint.
+            sub = ctx.args[0].lower() if ctx.args else ""
+            if sub in {"run", "edit"}:
+                return (
+                    f"⚠️ /cron {sub} requires the Telegram bot. Use the Telegram chat for now."
+                ), None
+            result = await commands.cmd_cron(ctx)
+        elif command_name in {"bind", "unbind"}:
             return (
                 f"⚠️ /{command_name} is not yet available on the dashboard. "
                 "Use the Telegram bot for now."

@@ -926,8 +926,8 @@ async def test_slash_unknown_returns_error(client, patch_backend):
 
 
 @pytest.mark.asyncio
-async def test_slash_unextracted_command_falls_back(client, patch_backend):
-    """/cron and friends are not yet on the dashboard — return a hint."""
+async def test_slash_cron_usage(client, patch_backend):
+    """``/cron`` with no args returns the usage / command list."""
 
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
@@ -937,7 +937,47 @@ async def test_slash_unextracted_command_falls_back(client, patch_backend):
     )
     events = await _parse_sse_events(sse)
     result = next(e for e in events if e["type"] == "command_result")
-    assert "not yet available" in result["text"]
+    assert "/cron list" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_run_falls_back(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron run x"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Telegram" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_edit_falls_back(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron edit x"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Telegram" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_list_empty(client, patch_backend, monkeypatch):
+    monkeypatch.setattr("abyss.cron.list_cron_jobs", lambda b: [], raising=False)
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron list"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "No cron jobs" in result["text"]
 
 
 @pytest.mark.asyncio

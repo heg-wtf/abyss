@@ -853,6 +853,220 @@ async def cmd_compact_run(ctx: CommandContext) -> CommandResult:
 
 
 # ---------------------------------------------------------------------------
+# Cron — list / add / remove / enable / disable / edit
+# (``run`` requires a platform-specific send_message callback and stays
+#  in the Telegram adapter.)
+# ---------------------------------------------------------------------------
+
+
+_CRON_USAGE = (
+    "⏰ *Cron Commands:*\n\n"
+    "`/cron list` - Show cron jobs\n"
+    "`/cron add <description>` - Create a job\n"
+    "`/cron edit <name>` - Edit job message\n"
+    "`/cron run <name>` - Run a job now\n"
+    "`/cron remove <name>` - Remove a job\n"
+    "`/cron enable <name>` - Enable a job\n"
+    "`/cron disable <name>` - Disable a job"
+)
+
+
+async def cmd_cron(ctx: CommandContext) -> CommandResult:
+    """Dispatch the pure cron subcommands.
+
+    Covers ``list``, ``add``, ``remove``, ``enable``, ``disable``.
+    ``run`` and ``edit`` are platform-specific (send_message callback /
+    multi-step ForceReply state) and stay in their adapter; this
+    function returns a "use this platform's flow" marker so adapters
+    can branch.
+    """
+
+    from abyss.cron import (
+        add_cron_job,
+        disable_cron_job,
+        enable_cron_job,
+        generate_unique_job_name,
+        list_cron_jobs,
+        next_run_time,
+        parse_natural_language_schedule,
+        remove_cron_job,
+        resolve_default_timezone,
+    )
+
+    if not ctx.args:
+        return CommandResult(text=_CRON_USAGE)
+
+    subcommand = ctx.args[0].lower()
+
+    if subcommand == "list":
+        jobs = list_cron_jobs(ctx.bot_name)
+        if not jobs:
+            return CommandResult(text="⏰ No cron jobs configured.", parse_mode=None)
+        lines = ["⏰ *Cron Jobs:*\n"]
+        for job in jobs:
+            enabled = job.get("enabled", True)
+            status_icon = "✅" if enabled else "🛑"
+            schedule_display = job.get("schedule") or f"at: {job.get('at', 'N/A')}"
+            timezone_label = job.get("timezone", resolve_default_timezone())
+            next_time = next_run_time(job) if enabled else None
+            next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
+            message_preview = job.get("message", "")[:80]
+            lines.append(
+                f"{status_icon} `{job['name']}` (`{schedule_display}` {timezone_label})\n"
+                f"   Next: {next_display} | {message_preview}"
+            )
+        return CommandResult(text="\n".join(lines))
+
+    if subcommand == "add":
+        if len(ctx.args) < 2:
+            return CommandResult(
+                text=(
+                    "Usage: `/cron add <description>`\n"
+                    "Example: `/cron add 매일 아침 9시에 이메일 요약해줘`"
+                ),
+                success=False,
+            )
+        user_input = " ".join(ctx.args[1:])
+        try:
+            timezone_name = resolve_default_timezone()
+            parsed = await parse_natural_language_schedule(user_input, timezone_name)
+        except (ValueError, RuntimeError) as error:
+            return CommandResult(
+                text=(
+                    f"Failed to parse: {error}\n\n"
+                    "Example: `/cron add 매일 아침 9시에 이메일 요약해줘`"
+                ),
+                success=False,
+            )
+
+        job_name = generate_unique_job_name(ctx.bot_name, parsed["name"])
+        job: dict[str, Any] = {
+            "name": job_name,
+            "message": parsed["message"],
+            "timezone": timezone_name,
+            "enabled": True,
+        }
+        if parsed["type"] == "recurring":
+            job["schedule"] = parsed["schedule"]
+        else:
+            job["at"] = parsed["at"]
+            job["delete_after_run"] = True
+
+        try:
+            add_cron_job(ctx.bot_name, job)
+        except ValueError as error:
+            return CommandResult(text=f"Failed: {error}", parse_mode=None, success=False)
+
+        next_time = next_run_time(job)
+        next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
+        schedule_line = (
+            f"Schedule: `{parsed['schedule']}` ({timezone_name})"
+            if parsed["type"] == "recurring"
+            else f"Run at: {parsed['at']} ({timezone_name})"
+        )
+        return CommandResult(
+            text=(
+                f"⏰ *Cron job created:*\n\n"
+                f"  Name: `{job_name}`\n"
+                f"  {schedule_line}\n"
+                f"  Message: {parsed['message']}\n"
+                f"  Next: {next_display}"
+            )
+        )
+
+    if subcommand == "remove":
+        if len(ctx.args) < 2:
+            return CommandResult(text="Usage: `/cron remove <name>`", success=False)
+        job_name = ctx.args[1]
+        if remove_cron_job(ctx.bot_name, job_name):
+            return CommandResult(text=f"⏰ Job `{job_name}` removed.")
+        return CommandResult(text=f"Job '{job_name}' not found.", parse_mode=None, success=False)
+
+    if subcommand == "enable":
+        if len(ctx.args) < 2:
+            return CommandResult(text="Usage: `/cron enable <name>`", success=False)
+        job_name = ctx.args[1]
+        if enable_cron_job(ctx.bot_name, job_name):
+            return CommandResult(text=f"✅ Job `{job_name}` enabled.")
+        return CommandResult(text=f"Job '{job_name}' not found.", parse_mode=None, success=False)
+
+    if subcommand == "disable":
+        if len(ctx.args) < 2:
+            return CommandResult(text="Usage: `/cron disable <name>`", success=False)
+        job_name = ctx.args[1]
+        if disable_cron_job(ctx.bot_name, job_name):
+            return CommandResult(text=f"🛑 Job `{job_name}` disabled.")
+        return CommandResult(text=f"Job '{job_name}' not found.", parse_mode=None, success=False)
+
+    if subcommand == "run":
+        return CommandResult(
+            text="Cron run is not supported on this surface.",
+            parse_mode=None,
+            success=False,
+        )
+
+    if subcommand == "edit":
+        return CommandResult(
+            text="Cron edit requires a multi-step flow handled by the adapter.",
+            parse_mode=None,
+            success=False,
+        )
+
+    return CommandResult(
+        text="Unknown subcommand. Use: list, add, edit, run, remove, enable, disable",
+        parse_mode=None,
+        success=False,
+    )
+
+
+@dataclass
+class CronEditPrompt:
+    """Marker emitted by ``cmd_cron_edit_start`` so the adapter can ask
+    the user for the new message (Telegram uses ForceReply; dashboard
+    can render a follow-up input)."""
+
+    job_name: str
+    current_message: str
+    prompt_text: str
+
+
+async def cmd_cron_edit_start(ctx: CommandContext, job_name: str) -> CronEditPrompt | CommandResult:
+    """Begin a cron-edit flow. Returns a ``CronEditPrompt`` describing
+    what the adapter should ask next, or a ``CommandResult`` (error)
+    when the job does not exist."""
+
+    from abyss.cron import get_cron_job
+
+    cron_job = get_cron_job(ctx.bot_name, job_name)
+    if not cron_job:
+        return CommandResult(text=f"Job '{job_name}' not found.", parse_mode=None, success=False)
+
+    current_message = cron_job.get("message", "")
+    prompt_text = f"✏️ Job `{job_name}` current message:\n\n{current_message}\n\nSend new message:"
+    return CronEditPrompt(
+        job_name=job_name,
+        current_message=current_message,
+        prompt_text=prompt_text,
+    )
+
+
+async def cmd_cron_edit_apply(
+    ctx: CommandContext, job_name: str, new_message: str
+) -> CommandResult:
+    """Finalise the cron-edit flow with the new message."""
+
+    new_message = new_message.strip()
+    if not new_message:
+        return CommandResult(text="Edit cancelled (empty message).", parse_mode=None, success=False)
+
+    from abyss.cron import edit_cron_job_message
+
+    if edit_cron_job_message(ctx.bot_name, job_name, new_message):
+        return CommandResult(text=f"✅ Job `{job_name}` message updated.")
+    return CommandResult(text=f"Job '{job_name}' not found.", parse_mode=None, success=False)
+
+
+# ---------------------------------------------------------------------------
 # Command metadata for adapters (dashboard autocomplete, Telegram BotCommand)
 # ---------------------------------------------------------------------------
 

@@ -639,3 +639,247 @@ class TestCompact:
         result = await commands.cmd_compact_run(make_context(bot_path, bot_config))
         assert not result.success
         assert "boom" in result.text
+
+
+# ---------------------------------------------------------------------------
+# Cron (list / add / remove / enable / disable / edit_start / edit_apply)
+# ---------------------------------------------------------------------------
+
+
+class TestCron:
+    @pytest.mark.asyncio
+    async def test_usage_no_args(self, bot_path, bot_config):
+        result = await commands.cmd_cron(make_context(bot_path, bot_config))
+        assert "/cron list" in result.text
+        assert "/cron add" in result.text
+
+    @pytest.mark.asyncio
+    async def test_list_empty(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr("abyss.cron.list_cron_jobs", lambda b: [], raising=False)
+        result = await commands.cmd_cron(make_context(bot_path, bot_config, args=["list"]))
+        assert "No cron jobs" in result.text
+
+    @pytest.mark.asyncio
+    async def test_list_jobs(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr(
+            "abyss.cron.list_cron_jobs",
+            lambda b: [
+                {
+                    "name": "morning",
+                    "schedule": "0 9 * * *",
+                    "timezone": "Asia/Seoul",
+                    "enabled": True,
+                    "message": "Daily summary",
+                }
+            ],
+            raising=False,
+        )
+        monkeypatch.setattr("abyss.cron.next_run_time", lambda job: None, raising=False)
+        monkeypatch.setattr(
+            "abyss.cron.resolve_default_timezone",
+            lambda: "Asia/Seoul",
+            raising=False,
+        )
+        result = await commands.cmd_cron(make_context(bot_path, bot_config, args=["list"]))
+        assert "morning" in result.text
+        assert "Asia/Seoul" in result.text
+
+    @pytest.mark.asyncio
+    async def test_add_no_input(self, bot_path, bot_config):
+        result = await commands.cmd_cron(make_context(bot_path, bot_config, args=["add"]))
+        assert not result.success
+        assert "Usage" in result.text
+
+    @pytest.mark.asyncio
+    async def test_add_parse_error(self, bot_path, bot_config, monkeypatch):
+        async def fake_parse(text, tz):
+            raise ValueError("nope")
+
+        monkeypatch.setattr(
+            "abyss.cron.parse_natural_language_schedule",
+            fake_parse,
+            raising=False,
+        )
+        monkeypatch.setattr("abyss.cron.resolve_default_timezone", lambda: "UTC", raising=False)
+        result = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["add", "nonsense"])
+        )
+        assert not result.success
+        assert "Failed to parse" in result.text
+
+    @pytest.mark.asyncio
+    async def test_add_recurring(self, bot_path, bot_config, monkeypatch):
+        async def fake_parse(text, tz):
+            return {
+                "type": "recurring",
+                "name": "summary",
+                "schedule": "0 9 * * *",
+                "message": "Send daily summary",
+            }
+
+        monkeypatch.setattr(
+            "abyss.cron.parse_natural_language_schedule",
+            fake_parse,
+            raising=False,
+        )
+        monkeypatch.setattr("abyss.cron.resolve_default_timezone", lambda: "UTC", raising=False)
+        monkeypatch.setattr(
+            "abyss.cron.generate_unique_job_name",
+            lambda b, n: n,
+            raising=False,
+        )
+        added: dict = {}
+        monkeypatch.setattr(
+            "abyss.cron.add_cron_job",
+            lambda b, job: added.update(job),
+            raising=False,
+        )
+        monkeypatch.setattr("abyss.cron.next_run_time", lambda job: None, raising=False)
+        result = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["add", "매일 아침 9시"])
+        )
+        assert result.success
+        assert "summary" in result.text
+        assert added["schedule"] == "0 9 * * *"
+        assert added["enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_add_one_shot(self, bot_path, bot_config, monkeypatch):
+        async def fake_parse(text, tz):
+            return {
+                "type": "one_shot",
+                "name": "ping",
+                "at": "2026-06-01T09:00:00",
+                "message": "Reminder",
+            }
+
+        monkeypatch.setattr(
+            "abyss.cron.parse_natural_language_schedule",
+            fake_parse,
+            raising=False,
+        )
+        monkeypatch.setattr("abyss.cron.resolve_default_timezone", lambda: "UTC", raising=False)
+        monkeypatch.setattr(
+            "abyss.cron.generate_unique_job_name",
+            lambda b, n: n,
+            raising=False,
+        )
+        added: dict = {}
+        monkeypatch.setattr(
+            "abyss.cron.add_cron_job",
+            lambda b, job: added.update(job),
+            raising=False,
+        )
+        monkeypatch.setattr("abyss.cron.next_run_time", lambda job: None, raising=False)
+        result = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["add", "내일 9시"])
+        )
+        assert result.success
+        assert added["delete_after_run"] is True
+        assert added["at"] == "2026-06-01T09:00:00"
+
+    @pytest.mark.asyncio
+    async def test_remove_no_args(self, bot_path, bot_config):
+        result = await commands.cmd_cron(make_context(bot_path, bot_config, args=["remove"]))
+        assert not result.success
+
+    @pytest.mark.asyncio
+    async def test_remove_success(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr("abyss.cron.remove_cron_job", lambda b, n: True, raising=False)
+        result = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["remove", "morning"])
+        )
+        assert result.success
+        assert "removed" in result.text
+
+    @pytest.mark.asyncio
+    async def test_remove_not_found(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr("abyss.cron.remove_cron_job", lambda b, n: False, raising=False)
+        result = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["remove", "ghost"])
+        )
+        assert not result.success
+
+    @pytest.mark.asyncio
+    async def test_enable_disable(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr("abyss.cron.enable_cron_job", lambda b, n: True, raising=False)
+        monkeypatch.setattr("abyss.cron.disable_cron_job", lambda b, n: True, raising=False)
+        enabled = await commands.cmd_cron(make_context(bot_path, bot_config, args=["enable", "x"]))
+        disabled = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["disable", "x"])
+        )
+        assert enabled.success
+        assert "enabled" in enabled.text
+        assert disabled.success
+        assert "disabled" in disabled.text
+
+    @pytest.mark.asyncio
+    async def test_run_and_edit_marker(self, bot_path, bot_config):
+        # ``run`` and ``edit`` indicate the adapter must handle them.
+        run_result = await commands.cmd_cron(make_context(bot_path, bot_config, args=["run", "x"]))
+        edit_result = await commands.cmd_cron(
+            make_context(bot_path, bot_config, args=["edit", "x"])
+        )
+        assert not run_result.success
+        assert not edit_result.success
+
+    @pytest.mark.asyncio
+    async def test_unknown_subcommand(self, bot_path, bot_config):
+        result = await commands.cmd_cron(make_context(bot_path, bot_config, args=["wat"]))
+        assert not result.success
+        assert "Unknown" in result.text
+
+
+class TestCronEdit:
+    @pytest.mark.asyncio
+    async def test_edit_start_unknown_job(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr("abyss.cron.get_cron_job", lambda b, n: None, raising=False)
+        outcome = await commands.cmd_cron_edit_start(make_context(bot_path, bot_config), "ghost")
+        assert isinstance(outcome, commands.CommandResult)
+        assert not outcome.success
+
+    @pytest.mark.asyncio
+    async def test_edit_start_returns_prompt(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr(
+            "abyss.cron.get_cron_job",
+            lambda b, n: {"name": n, "message": "old text"},
+            raising=False,
+        )
+        outcome = await commands.cmd_cron_edit_start(make_context(bot_path, bot_config), "morning")
+        assert isinstance(outcome, commands.CronEditPrompt)
+        assert outcome.job_name == "morning"
+        assert outcome.current_message == "old text"
+        assert "Send new message" in outcome.prompt_text
+
+    @pytest.mark.asyncio
+    async def test_edit_apply_empty(self, bot_path, bot_config):
+        result = await commands.cmd_cron_edit_apply(
+            make_context(bot_path, bot_config), "morning", "   "
+        )
+        assert not result.success
+        assert "empty" in result.text
+
+    @pytest.mark.asyncio
+    async def test_edit_apply_success(self, bot_path, bot_config, monkeypatch):
+        seen: dict = {}
+
+        def fake_edit(b, n, m):
+            seen.update({"bot": b, "name": n, "message": m})
+            return True
+
+        monkeypatch.setattr("abyss.cron.edit_cron_job_message", fake_edit, raising=False)
+        result = await commands.cmd_cron_edit_apply(
+            make_context(bot_path, bot_config), "morning", "new text"
+        )
+        assert result.success
+        assert seen == {"bot": "testbot", "name": "morning", "message": "new text"}
+
+    @pytest.mark.asyncio
+    async def test_edit_apply_not_found(self, bot_path, bot_config, monkeypatch):
+        monkeypatch.setattr(
+            "abyss.cron.edit_cron_job_message", lambda b, n, m: False, raising=False
+        )
+        result = await commands.cmd_cron_edit_apply(
+            make_context(bot_path, bot_config), "ghost", "new text"
+        )
+        assert not result.success
