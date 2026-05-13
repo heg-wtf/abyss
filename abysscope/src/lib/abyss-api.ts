@@ -67,7 +67,13 @@ export const MAX_UPLOADS_PER_MESSAGE = 5;
 export type ChatEvent =
   | { type: "chunk"; text: string }
   | { type: "done"; text: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      type: "command_result";
+      command: string;
+      text: string;
+      file?: { name: string; path: string; url: string };
+    };
 
 /**
  * Thrown when the sidecar replies with a non-2xx status. Lets callers
@@ -156,6 +162,19 @@ export async function renameChatSession(
       body: JSON.stringify({ name }),
     }
   );
+}
+
+export interface SlashCommandSpec {
+  name: string;
+  description: string;
+  usage: string;
+}
+
+export async function listSlashCommands(): Promise<SlashCommandSpec[]> {
+  const data = await jsonFetch<{ commands: SlashCommandSpec[] }>(
+    "/chat/commands"
+  );
+  return data.commands;
 }
 
 export async function getChatMessages(

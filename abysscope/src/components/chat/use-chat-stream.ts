@@ -95,6 +95,13 @@ export function useMultiSessionChatStream(
             accumulated += event.text;
             patchStream(sessionId, { text: accumulated });
             onChunk?.(sessionId, event.text);
+          } else if (event.type === "command_result") {
+            // Slash commands emit a single ``command_result`` event
+            // (no incremental chunks). Treat it as the full reply
+            // text so the UI renders it just like any other message.
+            accumulated = event.text;
+            patchStream(sessionId, { text: accumulated });
+            onChunk?.(sessionId, event.text);
           } else if (event.type === "error") {
             patchStream(sessionId, { error: event.message });
           } else if (event.type === "done") {

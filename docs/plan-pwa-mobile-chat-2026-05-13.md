@@ -1,10 +1,11 @@
 # Plan: abysscope `/mobile` PWA 채팅 화면 + 슬래시 커맨드 통합
 
 - date: 2026-05-13
-- status: in-progress
+- status: done
 - author: claude
 - approved-by: ash84
 - branch: feat/mobile-pwa-chat
+- completed: 2026-05-14
 
 ## 1. 목적 및 배경
 

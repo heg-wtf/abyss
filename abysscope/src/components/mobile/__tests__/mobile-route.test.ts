@@ -81,4 +81,47 @@ describe("/mobile route skeleton", () => {
     expect(proxy).toMatch(/export async function POST/);
     expect(proxy).toMatch(/renameChatSession\(bot, id/);
   });
+
+  it("chat screen renders header + input bar + workspace + slash sheets", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Header has back link to sessions list and workspace toggle.
+    expect(source).toMatch(/href="\/mobile\/sessions"/);
+    expect(source).toMatch(/aria-label="Workspace files"/);
+    // Input bar order: slash, attach, textarea, send/voice toggle.
+    expect(source).toMatch(/aria-label="Slash commands"/);
+    expect(source).toMatch(/aria-label="Attach file"/);
+    expect(source).toMatch(/aria-label="Send message"/);
+    expect(source).toMatch(/aria-label="Voice/);
+    // Workspace sheet reuses the existing WorkspaceTree component.
+    expect(source).toMatch(/WorkspaceTree/);
+    // Slash command sheet hits the catalog endpoint.
+    expect(source).toMatch(/\/api\/chat\/commands/);
+    // Streaming hook is reused from desktop so SSE handling stays in
+    // one place.
+    expect(source).toMatch(/useMultiSessionChatStream/);
+  });
+
+  it("chat page resolves session server-side with 404 fallback", () => {
+    const source = read("app/mobile/chat/[bot]/[sessionId]/page.tsx");
+    expect(source).toMatch(/listChatSessions/);
+    expect(source).toMatch(/notFound\(\)/);
+    expect(source).toMatch(/MobileChatScreen/);
+  });
+
+  it("slash commands proxy route exists", () => {
+    const source = read("app/api/chat/commands/route.ts");
+    expect(source).toMatch(/export async function GET/);
+    expect(source).toMatch(/listSlashCommands/);
+  });
+
+  it("stream hook handles command_result events", () => {
+    const source = read("components/chat/use-chat-stream.ts");
+    expect(source).toMatch(/event\.type === "command_result"/);
+  });
+
+  it("ChatEvent type includes command_result with optional file payload", () => {
+    const source = read("lib/abyss-api.ts");
+    expect(source).toMatch(/type: "command_result"/);
+    expect(source).toMatch(/file\?: \{ name: string; path: string; url: string \}/);
+  });
 });

@@ -416,6 +416,10 @@ cd abysscope && npx next build && npx next start --port 3847
 
 **Tech Stack**: Next.js 16 + shadcn/ui + Tailwind CSS + js-yaml. Reads `~/.abyss/` directly (no database). Chat / upload uses the internal aiohttp `ChatServer` started by `abyss start`.
 
+### Mobile (`/mobile`)
+
+A mobile-friendly route ships alongside the desktop UI at `http://<host>:3847/mobile`. It exposes the same chat backend with a phone-first layout: session list with custom names + long-press actions, single-chat screen with attachments, slash commands, and a workspace-files sheet. See [`docs/MOBILE_ACCESS.md`](docs/MOBILE_ACCESS.md) for the Tailscale + LAN access guide.
+
 ## Runtime Data
 
 Configuration and session data are stored in `~/.abyss/`. Override the path with the `ABYSS_HOME` environment variable.
