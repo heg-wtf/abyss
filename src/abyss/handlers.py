@@ -19,6 +19,7 @@ from telegram.ext import (
     filters,
 )
 
+from abyss import commands
 from abyss.claude_runner import (
     STREAMING_CURSOR,
     cancel_process,
@@ -28,14 +29,9 @@ from abyss.claude_runner import (
 from abyss.config import (
     DEFAULT_MODEL,
     DEFAULT_STREAMING,
-    VALID_MODELS,
-    is_valid_model,
-    model_display_name,
-    save_bot_config,
 )
 from abyss.group import (
     bind_group,
-    clear_shared_conversation,
     find_group_by_chat_id,
     get_my_role,
     load_group_config,
@@ -44,17 +40,12 @@ from abyss.group import (
 )
 from abyss.llm import LLMRequest, cached_backend, get_or_create
 from abyss.session import (
-    clear_bot_memory,
     clear_claude_session_id,
-    conversation_status_summary,
     ensure_session,
     get_claude_session_id,
-    list_workspace_files,
     load_bot_memory,
     load_conversation_history,
     log_conversation,
-    reset_all_session,
-    reset_session,
     save_claude_session_id,
 )
 from abyss.utils import markdown_to_telegram_html, split_message
@@ -63,6 +54,49 @@ logger = logging.getLogger(__name__)
 
 SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 MAX_QUEUE_SIZE = 5
+
+
+async def _send_command_result(
+    update: Update,
+    result: commands.CommandResult,
+) -> None:
+    """Render a ``CommandResult`` as one or more Telegram messages.
+
+    Centralises the Markdown/HTML/file response logic so each handler
+    can simply delegate to ``commands.cmd_*`` and call this helper.
+    """
+
+    if result.silent:
+        return
+
+    if result.file_path is not None:
+        try:
+            await update.effective_message.reply_document(
+                document=open(result.file_path, "rb"),
+                filename=result.file_path.name,
+            )
+        except Exception as error:
+            await update.effective_message.reply_text(f"Failed to send file: {error}")
+            logger.error("Failed to send file %s: %s", result.file_path, error)
+        return
+
+    if not result.text:
+        return
+
+    parse_mode = result.parse_mode
+    if parse_mode == "HTML":
+        # ``CommandResult.parse_mode == "HTML"`` signals "this text is
+        # Markdown that needs Telegram-HTML conversion and chunking".
+        html = markdown_to_telegram_html(result.text)
+        for chunk in split_message(html):
+            try:
+                await update.effective_message.reply_text(chunk, parse_mode="HTML")
+            except Exception:
+                await update.effective_message.reply_text(chunk)
+        return
+
+    await update.effective_message.reply_text(result.text, parse_mode=parse_mode)
+
 
 STREAM_THROTTLE_SECONDS = 0.5
 STREAM_MIN_CHARS_BEFORE_SEND = 10
@@ -193,10 +227,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     Returns a list of handler instances to add to the Application.
     """
     allowed_users = bot_config.get("allowed_users", [])
-    personality = bot_config.get("personality", "")
-    display_name = bot_config.get("display_name", "")
-    role = bot_config.get("role", bot_config.get("description", ""))
-    goal = bot_config.get("goal", "")
     claude_arguments = bot_config.get("claude_args", [])
     command_timeout = bot_config.get("command_timeout", 300)
     current_model = bot_config.get("model", DEFAULT_MODEL)
@@ -212,327 +242,129 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             return False
         return True
 
+    def _make_context(update: Update, args: list[str] | None = None) -> commands.CommandContext:
+        return commands.CommandContext(
+            bot_name=bot_name,
+            bot_path=bot_path,
+            bot_config=bot_config,
+            chat_id=update.effective_chat.id,
+            args=args or [],
+        )
+
     async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command - introduce the bot."""
         if not await check_authorization(update):
             return
-
-        name_display = display_name or bot_name
-        text = (
-            f"\U0001f916 *{name_display}*\n\n"
-            f"\U0001f3ad *Personality:* {personality}\n"
-            f"\U0001f4bc *Role:* {role}\n"
-        )
-        if goal:
-            text += f"\U0001f3af *Goal:* {goal}\n"
-        text += (
-            "\n\U0001f4ac Send me a message to start chatting!\n"
-            "\U00002753 Type /help for available commands."
-        )
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_start(_make_context(update))
+        await _send_command_result(update, result)
 
     async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command."""
         if not await check_authorization(update):
             return
-
-        text = (
-            "\U0001f4cb *Available Commands:*\n\n"
-            "\U0001f44b /start - Bot introduction\n"
-            "\U0001f504 /reset - Clear conversation (keep workspace)\n"
-            "\U0001f5d1 /resetall - Delete entire session\n"
-            "\U0001f4c2 /files - List workspace files\n"
-            "\U0001f4e4 /send - Send workspace file\n"
-            "\U0001f4ca /status - Session status\n"
-            "\U0001f9e0 /model - Show or change model\n"
-            "\U0001f4e1 /streaming - Toggle streaming mode\n"
-            "\U0001f9e0 /memory - Show or clear memory\n"
-            "\U0001f9e9 /skills - Skill management\n"
-            "\u23f0 /cron - Cron job management\n"
-            "\U0001f493 /heartbeat - Heartbeat management\n"
-            "\U0001f4e6 /compact - Compact MD files\n"
-            "\u26d4 /cancel - Stop running process\n"
-            "\U00002139 /version - Show version\n"
-            "\U00002753 /help - Show this message"
-        )
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_help(_make_context(update))
+        await _send_command_result(update, result)
 
     async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reset command.
 
-        In group mode, only the orchestrator handles /reset:
-        - Resets all bots' group sessions (orchestrator + members)
-        - Clears shared conversation log
-        - Preserves shared workspace files
-        In DM mode, resets only this bot's session.
+        Pure reset logic lives in ``commands.cmd_reset``; this adapter
+        closes the SDK pool sessions for every affected bot afterwards.
         """
         if not await check_authorization(update):
             return
 
-        chat_id = update.effective_chat.id
-        group_config = find_group_by_chat_id(chat_id)
+        outcome = await commands.cmd_reset(_make_context(update))
 
-        # Close pool sessions so fresh clients are created after reset
         from abyss.sdk_client import get_pool, is_sdk_available
 
-        if group_config is not None:
-            my_role = get_my_role(group_config, bot_name)
-            if my_role != "orchestrator":
-                return  # Only orchestrator handles group /reset
+        if is_sdk_available():
+            chat_id = update.effective_chat.id
+            for affected in outcome.affected_bots:
+                await get_pool().close_session(f"{affected}:{chat_id}")
 
-            from abyss.config import bot_directory as get_bot_directory
-
-            # Reset orchestrator's own session
-            reset_session(bot_path, chat_id)
-            if is_sdk_available():
-                await get_pool().close_session(f"{bot_name}:{chat_id}")
-
-            # Reset all member bots' sessions for this chat_id
-            for member_name in group_config.get("members", []):
-                member_path = get_bot_directory(member_name)
-                reset_session(member_path, chat_id)
-                if is_sdk_available():
-                    await get_pool().close_session(f"{member_name}:{chat_id}")
-
-            # Clear shared conversation log
-            clear_shared_conversation(group_config["name"])
-
-            message = (
-                "\U0001f504 Group session reset. Shared conversation cleared. Workspace preserved."
-            )
-        else:
-            reset_session(bot_path, chat_id)
-            if is_sdk_available():
-                await get_pool().close_session(f"{bot_name}:{chat_id}")
-            message = "\U0001f504 Conversation reset. Workspace files preserved."
-
-        await update.effective_message.reply_text(message)
+        await _send_command_result(update, outcome.result)
 
     async def resetall_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /resetall command."""
         if not await check_authorization(update):
             return
 
-        chat_id = update.effective_chat.id
-        reset_all_session(bot_path, chat_id)
-        # Close pool session
+        result = await commands.cmd_resetall(_make_context(update))
+
         from abyss.sdk_client import get_pool, is_sdk_available
 
         if is_sdk_available():
+            chat_id = update.effective_chat.id
             await get_pool().close_session(f"{bot_name}:{chat_id}")
-        await update.effective_message.reply_text("\U0001f5d1 Session completely reset.")
+
+        await _send_command_result(update, result)
 
     async def files_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /files command."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        session_directory = ensure_session(bot_path, chat_id)
-        files = list_workspace_files(session_directory)
-
-        if not files:
-            await update.effective_message.reply_text("\U0001f4c2 No files in workspace.")
-            return
-
-        file_list = "\n".join(f"  {f}" for f in files)
-        text = f"\U0001f4c2 *Workspace files:*\n```\n{file_list}\n```"
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_files(_make_context(update))
+        await _send_command_result(update, result)
 
     async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /status command."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        session_directory = ensure_session(bot_path, chat_id)
-
-        conversation_status = conversation_status_summary(session_directory)
-
-        files = list_workspace_files(session_directory)
-
-        text = (
-            f"\U0001f4ca *Session Status*\n\n"
-            f"\U0001f916 Bot: {bot_name}\n"
-            f"\U0001f4ac Chat ID: {chat_id}\n"
-            f"\U0001f4dd Conversation: {conversation_status}\n"
-            f"\U0001f4c2 Workspace files: {len(files)}"
-        )
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_status(_make_context(update))
+        await _send_command_result(update, result)
 
     async def send_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /send command - send a workspace file to the user."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        session_directory = ensure_session(bot_path, chat_id)
-        workspace = session_directory / "workspace"
-
-        if not context.args:
-            files = list_workspace_files(session_directory)
-            if not files:
-                await update.effective_message.reply_text("\U0001f4c2 No files in workspace.")
-                return
-            file_list = "\n".join(f"  {f}" for f in files)
-            text = f"\U0001f4e4 Usage: `/send filename`\n\nAvailable files:\n```\n{file_list}\n```"
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        filename = " ".join(context.args)
-        file_path = workspace / filename
-
-        if not file_path.exists():
-            await update.effective_message.reply_text(
-                f"File not found: `{filename}`", parse_mode="Markdown"
-            )
-            return
-
-        if not file_path.is_file():
-            await update.effective_message.reply_text(
-                f"Not a file: `{filename}`", parse_mode="Markdown"
-            )
-            return
-
-        try:
-            await update.effective_message.reply_document(
-                document=open(file_path, "rb"),
-                filename=file_path.name,
-            )
-        except Exception as error:
-            await update.effective_message.reply_text(f"Failed to send file: {error}")
-            logger.error("Failed to send file %s: %s", filename, error)
+        result = await commands.cmd_send(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /model command - show or change the Claude model."""
         nonlocal current_model
         if not await check_authorization(update):
             return
+        result = await commands.cmd_model(_make_context(update, context.args))
+        # ``bot_config`` is the source of truth; re-sync the closure cache.
+        current_model = bot_config.get("model", DEFAULT_MODEL)
+        await _send_command_result(update, result)
 
-        if not context.args:
-            model_list = " / ".join(
-                f"*{model_display_name(m)}*" if m == current_model else model_display_name(m)
-                for m in VALID_MODELS
-            )
-            text = (
-                f"\U0001f9e0 Current model: *{model_display_name(current_model)}*\n\n"
-                f"Available: {model_list}\n"
-                "Usage: `/model sonnet`"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
+    async def _cancel_for(target_bot: str, target_key: str) -> bool:
+        """Cancel a bot's running task via its cached backend.
 
-        new_model = context.args[0].lower()
-        if not is_valid_model(new_model):
-            await update.effective_message.reply_text(
-                f"Invalid model: `{new_model}`\nAvailable: {', '.join(VALID_MODELS)}",
-                parse_mode="Markdown",
-            )
-            return
-
-        current_model = new_model
-        bot_config["model"] = new_model
-        save_bot_config(bot_name, bot_config)
-        await update.effective_message.reply_text(
-            f"\U0001f9e0 Model changed to *{model_display_name(new_model)}*",
-            parse_mode="Markdown",
-        )
+        Falls back to the legacy Claude Code cancel paths so bots
+        that haven't yet talked to their backend (no cached
+        instance) still get cancelled.
+        """
+        backend = cached_backend(target_bot)
+        if backend is not None and await backend.cancel(target_key):
+            return True
+        if await cancel_sdk_session(target_key):
+            return True
+        if is_process_running(target_key) and cancel_process(target_key):
+            return True
+        return False
 
     async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /cancel command - stop running Claude Code process.
-
-        In group mode, only the orchestrator handles /cancel:
-        - Cancels all bots' running processes for this group chat
-        - Does not affect DM processes
-        In DM mode, cancels only this bot's process.
-        """
+        """Handle /cancel command - stop running Claude Code process."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        group_config = find_group_by_chat_id(chat_id)
-
-        async def _cancel_for(target_bot: str, target_key: str) -> bool:
-            """Cancel a bot's running task via its cached backend.
-
-            Falls back to the legacy Claude Code cancel paths so bots
-            that haven't yet talked to their backend (no cached
-            instance) still get cancelled.
-            """
-            backend = cached_backend(target_bot)
-            if backend is not None and await backend.cancel(target_key):
-                return True
-            if await cancel_sdk_session(target_key):
-                return True
-            if is_process_running(target_key) and cancel_process(target_key):
-                return True
-            return False
-
-        if group_config is not None:
-            my_role = get_my_role(group_config, bot_name)
-            if my_role != "orchestrator":
-                return  # Only orchestrator handles group /cancel
-
-            cancelled_bots: list[str] = []
-
-            orchestrator_key = f"{bot_name}:{chat_id}"
-            if await _cancel_for(bot_name, orchestrator_key):
-                cancelled_bots.append(bot_name)
-
-            for member_name in group_config.get("members", []):
-                member_key = f"{member_name}:{chat_id}"
-                if await _cancel_for(member_name, member_key):
-                    cancelled_bots.append(member_name)
-
-            if cancelled_bots:
-                names = ", ".join(cancelled_bots)
-                await update.effective_message.reply_text(f"\u26d4 Cancelled: {names}")
-            else:
-                await update.effective_message.reply_text("No running processes in group.")
-            return
-
-        session_key = f"{bot_name}:{chat_id}"
-        if await _cancel_for(bot_name, session_key):
-            await update.effective_message.reply_text("\u26d4 Execution cancelled.")
-            return
-
-        await update.effective_message.reply_text("No running process to cancel.")
+        outcome = await commands.cmd_cancel(
+            _make_context(update),
+            cancel_for=_cancel_for,
+        )
+        await _send_command_result(update, outcome.result)
 
     async def streaming_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /streaming command - toggle streaming mode on/off."""
         nonlocal streaming_enabled
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            status_text = "on" if streaming_enabled else "off"
-            text = (
-                f"\U0001f4e1 Streaming: *{status_text}*\n\n"
-                "Usage: `/streaming on` or `/streaming off`"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        value = context.args[0].lower()
-        if value == "on":
-            streaming_enabled = True
-            bot_config["streaming"] = True
-            save_bot_config(bot_name, bot_config)
-            await update.effective_message.reply_text(
-                "\U0001f4e1 Streaming enabled.", parse_mode="Markdown"
-            )
-        elif value == "off":
-            streaming_enabled = False
-            bot_config["streaming"] = False
-            save_bot_config(bot_name, bot_config)
-            await update.effective_message.reply_text(
-                "\U0001f4e1 Streaming disabled.", parse_mode="Markdown"
-            )
-        else:
-            await update.effective_message.reply_text(
-                "Usage: `/streaming on` or `/streaming off`",
-                parse_mode="Markdown",
-            )
+        result = await commands.cmd_streaming(_make_context(update, context.args))
+        streaming_enabled = bot_config.get("streaming", DEFAULT_STREAMING)
+        await _send_command_result(update, result)
 
     async def _send_non_streaming_response(
         update: Update,
@@ -1019,10 +851,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         """Handle /version command."""
         if not await check_authorization(update):
             return
-
-        from abyss import __version__
-
-        await update.effective_message.reply_text(f"\U00002139 abyss v{__version__}")
+        result = await commands.cmd_version(_make_context(update))
+        await _send_command_result(update, result)
 
     async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo/document messages - download to workspace and forward to Claude."""
@@ -1105,31 +935,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         """Handle /memory command - show or clear bot memory."""
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            memory_content = load_bot_memory(bot_path)
-            if not memory_content:
-                await update.effective_message.reply_text("\U0001f9e0 No memories saved yet.")
-                return
-            html = markdown_to_telegram_html(memory_content)
-            chunks = split_message(html)
-            for chunk in chunks:
-                try:
-                    await update.effective_message.reply_text(chunk, parse_mode="HTML")
-                except Exception:
-                    await update.effective_message.reply_text(chunk)
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "clear":
-            clear_bot_memory(bot_path)
-            await update.effective_message.reply_text("\U0001f9e0 Memory cleared.")
-        else:
-            await update.effective_message.reply_text(
-                "Usage: `/memory` (show) or `/memory clear`",
-                parse_mode="Markdown",
-            )
+        result = await commands.cmd_memory(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def skills_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /skills command - list, attach, or detach skills."""

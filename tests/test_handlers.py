@@ -134,7 +134,7 @@ async def test_reset_handler(bot_path, bot_config, mock_update):
     handlers = make_handlers("test-bot", bot_path, bot_config)
     reset_handler = handlers[2]
 
-    with patch("abyss.handlers.reset_session") as mock_reset:
+    with patch("abyss.commands.reset_session") as mock_reset:
         await reset_handler.callback(mock_update, MagicMock())
         mock_reset.assert_called_once_with(bot_path, 67890)
 
@@ -268,7 +268,7 @@ async def test_model_handler_change_model(bot_path, bot_config, mock_update):
     mock_context = MagicMock()
     mock_context.args = ["opus"]
 
-    with patch("abyss.handlers.save_bot_config") as mock_save:
+    with patch("abyss.commands.save_bot_config") as mock_save:
         await model_handler.callback(mock_update, mock_context)
         mock_save.assert_called_once()
         saved_config = mock_save.call_args[0][1]
@@ -554,7 +554,7 @@ async def test_streaming_handler_on(bot_path, bot_config, mock_update):
     mock_context = MagicMock()
     mock_context.args = ["on"]
 
-    with patch("abyss.handlers.save_bot_config") as mock_save:
+    with patch("abyss.commands.save_bot_config") as mock_save:
         await streaming_handler.callback(mock_update, mock_context)
         mock_save.assert_called_once()
         saved_config = mock_save.call_args[0][1]
@@ -574,7 +574,7 @@ async def test_streaming_handler_off(bot_path, bot_config, mock_update):
     mock_context = MagicMock()
     mock_context.args = ["off"]
 
-    with patch("abyss.handlers.save_bot_config") as mock_save:
+    with patch("abyss.commands.save_bot_config") as mock_save:
         await streaming_handler.callback(mock_update, mock_context)
         mock_save.assert_called_once()
         saved_config = mock_save.call_args[0][1]

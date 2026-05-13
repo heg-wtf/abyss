@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "abyss"
-version = "2026.5.8"
+version = "2026.5.13"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
