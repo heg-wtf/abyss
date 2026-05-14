@@ -15,14 +15,10 @@ import {
 import { BotAvatar } from "@/components/bot-avatar";
 import { SlideDrawer } from "@/components/mobile/slide-drawer";
 import { SessionsDrawerPanel } from "@/components/mobile/sessions-drawer-panel";
-import type {
-  BotSummary,
-  ChatMessage,
-  RoutineSummary,
-} from "@/lib/abyss-api";
+import { parseChatEvents } from "@/lib/abyss-api";
+import type { ChatMessage, RoutineSummary } from "@/lib/abyss-api";
 
 interface Props {
-  bots: BotSummary[];
   routine: RoutineSummary;
   initialMessages: ChatMessage[];
 }
@@ -37,7 +33,7 @@ interface Props {
  * button re-fetches via the proxy in case new runs landed while the
  * tab was open.
  */
-export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
+export function MobileRoutineScreen({ routine, initialMessages }: Props) {
   const router = useRouter();
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [refreshing, setRefreshing] = React.useState(false);
@@ -59,13 +55,25 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
     }
   };
 
+  const abortRef = React.useRef<AbortController | null>(null);
+
+  // Cancel any in-flight reply on unmount so a setMessages on a dead
+  // component (and the orphan optimistic bubble) never happens.
+  React.useEffect(
+    () => () => {
+      abortRef.current?.abort();
+    },
+    [],
+  );
+
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
+
     // Optimistic user bubble so the input feels responsive while the
-    // SSE response streams in. We swap the placeholder out for the
-    // server-truthed messages once the assistant reply lands.
+    // SSE response streams in. Rolled back below if the request
+    // fails or is aborted before the assistant reply lands.
     const optimistic: ChatMessage = {
       role: "user",
       content: text,
@@ -73,6 +81,10 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
     };
     setMessages((prev) => [...prev, optimistic]);
     setDraft("");
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     let assistantText = "";
     try {
       const response = await fetch(
@@ -81,37 +93,18 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text }),
+          signal: controller.signal,
         },
       );
       if (!response.ok || !response.body) {
         setMessages((prev) => prev.filter((m) => m !== optimistic));
         return;
       }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // SSE frames separated by blank lines.
-        const frames = buffer.split("\n\n");
-        buffer = frames.pop() ?? "";
-        for (const frame of frames) {
-          const line = frame
-            .split("\n")
-            .find((l) => l.startsWith("data: "));
-          if (!line) continue;
-          try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "chunk" && typeof event.text === "string") {
-              assistantText += event.text;
-            } else if (event.type === "done" && typeof event.text === "string") {
-              assistantText = event.text;
-            }
-          } catch {
-            // ignore malformed frame
-          }
+      for await (const event of parseChatEvents(response.body)) {
+        if (event.type === "chunk") {
+          assistantText += event.text;
+        } else if (event.type === "done") {
+          assistantText = event.text;
         }
       }
       if (assistantText) {
@@ -124,7 +117,15 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
           },
         ]);
       }
+    } catch (error) {
+      if ((error as Error)?.name !== "AbortError") {
+        // Stream errored before the assistant reply landed —
+        // drop the optimistic bubble so the user can retry without
+        // a ghost message in the transcript.
+        setMessages((prev) => prev.filter((m) => m !== optimistic));
+      }
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       setSending(false);
     }
   };
@@ -242,16 +243,15 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
         />
       </SlideDrawer>
 
-      {/* ``bots`` is unused inside the routine screen today, but
-          stays threaded through the page so future "switch routine"
-          affordances can pick from the same roster the chat surface
-          uses. */}
-      <span className="hidden">{bots.length}</span>
     </div>
   );
 }
 
-function RoutineMessageBubble({ message }: { message: ChatMessage }) {
+const RoutineMessageBubble = React.memo(function RoutineMessageBubble({
+  message,
+}: {
+  message: ChatMessage;
+}) {
   const isUser = message.role === "user";
   return (
     <li className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
@@ -290,4 +290,4 @@ function RoutineMessageBubble({ message }: { message: ChatMessage }) {
       </div>
     </li>
   );
-}
+});

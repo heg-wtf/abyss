@@ -1,8 +1,8 @@
 /**
  * Client for the abyss chat sidecar HTTP API.
  *
- * The sidecar runs in-process with the Telegram bots (`abyss start`) and
- * binds to 127.0.0.1:3848 by default. Override with `ABYSS_CHAT_API_URL`.
+ * The sidecar (`abyss start`) serves the mobile PWA and dashboard chat,
+ * binding to 127.0.0.1:3848 by default. Override with `ABYSS_CHAT_API_URL`.
  */
 
 const DEFAULT_BASE = "http://127.0.0.1:3848";
@@ -228,39 +228,9 @@ export async function cancelChat(bot: string, sessionId: string): Promise<void> 
 }
 
 /**
- * Forward a streaming chat request to the sidecar and return the raw
- * `Response`. Caller is responsible for piping the body into another
- * `Response` (for Next.js API proxying) or parsing SSE locally.
- *
- * `attachments` is the list of `path` values returned by
- * `uploadAttachment()`. Empty list omits the field entirely.
- */
-export async function streamChatRaw(
-  bot: string,
-  sessionId: string,
-  message: string,
-  signal?: AbortSignal,
-  attachments: string[] = []
-): Promise<Response> {
-  const body: Record<string, unknown> = {
-    bot,
-    session_id: sessionId,
-    message,
-  };
-  if (attachments.length > 0) {
-    body.attachments = attachments;
-  }
-  return fetch(getApiBase() + "/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-}
-
-/**
  * Upload a single attachment via the sidecar's multipart endpoint.
- * Returns the stored path that should be passed to `streamChatRaw`.
+ * Returns the stored path that mobile / dashboard chat surfaces pass
+ * back to ``/api/chat`` as part of the ``attachments`` array.
  *
  * Throws `UpstreamError` for HTTP failures, plain `Error` for network errors.
  */

@@ -104,36 +104,45 @@ export function SessionsDrawerPanel({
     };
   }, [menuAnchor]);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const botResp = await fetch("/api/chat/bots");
-      const botData = botResp.ok ? await botResp.json() : { bots: [] };
-      const botList: BotSummary[] = botData.bots ?? [];
-      setBots(botList);
-
-      const all = await Promise.all(
-        botList.map(async (bot) => {
-          const sessResp = await fetch(
-            `/api/chat/sessions?bot=${encodeURIComponent(bot.name)}`,
-          );
-          if (!sessResp.ok) return [] as ChatSession[];
-          const data = (await sessResp.json()) as { sessions: ChatSession[] };
-          return data.sessions;
-        }),
-      );
-      const merged = all
-        .flat()
-        .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-      setSessions(merged);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   React.useEffect(() => {
-    void load();
-  }, [load]);
+    // Cancellation guard: opening + closing the drawer quickly over
+    // a slow Tailscale connection used to fire ``setBots`` /
+    // ``setSessions`` on an unmounted panel. ``cancelled`` short-
+    // circuits every setter after unmount.
+    let cancelled = false;
+    const run = async () => {
+      setLoading(true);
+      try {
+        const botResp = await fetch("/api/chat/bots");
+        const botData = botResp.ok ? await botResp.json() : { bots: [] };
+        const botList: BotSummary[] = botData.bots ?? [];
+        if (cancelled) return;
+        setBots(botList);
+
+        const all = await Promise.all(
+          botList.map(async (bot) => {
+            const sessResp = await fetch(
+              `/api/chat/sessions?bot=${encodeURIComponent(bot.name)}`,
+            );
+            if (!sessResp.ok) return [] as ChatSession[];
+            const data = (await sessResp.json()) as { sessions: ChatSession[] };
+            return data.sessions;
+          }),
+        );
+        if (cancelled) return;
+        const merged = all
+          .flat()
+          .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+        setSessions(merged);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Routines (cron + heartbeat) fetch lazily — only when the tab is
   // opened — so cold-loading the drawer for normal chat use doesn't
