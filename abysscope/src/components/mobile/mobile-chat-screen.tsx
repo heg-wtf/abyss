@@ -123,6 +123,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const isTouchDevice = useIsTouchDevice();
 
   const stream = useMultiSessionChatStream();
   const activeStream = getSessionStream(stream.streams, session.id);
@@ -441,11 +442,37 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
+  /**
+   * Enter-key semantics differ by device:
+   *
+   * - **Desktop / non-touch.** Enter sends, Shift+Enter inserts a newline.
+   *   This matches the convention every modern web chat (Slack, Discord,
+   *   Claude.ai, ChatGPT) uses on a real keyboard. Cmd/Ctrl+Enter also
+   *   sends so muscle memory from the previous behavior keeps working.
+   * - **Touch.** Enter always inserts a newline — the user has no easy
+   *   modifier key, the send button is right next to the textarea, and
+   *   accidental sends on the virtual keyboard are a worse failure than
+   *   a missed newline. Cmd/Ctrl+Enter still sends for bluetooth keyboards.
+   *
+   * ``isComposing`` skips the IME confirm Enter (Hangul / Japanese
+   * candidate selection) so the first key release after a composition
+   * never triggers send.
+   */
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey && event.ctrlKey) {
-      event.preventDefault();
-      void handleSend();
+    if (event.key !== "Enter") return;
+    if (event.nativeEvent.isComposing) return;
+
+    const isModifierEnter = event.ctrlKey || event.metaKey;
+    if (isTouchDevice) {
+      if (isModifierEnter) {
+        event.preventDefault();
+        void handleSend();
+      }
+      return;
     }
+    if (event.shiftKey) return;
+    event.preventDefault();
+    void handleSend();
   };
 
   const botSummary =
@@ -791,6 +818,28 @@ function CancelStreamButton({ onCancel }: { onCancel: () => void }) {
       </span>
     </button>
   );
+}
+
+/**
+ * Detect touch-only input devices via the standard CSS media query.
+ *
+ * ``(hover: none) and (pointer: coarse)`` matches phones / tablets but
+ * not a laptop with a touchscreen + keyboard (which reports
+ * ``hover: hover``). The result starts ``false`` so SSR stays
+ * deterministic; the actual value lands on first paint via the
+ * ``useEffect`` below. ``addEventListener('change', ...)`` keeps the
+ * value live if the user docks an external keyboard mid-session.
+ */
+function useIsTouchDevice() {
+  const [isTouch, setIsTouch] = React.useState(false);
+  React.useEffect(() => {
+    const query = window.matchMedia("(hover: none) and (pointer: coarse)");
+    const update = () => setIsTouch(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return isTouch;
 }
 
 function StreamProgress({
