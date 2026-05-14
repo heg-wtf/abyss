@@ -1387,16 +1387,18 @@ class ChatServer:
         elif command_name == "skills":
             result = await commands.cmd_skills(ctx)
         elif command_name == "heartbeat":
-            # ``/heartbeat run`` used to depend on a Telegram send-message
-            # callback; with Telegram gone the path is not wired up to
-            # the PWA chat surface yet. Status / on / off still work
-            # because they only mutate config.
+            # ``/heartbeat run`` triggers the same code path as the
+            # scheduler; the result lands in
+            # ``heartbeat_sessions/conversation-*.md`` and (when a
+            # PWA subscription exists) a Web Push notification.
             if ctx.args and ctx.args[0].lower() == "run":
+                from abyss.heartbeat import execute_heartbeat
+
+                await execute_heartbeat(bot_name=ctx.bot_name, bot_config=ctx.bot_config)
                 return (
-                    "⚠️ /heartbeat run is not yet wired into the PWA chat. "
-                    "The scheduled heartbeat still fires; this is the "
-                    "manual-trigger path."
-                ), None
+                    "💓 Heartbeat fired. Check the Routines tab for the result.",
+                    None,
+                )
             result = await commands.cmd_heartbeat(ctx)
         elif command_name == "compact":
             preview = await commands.cmd_compact_preview(ctx)
@@ -1405,15 +1407,35 @@ class ChatServer:
             run_result = await commands.cmd_compact_run(ctx)
             return f"{preview.text}\n\n{run_result.text}", None
         elif command_name == "cron":
-            # ``run`` (manual trigger) and ``edit`` (multi-step prompt)
-            # are not available on the PWA chat surface yet. Other
-            # subcommands (list, add, remove, enable, disable) work.
             sub = ctx.args[0].lower() if ctx.args else ""
-            if sub in {"run", "edit"}:
+            if sub == "run":
+                # ``/cron run <job>`` triggers the same function the
+                # scheduler invokes — the result lands in the
+                # routine's conversation log + (when subscribed) Web
+                # Push.
+                if len(ctx.args) < 2:
+                    return "Usage: `/cron run <job_name>`", None
+                from abyss.cron import execute_cron_job, get_cron_job
+
+                job_name = ctx.args[1]
+                cron_job = get_cron_job(ctx.bot_name, job_name)
+                if cron_job is None:
+                    return f"Cron job '{job_name}' not found.", None
+                await execute_cron_job(
+                    bot_name=ctx.bot_name,
+                    job=cron_job,
+                    bot_config=ctx.bot_config,
+                )
                 return (
-                    f"⚠️ /cron {sub} is not yet wired into the PWA chat. "
-                    "Edit the bot's cron.yaml directly for now."
-                ), None
+                    f"⏰ Cron job '{job_name}' fired. Check the Routines tab.",
+                    None,
+                )
+            if sub == "edit":
+                return (
+                    "⚠️ /cron edit (multi-step) is not yet wired into the PWA chat. "
+                    "Use `abyss bot edit <bot>` to edit cron.yaml directly.",
+                    None,
+                )
             result = await commands.cmd_cron(ctx)
         else:
             raise LookupError(f"unknown command: /{command_name}")
