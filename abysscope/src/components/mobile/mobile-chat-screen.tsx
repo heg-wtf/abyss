@@ -285,6 +285,78 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     [pending.length, enqueueFile]
   );
 
+  /**
+   * One-slot message queue. When the user hits Send while a reply is
+   * already streaming, we keep their bubble optimistic and stash the
+   * payload here; the streaming-falling-edge effect below flushes it as
+   * soon as the current turn finishes. A new Send overwrites the slot
+   * (single-message queue, à la Claude.ai), and the queued bubble
+   * carries an explicit cancel control so the user can pull it back.
+   */
+  type QueuedSend = {
+    userMessageId: string;
+    display: string;
+    attachmentPaths: string[];
+  };
+  const [queued, setQueued] = React.useState<QueuedSend | null>(null);
+
+  const executeStreamSend = React.useCallback(
+    async (userMessageId: string, display: string, attachmentPaths: string[]) => {
+      try {
+        const reply = await stream.send(
+          session.bot,
+          session.id,
+          display,
+          attachmentPaths
+        );
+        // Skip the assistant bubble only when both text *and* file are
+        // empty (e.g. ``AbortError`` early return). ``/send <filename>``
+        // returns empty text + a non-null ``commandFile``; we still
+        // want a bubble so the user can tap the download chip.
+        if (reply.text || reply.commandFile) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: newId(),
+              role: "assistant",
+              content: reply.text,
+              timestamp: new Date().toISOString(),
+              commandFile: reply.commandFile ?? null,
+            },
+          ]);
+        }
+      } catch (error) {
+        // Roll back the optimistic user bubble so the chat does not
+        // silently swallow a failed send.
+        setMessages((prev) => prev.filter((m) => m.id !== userMessageId));
+        setTransientError(
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+    },
+    [session.bot, session.id, stream]
+  );
+
+  // Falling-edge of streaming → flush the queued message, if any.
+  // ``useRef`` guards against firing on the initial mount when the
+  // stream was already idle.
+  const previousStreamingRef = React.useRef(activeStream.streaming);
+  React.useEffect(() => {
+    const wasStreaming = previousStreamingRef.current;
+    previousStreamingRef.current = activeStream.streaming;
+    if (!wasStreaming || activeStream.streaming || !queued) return;
+    const next = queued;
+    setQueued(null);
+    void executeStreamSend(next.userMessageId, next.display, next.attachmentPaths);
+  }, [activeStream.streaming, queued, executeStreamSend]);
+
+  const cancelQueued = React.useCallback(() => {
+    if (!queued) return;
+    const targetId = queued.userMessageId;
+    setMessages((prev) => prev.filter((m) => m.id !== targetId));
+    setQueued(null);
+  }, [queued]);
+
   const handleSend = async () => {
     if (!sendable) return;
     const text = draft.trim();
@@ -320,41 +392,32 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           };
         }),
     };
+
+    // Streaming in progress — overwrite the single-slot queue. The
+    // previous queued bubble (if any) is dropped so we never end up
+    // with two pending sends fighting for the next turn.
+    if (activeStream.streaming) {
+      setMessages((prev) => {
+        const withoutOldQueue = queued
+          ? prev.filter((m) => m.id !== queued.userMessageId)
+          : prev;
+        return [...withoutOldQueue, userMessage];
+      });
+      setDraft("");
+      setPending([]);
+      setQueued({
+        userMessageId: userMessage.id,
+        display,
+        attachmentPaths,
+      });
+      return;
+    }
+
+    // Idle — fire immediately.
     setMessages((prev) => [...prev, userMessage]);
     setDraft("");
     setPending([]);
-
-    try {
-      const reply = await stream.send(
-        session.bot,
-        session.id,
-        display,
-        attachmentPaths
-      );
-      // Skip the assistant bubble only when both text *and* file are
-      // empty (e.g. ``AbortError`` early return). ``/send <filename>``
-      // returns empty text + a non-null ``commandFile``; we still
-      // want a bubble so the user can tap the download chip.
-      if (reply.text || reply.commandFile) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: newId(),
-            role: "assistant",
-            content: reply.text,
-            timestamp: new Date().toISOString(),
-            commandFile: reply.commandFile ?? null,
-          },
-        ]);
-      }
-    } catch (error) {
-      // Roll back the optimistic user bubble so the chat does not
-      // silently swallow a failed send.
-      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
-      setTransientError(
-        error instanceof Error ? error.message : String(error)
-      );
-    }
+    await executeStreamSend(userMessage.id, display, attachmentPaths);
   };
 
   const handleSlashOpen = async () => {
@@ -441,7 +504,12 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         )}
         <ul className="space-y-3">
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble
+              key={message.id}
+              message={message}
+              queued={queued?.userMessageId === message.id}
+              onCancelQueue={cancelQueued}
+            />
           ))}
           {activeStream.streaming && (
             <li
@@ -546,7 +614,12 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             <button
               type="button"
               aria-label="Send message"
-              disabled={!sendable || activeStream.streaming}
+              title={
+                activeStream.streaming
+                  ? "응답 완료 후 자동 전송"
+                  : "Send message"
+              }
+              disabled={!sendable}
               onClick={handleSend}
               className="rounded-full bg-primary p-2 text-primary-foreground disabled:opacity-50"
             >
@@ -779,17 +852,30 @@ function StreamProgress({
   );
 }
 
-function MessageBubble({ message }: { message: ConversationMessage }) {
+function MessageBubble({
+  message,
+  queued = false,
+  onCancelQueue,
+}: {
+  message: ConversationMessage;
+  queued?: boolean;
+  onCancelQueue?: () => void;
+}) {
   const isUser = message.role === "user";
   return (
     <li className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`min-w-0 max-w-[85%] overflow-hidden rounded-2xl px-3 py-2 text-sm ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground"
+        className={`flex max-w-[85%] flex-col gap-1 ${
+          isUser ? "items-end" : "items-start"
         }`}
       >
+        <div
+          className={`min-w-0 overflow-hidden rounded-2xl px-3 py-2 text-sm ${
+            isUser
+              ? `bg-primary text-primary-foreground ${queued ? "opacity-70" : ""}`
+              : "bg-muted text-foreground"
+          }`}
+        >
         {isUser ? (
           <div className="whitespace-pre-wrap">{message.content}</div>
         ) : (
@@ -823,9 +909,28 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
             </a>
           </div>
         ) : null}
-        <div className="mt-1 text-right text-[10px] opacity-60">
-          {formatTime(message.timestamp)}
+          <div className="mt-1 text-right text-[10px] opacity-60">
+            {formatTime(message.timestamp)}
+          </div>
         </div>
+        {queued && (
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <StreamingDots inline />
+            <span>응답 완료 후 전송</span>
+            {onCancelQueue && (
+              <button
+                type="button"
+                onClick={onCancelQueue}
+                aria-label="Cancel queued message"
+                className="-m-2 inline-flex items-center justify-center rounded-full p-2 hover:text-foreground"
+              >
+                <span className="flex h-4 w-4 items-center justify-center rounded-full border border-current">
+                  <X className="h-2.5 w-2.5" aria-hidden />
+                </span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </li>
   );
