@@ -355,26 +355,12 @@ describe("/mobile route skeleton", () => {
     expect(visibility).toMatch(/keepalive: true/);
   });
 
-  it("handlers.py closes the file handle when replying with a document", () => {
-    const handlersPath = path.resolve(
-      __dirname,
-      "..",
-      "..",
-      "..",
-      "..",
-      "..",
-      "src",
-      "abyss",
-      "handlers.py"
-    );
-    const source = readFileSync(handlersPath, "utf8");
-    // ``reply_document`` used to receive ``open(...)`` inline with no
-    // matching close path — github-code-quality bot flagged this on
-    // PR #50. The fix wraps the handle in a ``with`` block.
-    expect(source).toMatch(/with open\(result\.file_path, "rb"\) as document:/);
-  });
+  // ``handlers.py`` was the Telegram adapter — it was deleted in
+  // v2026.05.14 when the PWA + dashboard chat became the only
+  // surface. The original assertion (file-handle closure on
+  // ``reply_document``) had no remaining production code to guard.
 
-  it("workspace and sessions slide in from the side instead of a centred modal", () => {
+it("workspace and sessions slide in from the side instead of a centred modal", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
     // Workspace + sessions both go through the shared SlideDrawer
     // primitive. The Dialog-based workspace (with its showCloseButton

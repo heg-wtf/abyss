@@ -1,12 +1,23 @@
 # abyss Development Guide
 
-Personal AI assistant: Telegram + Claude Code. Runs locally on Mac.
+Personal AI assistant: PWA + Claude Code. Runs locally on Mac;
+reached from the phone over Tailscale.
+
+> **v2026.05.14** — Telegram + the group surface (orchestrator /
+> member, `bot_to_bot_mode`, `markdown_to_telegram_html`,
+> `allowed_users`, etc.) were removed. Sections below still mention
+> them in their original wording; treat those as historical context
+> until the per-section rewrite lands. The current surface is the
+> mobile PWA + dashboard chat (`abyss.chat_server`), with cron and
+> heartbeat results landing in `conversation-*.md` + Web Push.
 
 ## Tech Stack
 
 - Python >= 3.11, uv package manager
-- Typer (CLI), Rich (output), python-telegram-bot v21+ (async), PyYAML (config), croniter (cron), httpx (HTTP for OpenRouter)
+- Typer (CLI), Rich (output), PyYAML (config), croniter (cron), httpx (HTTP for OpenRouter)
 - LLM backends: Claude Code CLI (`claude -p`) + Python Agent SDK (default), OpenAI-compatible (`openai_compat`) for MiniMax / OpenRouter / any OpenAI-compat endpoint (opt-in per bot)
+- Delivery: in-process `chat_server` (HTTP/SSE on 127.0.0.1:3848) +
+  Web Push via `pywebpush`. Telegram polling is gone.
 
 ## Dev Commands
 

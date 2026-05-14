@@ -300,7 +300,7 @@ async def _sse_write(response: web.StreamResponse, event: dict[str, Any]) -> Non
 
 
 _SECTION_PATTERN = re.compile(
-    r"##\s+(user|assistant)\s+\(([^)]+)\)\s*\n+(.*?)(?=\n##\s+(?:user|assistant)\s+\(|\Z)",
+    r"##\s+(user|assistant|human)\s+\(([^)]+)\)\s*\n+(.*?)(?=\n##\s+(?:user|assistant|human)\s+\(|\Z)",
     re.DOTALL,
 )
 
@@ -385,6 +385,15 @@ def _parse_conversation_messages(
 
 
 def _bot_display_name(bot_name: str) -> str:
+    """Resolve a bot's user-facing label.
+
+    Priority: ``display_name`` → ``telegram_botname`` → slug. The
+    ``telegram_botname`` lookup is a backward-compat shim for
+    ``bot.yaml`` files written before v2026.05.14 — those carry no
+    ``display_name`` because the original onboarding flow filled it
+    in from BotFather. Without this shim the chat list, drawer, and
+    Routines tab fall back to the raw slug (e.g. ``cclawnotifybot``).
+    """
     cfg = load_bot_config(bot_name) or {}
     return cfg.get("display_name") or cfg.get("telegram_botname") or bot_name
 
@@ -612,6 +621,10 @@ class ChatServer:
         router.add_get(
             "/chat/routines/{bot}/{kind}/{job}/messages",
             self._handle_get_routine_messages,
+        )
+        router.add_post(
+            "/chat/routines/{bot}/{kind}/{job}/chat",
+            self._handle_routine_chat,
         )
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
@@ -927,7 +940,110 @@ class ChatServer:
         # session strings used by ``_parse_conversation_messages``
         # don't matter — pass empty placeholders.
         messages = _parse_conversation_messages(session_dir, "", "")
-        return web.json_response({"messages": messages})
+        # Filter out cron / heartbeat *trigger* user entries written
+        # before the user-role split (role="user"). Real keyboard
+        # replies via ``_handle_routine_chat`` log as role="human",
+        # so dropping "user" here hides the noisy system prompts
+        # without losing actual conversation. Assistant replies are
+        # always shown. Re-tag ``human`` → ``user`` in the response
+        # so the existing mobile bubble renderer (which checks
+        # ``role === "user"``) keeps working.
+        filtered: list[dict[str, Any]] = []
+        for entry in messages:
+            role = entry.get("role")
+            if role == "user":
+                # Pre-split trigger; hide.
+                continue
+            if role == "human":
+                entry = {**entry, "role": "user"}
+            filtered.append(entry)
+        return web.json_response({"messages": filtered})
+
+    async def _handle_routine_chat(self, request: web.Request) -> web.StreamResponse:
+        """Reply to a cron / heartbeat routine from the mobile Routines tab.
+
+        Mirrors ``_handle_chat`` but targets the routine's session
+        directory (``cron_sessions/<job>`` or ``heartbeat_sessions``)
+        instead of a ``chat_<id>`` session. The Claude session ID
+        stored alongside the cron / heartbeat run gets resumed so the
+        user's reply lands in the same conversation that the scheduled
+        run produced — the original prompt context is preserved.
+        """
+        bot_name = request.match_info["bot"]
+        kind = request.match_info["kind"]
+        job_name = request.match_info["job"]
+
+        session_dir = _resolve_routine_dir(bot_name, kind, job_name)
+        if session_dir is None or not session_dir.exists():
+            return web.json_response({"error": "routine not found"}, status=404)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        message = (body.get("message") or "").strip()
+        if not message:
+            return web.json_response({"error": "message required"}, status=400)
+        if len(message.encode("utf-8")) > MAX_MESSAGE_BYTES:
+            return web.json_response({"error": "message too large"}, status=413)
+
+        bot_config = load_bot_config(bot_name)
+        if bot_config is None:
+            return web.json_response({"error": "bot not found"}, status=404)
+        bot_path = bot_directory(bot_name)
+
+        sse = web.StreamResponse(
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
+        await sse.prepare(request)
+
+        async def on_chunk(chunk: str) -> None:
+            with suppress(Exception):
+                await _sse_write(sse, {"type": "chunk", "text": chunk})
+
+        # Route the reply through ``chat_core.process_chat_message``
+        # with an explicit session-dir override; ``session_key``
+        # keeps the SDK pool entry separate from regular chats so a
+        # routine reply doesn't collide with a same-bot dashboard
+        # session that happens to be active.
+        synthetic_chat_id = f"{kind}:{job_name}"
+        session_key = f"{bot_name}:{kind}:{job_name}"
+        full_text = ""
+        try:
+            full_text = await process_chat_message(
+                bot_name=bot_name,
+                bot_path=bot_path,
+                bot_config=bot_config,
+                chat_id=synthetic_chat_id,
+                user_message=message,
+                on_chunk=on_chunk,
+                session_key=session_key,
+                attachments=(),
+                session_dir_override=session_dir,
+                # ``human`` distinguishes a real keyboard reply from
+                # the legacy ``user`` entries that cron / heartbeat
+                # left in older conversation files. The Routines viewer
+                # filters on this so the noisy trigger prompts that
+                # predate the user-role split stay hidden.
+                user_role="human",
+            )
+            await _sse_write(sse, {"type": "done", "text": full_text})
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "routine chat failed bot=%s %s/%s: %s",
+                bot_name,
+                kind,
+                job_name,
+                error,
+            )
+            with suppress(Exception):
+                await _sse_write(sse, {"type": "error", "message": str(error)})
+        return sse
 
     async def _handle_cancel(self, request: web.Request) -> web.Response:
         try:

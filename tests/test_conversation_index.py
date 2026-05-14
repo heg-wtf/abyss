@@ -410,12 +410,6 @@ def test_db_path_for_bot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert ci.db_path_for_bot("alpha") == expected
 
 
-def test_db_path_for_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
-    expected = tmp_path / "groups" / "team_one" / "conversation.db"
-    assert ci.db_path_for_group("team_one") == expected
-
-
 # ─── reindex wipes index even when source dir is missing ─────────────────
 
 

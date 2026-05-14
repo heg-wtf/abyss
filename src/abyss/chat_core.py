@@ -154,11 +154,16 @@ async def process_chat_message(
     session_key: str | None = None,
     timeout: int = 600,
     attachments: tuple[Path, ...] = (),
+    session_dir_override: Path | None = None,
+    user_role: str = "user",
 ) -> str:
-    """End-to-end chat turn used by non-Telegram callers (dashboard chat).
+    """End-to-end chat turn used by the dashboard / mobile callers.
 
     Steps:
       1. ``ensure_session`` to materialize the session directory + CLAUDE.md
+         (skipped when ``session_dir_override`` is supplied — used by the
+         Routines reply path so the cron / heartbeat session dir is
+         reused instead of creating a new ``chat_<id>`` directory)
       2. Append the user message (with attachment markers) to the log
       3. Bootstrap or resume the Claude session, embedding ``File: <path>``
          lines for each attachment so the agent can ``Read`` them
@@ -167,14 +172,19 @@ async def process_chat_message(
       6. Return the full assistant text
 
     ``attachments`` is a tuple of absolute Paths inside the session workspace.
-    Mirrors the Telegram ``file_handler`` approach: paths are inlined into
-    the prompt as text and Claude opens them via its ``Read`` tool. No
+    Mirrors the original file-handler approach: paths are inlined into the
+    prompt as text and Claude opens them via its ``Read`` tool. No
     multimodal SDK wiring is required.
     """
-    session_dir = ensure_session(bot_path, chat_id, bot_name=bot_name)
+    if session_dir_override is not None:
+        session_dir = session_dir_override
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "workspace").mkdir(exist_ok=True)
+    else:
+        session_dir = ensure_session(bot_path, chat_id, bot_name=bot_name)
 
     log_text, prompt_text = _compose_user_turn(user_message, attachments)
-    log_conversation(session_dir, "user", log_text)
+    log_conversation(session_dir, user_role, log_text)
 
     prompt, claude_session_id, resume_session = prepare_session_context(
         bot_path, session_dir, prompt_text

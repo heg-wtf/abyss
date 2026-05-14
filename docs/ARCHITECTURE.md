@@ -1,5 +1,15 @@
 # Architecture
 
+> **v2026.05.14** — Telegram and the group surface were removed.
+> Wherever this doc still references Telegram polling, the
+> `Application` lifecycle, group orchestrator/member routing, or
+> `bot_to_bot_mode`, treat it as historical context — replaced by
+> the PWA chat surface and the in-process `chat_server` (HTTP/SSE on
+> 127.0.0.1:3848). The cron + heartbeat schedulers still run; their
+> only delivery paths now are the conversation markdown log and
+> Web Push.
+
+
 ## Overall Structure
 
 ```mermaid
