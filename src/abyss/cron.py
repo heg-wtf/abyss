@@ -427,6 +427,27 @@ async def execute_cron_job(
         response = f"Cron job '{job_name}' failed: {error}"
         logger.error("Cron job '%s' failed: %s", job_name, error)
 
+    # Web Push delivery (coexists with the Telegram callback below).
+    # ``send_push`` no-ops when no PWA subscriptions exist, so this is
+    # safe on freshly-installed dashboards. Failures must never break
+    # the Telegram path that follows.
+    from contextlib import suppress as _suppress
+
+    with _suppress(Exception):
+        from abyss.web_push import send_push as _send_push
+
+        preview = response.replace("\n", " ").strip()
+        if len(preview) > 120:
+            preview = preview[:117] + "…"
+        display_name = (
+            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
+        )
+        await _send_push(
+            title=f"⏰ {display_name}: {job_name}",
+            body=preview or f"Cron job '{job_name}' finished.",
+            bot=bot_name,
+        )
+
     # Send results to all allowed users (fallback to session chat IDs)
     allowed_users = bot_config.get("allowed_users", [])
     if not allowed_users:

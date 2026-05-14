@@ -1230,3 +1230,137 @@ async def test_rename_metadata_survives_session_listing(client, abyss_home):
     import json as _json
 
     assert _json.loads(meta_file.read_text())["custom_name"] == "starred"
+
+
+# ---------------------------------------------------------------------------
+# Web Push routes + trigger (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_push_vapid_key_endpoint_returns_public_key(client, abyss_home):
+    resp = await client.get("/chat/push/vapid-key")
+    assert resp.status == 200
+    body = await resp.json()
+    assert "publicKey" in body
+    assert isinstance(body["publicKey"], str)
+    assert len(body["publicKey"]) > 50
+
+
+@pytest.mark.asyncio
+async def test_push_subscribe_persists(client, abyss_home):
+    sub = {
+        "endpoint": "https://fcm.googleapis.com/fcm/send/test1",
+        "keys": {"p256dh": "p256dh-stub", "auth": "auth-stub"},
+        "device_id": "phone-1",
+    }
+    resp = await client.post("/chat/push/subscribe", json=sub)
+    assert resp.status == 200
+    assert (await resp.json()) == {"ok": True}
+
+    from abyss import web_push as web_push_mod
+
+    subs = web_push_mod.list_subscriptions()
+    assert len(subs) == 1
+    assert subs[0]["endpoint"] == sub["endpoint"]
+
+
+@pytest.mark.asyncio
+async def test_push_subscribe_requires_endpoint(client, abyss_home):
+    resp = await client.post("/chat/push/subscribe", json={"keys": {}})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_push_unsubscribe(client, abyss_home):
+    sub = {
+        "endpoint": "https://example/push/x",
+        "keys": {"p256dh": "p", "auth": "a"},
+        "device_id": "phone-1",
+    }
+    await client.post("/chat/push/subscribe", json=sub)
+    resp = await client.request(
+        "DELETE",
+        "/chat/push/subscribe",
+        json={"endpoint": sub["endpoint"]},
+    )
+    assert resp.status == 200
+    from abyss import web_push as web_push_mod
+
+    assert web_push_mod.list_subscriptions() == []
+
+
+@pytest.mark.asyncio
+async def test_push_visibility_marks_device(client, abyss_home):
+    from abyss import web_push as web_push_mod
+
+    web_push_mod._visible_devices.clear()
+
+    resp = await client.post(
+        "/chat/push/visibility",
+        json={"deviceId": "phone-1", "visible": True},
+    )
+    assert resp.status == 200
+    assert web_push_mod.is_device_visible("phone-1") is True
+
+    await client.post(
+        "/chat/push/visibility",
+        json={"deviceId": "phone-1", "visible": False},
+    )
+    assert web_push_mod.is_device_visible("phone-1") is False
+
+
+@pytest.mark.asyncio
+async def test_push_visibility_requires_device_id(client, abyss_home):
+    resp = await client.post("/chat/push/visibility", json={"visible": True})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_chat_reply_triggers_push(client, abyss_home, patch_backend):
+    """A completed chat reply pings ``web_push.send_push`` so subscribed
+    devices receive a notification when the user is not actively
+    looking at the dashboard."""
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch as patch_fn
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    with patch_fn("abyss.chat_server.web_push.send_push", new_callable=AsyncMock) as sender:
+        sse = await client.post(
+            "/chat",
+            json={"bot": "alpha", "session_id": sid, "message": "hello"},
+        )
+        # Drain the SSE so the post-done push trigger runs.
+        async for _ in sse.content.iter_any():
+            pass
+
+    sender.assert_awaited_once()
+    kwargs = sender.call_args.kwargs
+    assert kwargs["bot"] == "alpha"
+    assert kwargs["session_id"] == sid
+    assert kwargs["title"] == "Alpha"  # bot display_name
+    assert "hi there" in kwargs["body"]  # reply preview includes the assistant text
+
+
+@pytest.mark.asyncio
+async def test_slash_reply_does_not_trigger_push(client, abyss_home, patch_backend):
+    """Slash commands never invoke the LLM, so they should not page
+    the user either — the response is synchronous to the same tab
+    that fired it."""
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch as patch_fn
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    with patch_fn("abyss.chat_server.web_push.send_push", new_callable=AsyncMock) as sender:
+        sse = await client.post(
+            "/chat",
+            json={"bot": "alpha", "session_id": sid, "message": "/help"},
+        )
+        async for _ in sse.content.iter_any():
+            pass
+
+    sender.assert_not_called()

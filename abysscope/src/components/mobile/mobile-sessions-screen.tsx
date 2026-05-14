@@ -5,11 +5,14 @@ import { useRouter } from "next/navigation";
 import { Menu } from "@base-ui/react/menu";
 import {
   AlertCircle,
+  Bell,
+  BellOff,
   MessageSquarePlus,
   Pencil,
   Trash2,
   X,
 } from "lucide-react";
+import { useWebPushContext } from "@/components/web-push-provider";
 import {
   Alert,
   AlertDescription,
@@ -229,7 +232,9 @@ export function MobileSessionsScreen({ apiOnline, bots }: Props) {
     <div className="flex h-full flex-col">
       <header className="flex h-14 items-center justify-between border-b px-4">
         <h1 className="text-base font-semibold">Abyss</h1>
-        <Menu.Root>
+        <div className="flex items-center gap-2">
+          <PushToggle />
+          <Menu.Root>
           <Menu.Trigger
             disabled={!apiOnline || bots.length === 0}
             render={
@@ -260,6 +265,7 @@ export function MobileSessionsScreen({ apiOnline, bots }: Props) {
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
+        </div>
       </header>
 
       <main className="flex-1 overflow-y-auto">
@@ -562,5 +568,96 @@ function DeleteDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Push notifications toggle (Phase 4)
+// ---------------------------------------------------------------------------
+
+function PushToggle() {
+  // Reads the single ``useWebPush`` instance hoisted into
+  // ``WebPushProvider`` at the root layout, so visibility tracking +
+  // notification routing live page-wide instead of disappearing when
+  // the user navigates off the sessions list.
+  const push = useWebPushContext();
+  const [open, setOpen] = React.useState(false);
+
+  if (push.status === "unsupported") {
+    return null;
+  }
+
+  const subscribed = push.status === "subscribed";
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={subscribed ? "Notifications on" : "Notifications off"}
+        onClick={() => setOpen(true)}
+        className="rounded-full p-2 hover:bg-muted"
+      >
+        {subscribed ? (
+          <Bell className="size-4" />
+        ) : (
+          <BellOff className="size-4 text-muted-foreground" />
+        )}
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Push notifications</DialogTitle>
+            <DialogDescription className="text-xs">
+              The phone fires a notification when a bot replies, a cron
+              job finishes, or a heartbeat reports something worth
+              looking at. Active tabs are skipped so you don&apos;t get
+              double-notified.
+            </DialogDescription>
+          </DialogHeader>
+
+          {push.status === "permission-denied" && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              Notifications are blocked for this site. Re-enable them in
+              your browser settings, then reload the page.
+            </p>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            iOS Safari requires the dashboard be added to your home
+            screen before push notifications work. Tap{" "}
+            <span className="font-medium">Share → Add to Home Screen</span>{" "}
+            once, then open the icon to register.
+          </p>
+
+          {push.error && (
+            <p className="text-xs text-destructive">{push.error}</p>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Close
+            </Button>
+            {subscribed ? (
+              <Button
+                variant="outline"
+                onClick={() => push.disable()}
+                disabled={push.pending}
+              >
+                {push.pending ? "Disabling…" : "Disable"}
+              </Button>
+            ) : (
+              <Button
+                onClick={() => push.enable()}
+                disabled={
+                  push.pending || push.status === "permission-denied"
+                }
+              >
+                {push.pending ? "Enabling…" : "Enable"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

@@ -51,6 +51,24 @@ Endpoints
 ``POST /chat/speak``
     Body: ``{"text": str, "voice_id"?: str}``. Streams ``audio/mpeg`` MP3.
 
+``GET /chat/push/vapid-key``
+    Returns the server's VAPID public key so the browser can call
+    ``pushManager.subscribe``. The key is generated and cached at
+    ``~/.abyss/vapid-keys.json`` on first use.
+
+``POST /chat/push/subscribe``
+    Body: ``PushSubscription.toJSON() + {"device_id": str}``. Upserts
+    the subscription by endpoint.
+
+``DELETE /chat/push/subscribe``
+    Body: ``{"endpoint": str}``. Removes the subscription.
+
+``POST /chat/push/visibility``
+    Body: ``{"deviceId": str, "visible": bool}``. Marks a device's
+    dashboard tab as active / inactive so push deliveries can skip it.
+    TTL ~60s — a stale visibility ping does not silently block
+    notifications.
+
 ``GET /healthz``
     Always 200.
 """
@@ -73,7 +91,7 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 
-from abyss import commands
+from abyss import commands, web_push
 from abyss.chat_core import process_chat_message
 from abyss.claude_runner import (
     cancel_process,
@@ -508,6 +526,10 @@ class ChatServer:
         router.add_post("/chat/transcribe", self._handle_transcribe)
         router.add_post("/chat/speak", self._handle_speak)
         router.add_post("/chat/scribe-token", self._handle_scribe_token)
+        router.add_get("/chat/push/vapid-key", self._handle_push_vapid_key)
+        router.add_post("/chat/push/subscribe", self._handle_push_subscribe)
+        router.add_delete("/chat/push/subscribe", self._handle_push_unsubscribe)
+        router.add_post("/chat/push/visibility", self._handle_push_visibility)
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -555,6 +577,77 @@ class ChatServer:
 
     async def _handle_health(self, _request: web.Request) -> web.Response:
         return web.json_response({"status": "ok", "port": self._port})
+
+    # ------------------------------------------------------------------
+    # Web Push (Phase 1 of the Telegram → PWA migration)
+    # ------------------------------------------------------------------
+
+    async def _handle_push_vapid_key(self, _request: web.Request) -> web.Response:
+        """Return the server's VAPID public key so the browser can
+        ``pushManager.subscribe`` with it.
+
+        The key is generated on first call and cached on disk — the
+        browser then forwards the resulting subscription back to
+        ``POST /chat/push/subscribe``.
+        """
+        keys = web_push.load_vapid_keys()
+        return web.json_response({"publicKey": keys.public_key})
+
+    async def _handle_push_subscribe(self, request: web.Request) -> web.Response:
+        """Upsert a Web Push subscription.
+
+        Body is the JSON form of ``PushSubscription.toJSON()`` from
+        the browser plus our own ``device_id`` so visibility tracking
+        can skip the active tab.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        if not isinstance(body, dict) or not body.get("endpoint"):
+            return web.json_response({"error": "subscription must include endpoint"}, status=400)
+
+        try:
+            await web_push.add_subscription(body)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response({"ok": True})
+
+    async def _handle_push_unsubscribe(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        endpoint = (body or {}).get("endpoint")
+        if not isinstance(endpoint, str) or not endpoint:
+            return web.json_response({"error": "endpoint required"}, status=400)
+
+        await web_push.remove_subscription(endpoint)
+        return web.json_response({"ok": True})
+
+    async def _handle_push_visibility(self, request: web.Request) -> web.Response:
+        """Mark a device visible / hidden so ``send_push`` can skip it.
+
+        The browser pings this endpoint when the dashboard tab gains
+        / loses focus (and periodically while focused). The TTL is
+        60s so a stale ping does not silently suppress pushes long
+        after the user closed the tab.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        device_id = (body or {}).get("deviceId")
+        if not isinstance(device_id, str) or not device_id:
+            return web.json_response({"error": "deviceId required"}, status=400)
+        if body.get("visible"):
+            web_push.mark_device_visible(device_id)
+        else:
+            web_push.mark_device_hidden(device_id)
+        return web.json_response({"ok": True})
 
     async def _handle_list_bots(self, _request: web.Request) -> web.Response:
         config = load_config() or {}
@@ -786,6 +879,16 @@ class ChatServer:
                     attachments=attachment_paths,
                 )
             await _sse_write(sse, {"type": "done", "text": full_text})
+            # Web Push notification — skipped for the device currently
+            # viewing the dashboard. Failure must never break the SSE
+            # response, so wrap broadly.
+            with suppress(Exception):
+                await self._notify_chat_reply(
+                    bot_name=bot_name,
+                    bot_config=bot_config,
+                    session_id=session_id,
+                    reply_text=full_text,
+                )
         except Exception as error:  # noqa: BLE001 — propagate to client cleanly
             logger.error(
                 "chat_server: chat failed bot=%s session=%s: %s", bot_name, session_id, error
@@ -793,6 +896,35 @@ class ChatServer:
             with suppress(Exception):
                 await _sse_write(sse, {"type": "error", "message": str(error)})
         return sse
+
+    async def _notify_chat_reply(
+        self,
+        *,
+        bot_name: str,
+        bot_config: dict[str, Any],
+        session_id: str,
+        reply_text: str,
+    ) -> None:
+        """Send a Web Push notification for a completed chat reply.
+
+        The body is a short preview (~120 chars) — the full transcript
+        stays on the server, the notification click handler navigates
+        the user to the live chat.
+        """
+        if not reply_text:
+            return
+        display_name = (
+            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
+        )
+        preview = reply_text.replace("\n", " ").strip()
+        if len(preview) > 120:
+            preview = preview[:117] + "…"
+        await web_push.send_push(
+            title=display_name,
+            body=preview,
+            bot=bot_name,
+            session_id=session_id,
+        )
 
     # ------------------------------------------------------------------
     # Slash commands

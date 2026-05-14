@@ -264,6 +264,27 @@ async def execute_heartbeat(
         logger.info("Heartbeat for '%s': HEARTBEAT_OK, no notification needed", bot_name)
         return
 
+    # Web Push delivery (coexists with the Telegram callback below).
+    # ``send_push`` no-ops when there are no subscriptions, so this is
+    # safe on freshly-installed dashboards. Failures here must never
+    # break the Telegram path.
+    from contextlib import suppress as _suppress
+
+    with _suppress(Exception):
+        from abyss.web_push import send_push as _send_push
+
+        preview = response.replace("\n", " ").strip()
+        if len(preview) > 120:
+            preview = preview[:117] + "…"
+        display_name = (
+            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
+        )
+        await _send_push(
+            title=f"💓 {display_name}",
+            body=preview or "Heartbeat check ran.",
+            bot=bot_name,
+        )
+
     # Send notification to all allowed users (fallback to session chat IDs)
     allowed_users = bot_config.get("allowed_users", [])
     if not allowed_users:
