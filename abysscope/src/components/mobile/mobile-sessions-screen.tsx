@@ -25,14 +25,64 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  createChatSession,
-  deleteChatSession,
-  listChatSessions,
-  renameChatSession,
-  type BotSummary,
-  type ChatSession,
-} from "@/lib/abyss-api";
+import type { BotSummary, ChatSession } from "@/lib/abyss-api";
+
+// Client components must hit the Next.js proxy routes (``/api/chat/...``)
+// instead of ``abyss-api`` helpers that point at ``127.0.0.1:3848``.
+// From a phone, ``127.0.0.1`` is the *phone's* loopback and the
+// request silently dies. The dashboard server (Mac) is the only one
+// that can reach the sidecar directly, so all reads/writes go through
+// its proxy routes.
+
+async function fetchSessions(bot: string): Promise<ChatSession[]> {
+  const response = await fetch(
+    `/api/chat/sessions?bot=${encodeURIComponent(bot)}`
+  );
+  if (!response.ok) return [];
+  const data = (await response.json()) as { sessions: ChatSession[] };
+  return data.sessions;
+}
+
+async function createSession(bot: string): Promise<ChatSession> {
+  const response = await fetch("/api/chat/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bot }),
+  });
+  if (!response.ok) {
+    throw new Error(`createSession failed: ${response.status}`);
+  }
+  return (await response.json()) as ChatSession;
+}
+
+async function deleteSession(bot: string, id: string): Promise<void> {
+  const response = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    throw new Error(`deleteSession failed: ${response.status}`);
+  }
+}
+
+async function renameSession(
+  bot: string,
+  id: string,
+  name: string
+): Promise<{ custom_name: string | null }> {
+  const response = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(id)}/rename`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`renameSession failed: ${response.status}`);
+  }
+  return (await response.json()) as { custom_name: string | null };
+}
 
 interface Props {
   apiOnline: boolean;
@@ -139,7 +189,7 @@ export function MobileSessionsScreen({ apiOnline, bots }: Props) {
     setErrorMessage(null);
     try {
       const results = await Promise.all(
-        bots.map((bot) => listChatSessions(bot.name).catch(() => []))
+        bots.map((bot) => fetchSessions(bot.name).catch(() => []))
       );
       const merged = results
         .flat()
@@ -162,7 +212,7 @@ export function MobileSessionsScreen({ apiOnline, bots }: Props) {
 
   const handleCreate = async (botName: string) => {
     try {
-      const created = await createChatSession(botName);
+      const created = await createSession(botName);
       router.push(`/mobile/chat/${botName}/${created.id}`);
     } catch (error) {
       setErrorMessage(
@@ -413,7 +463,7 @@ function RenameDialog({
     if (!session) return;
     setSubmitting(true);
     try {
-      const updated = await renameChatSession(session.bot, session.id, name);
+      const updated = await renameSession(session.bot, session.id, name);
       onSaved({
         bot: session.bot,
         id: session.id,
@@ -478,7 +528,7 @@ function DeleteDialog({
     if (!session) return;
     setSubmitting(true);
     try {
-      await deleteChatSession(session.bot, session.id);
+      await deleteSession(session.bot, session.id);
       onDeleted({ bot: session.bot, id: session.id });
       onClose();
     } finally {

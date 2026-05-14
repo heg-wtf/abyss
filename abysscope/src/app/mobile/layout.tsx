@@ -4,12 +4,16 @@ import type { ReactNode } from "react";
 /**
  * Mobile route layout.
  *
- * The root layout still mounts <Sidebar /> + <main> in a flex shell;
- * `Sidebar` short-circuits to `null` on `/mobile/*` so the body's flex
- * row collapses to just the main content. Mobile screens then take
- * the full viewport via the wrapper below, which also reserves
- * `env(safe-area-inset-*)` padding for iOS Safari home indicator and
- * status bar.
+ * The root layout still mounts ``<Sidebar /> + <main className="...p-6">``
+ * in a flex shell; ``Sidebar`` short-circuits to ``null`` on
+ * ``/mobile/*`` so the body collapses to just the main slot. We then
+ * cancel the parent's ``p-6`` padding with ``-m-6`` and grow to the
+ * dynamic viewport (``h-dvh`` — handles iOS Safari's collapsing
+ * address bar properly, unlike ``100vh`` which is famously broken
+ * there). Earlier revisions used ``position: fixed`` to escape the
+ * layout entirely, but iOS Safari pushes ``fixed`` elements off
+ * screen when the soft keyboard opens, which is the "blank page on
+ * mobile" symptom we hit during real-device testing.
  */
 
 export const metadata: Metadata = {
@@ -31,7 +35,7 @@ export const viewport: Viewport = {
 export default function MobileLayout({ children }: { children: ReactNode }) {
   return (
     <div
-      className="fixed inset-0 flex flex-col bg-background text-foreground"
+      className="-m-6 flex h-dvh flex-col bg-background text-foreground"
       style={{
         paddingTop: "env(safe-area-inset-top)",
         paddingBottom: "env(safe-area-inset-bottom)",
