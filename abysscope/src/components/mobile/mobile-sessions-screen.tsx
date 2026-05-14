@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useWebPush } from "@/hooks/use-web-push";
+import { useWebPushContext } from "@/components/web-push-provider";
 import {
   Alert,
   AlertDescription,
@@ -576,7 +576,11 @@ function DeleteDialog({
 // ---------------------------------------------------------------------------
 
 function PushToggle() {
-  const push = useWebPush();
+  // Reads the single ``useWebPush`` instance hoisted into
+  // ``WebPushProvider`` at the root layout, so visibility tracking +
+  // notification routing live page-wide instead of disappearing when
+  // the user navigates off the sessions list.
+  const push = useWebPushContext();
   const [open, setOpen] = React.useState(false);
 
   if (push.status === "unsupported") {

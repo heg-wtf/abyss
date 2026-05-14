@@ -162,8 +162,13 @@ def _read_subscriptions() -> list[dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, list):
             return [item for item in data if isinstance(item, dict) and "endpoint" in item]
-    except (OSError, json.JSONDecodeError):
-        pass
+    except (OSError, json.JSONDecodeError) as exc:
+        # Surface the read/parse failure in the log so the operator
+        # can notice a corrupt subscription file, but keep returning
+        # an empty list so a malformed file does not crash every
+        # ``send_push`` call. The next ``add_subscription`` writes a
+        # fresh atomic snapshot and self-heals.
+        logger.warning("push-subscriptions.json unreadable (%s); ignoring", exc)
     return []
 
 

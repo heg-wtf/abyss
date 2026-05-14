@@ -266,8 +266,29 @@ describe("/mobile route skeleton", () => {
   it("mobile sessions header exposes the push toggle", () => {
     const source = read("components/mobile/mobile-sessions-screen.tsx");
     expect(source).toMatch(/PushToggle/);
-    expect(source).toMatch(/useWebPush/);
+    // The toggle pulls state from the shared provider — calling
+    // ``useWebPush`` directly here would mount a second instance and
+    // re-register notification-click + visibility listeners.
+    expect(source).toMatch(/useWebPushContext/);
+    expect(source).not.toMatch(/= useWebPush\(/);
     expect(source).toMatch(/Add to Home Screen/);
+  });
+
+  it("root layout mounts WebPushProvider once for every page", () => {
+    const source = read("app/layout.tsx");
+    // codex P1+P2 review on PR #51: notification-click routing and
+    // visibility tracking must run on every page, not just the
+    // sessions list. The provider hoists ``useWebPush`` to the root
+    // so any page in the React tree benefits.
+    expect(source).toMatch(/WebPushProvider/);
+    expect(source).toMatch(/<WebPushProvider>/);
+  });
+
+  it("WebPushProvider exposes a context guard", () => {
+    const source = read("components/web-push-provider.tsx");
+    expect(source).toMatch(/createContext/);
+    expect(source).toMatch(/useWebPushContext/);
+    expect(source).toMatch(/must be called inside <WebPushProvider>/);
   });
 
   it("api proxy routes forward to the chat server push endpoints", () => {

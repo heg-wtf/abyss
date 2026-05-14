@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
+import { WebPushProvider } from "@/components/web-push-provider";
 
 /**
  * Pretendard variable — Korean + Latin in one file (~2 MB woff2).
@@ -64,10 +65,18 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <div className="flex h-screen">
-            <Sidebar />
-            <main className="flex-1 overflow-auto p-6">{children}</main>
-          </div>
+          {/*
+            ``WebPushProvider`` mounts the single ``useWebPush``
+            instance at the top of the React tree so visibility
+            tracking + notification-click routing work on every page,
+            not just the one that happens to render the bell toggle.
+          */}
+          <WebPushProvider>
+            <div className="flex h-screen">
+              <Sidebar />
+              <main className="flex-1 overflow-auto p-6">{children}</main>
+            </div>
+          </WebPushProvider>
         </ThemeProvider>
       </body>
     </html>
