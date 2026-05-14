@@ -93,12 +93,7 @@ heartbeat:                         # Heartbeat config
     start: "07:00"
     end: "23:00"
 backend:                           # Optional — defaults to claude_code
-  type: openai_compat              # claude_code | openai_compat | openrouter (legacy)
-  provider: openrouter             # openrouter | minimax | minimax_china
-  api_key: sk-or-v1-...            # API key set directly in bot.yaml
-  model: anthropic/claude-haiku-4.5
-  max_history: 20                  # turns of history to replay
-  max_tokens: 4096
+  type: claude_code                # only registered backend post-v2026.05.15
 ```
 
 ### 5. Multi-Bot Architecture
@@ -229,39 +224,14 @@ QMD (local markdown search engine) is automatically available to all bots when t
 
 ### 13.6. LLM Backend Abstraction
 
-abyss routes every model call through `abyss.llm.LLMBackend`. New backends drop in by registering a class with `abyss.llm.register`.
+abyss routes every model call through `abyss.llm.LLMBackend`. The Protocol stays in place so future full-agent backends can drop in by registering a class with `abyss.llm.register`.
 
-- **`claude_code` (default)** — `ClaudeCodeBackend` wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent capabilities preserved: built-in tools, MCP, skills, `/resume`, `/cancel`. No bot.yaml change required.
-- **`openai_compat` (opt-in)** — `OpenAICompatBackend` in `llm/openai_compat.py`. Talks to any OpenAI-compatible chat completions endpoint via `httpx`. Text-only: no tool invocation, no MCP, no `/resume` continuity. Conversation history replayed from `conversation-YYMMDD.md` (capped at `max_history`); `CLAUDE.md` sent as system prompt. Built-in `PROVIDER_PRESETS` for `openrouter`, `minimax` (international), `minimax_china`.
-- **`openrouter` (backward-compat alias)** — `OpenRouterBackend` in `llm/openrouter.py` is a thin subclass of `OpenAICompatBackend` with `type="openrouter"` and `_default_provider="openrouter"`. Existing `bot.yaml` files with `type: openrouter` continue to work unchanged.
-- **Per-bot selection** via `bot.yaml`:
-
-  ```yaml
-  # OpenRouter
-  backend:
-    type: openai_compat
-    provider: openrouter
-    api_key: sk-or-v1-...           # set directly in bot.yaml
-    model: anthropic/claude-haiku-4.5
-    max_history: 20
-    max_tokens: 4096
-
-  # MiniMax (direct)
-  backend:
-    type: openai_compat
-    provider: minimax
-    api_key: your-minimax-api-key   # set directly in bot.yaml
-    model: minimax-text-01
-    max_history: 20
-    max_tokens: 4096
-  ```
-
-- **Per-bot caching** — `get_or_create(bot_name, bot_config)` keeps one backend instance per bot for the process lifetime so HTTPX clients / SDK pools are shared across handler / cron / heartbeat call sites. The instance's `bot_config` is refreshed on each lookup so config changes take effect without process restart (backend type changes still recreate).
+- **`claude_code` (only registered backend)** — `ClaudeCodeBackend` wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent capabilities: built-in tools, MCP, skills, `--resume`, `/cancel`. No `bot.yaml` change required.
+- **v2026.05.15 — OpenAI-compatible removed.** The `openai_compat` / `openrouter` / `minimax` backends were dropped to keep abyss focused as a Claude Code persona agent toolkit. Bots with a residual `backend.type` set to those values fail to start with a migration hint pointing at `bot.yaml`.
+- **Per-bot caching** — `get_or_create(bot_name, bot_config)` keeps one backend instance per bot for the process lifetime so SDK pools are shared across handler / cron / heartbeat call sites. The instance's `bot_config` is refreshed on each lookup so config changes take effect without a process restart; backend-type changes recreate the instance.
 - **Cancellation** — `/cancel` looks up the cached backend (`cached_backend(bot_name)`) and calls `backend.cancel(session_key)`. Falls through to legacy Claude Code cancel paths for bots that haven't yet warmed up a backend.
-- **Shutdown** — `bot_manager` calls `abyss.llm.close_all()` before stopping the SDK pool so HTTPX clients release sockets cleanly.
-- **User-message dedup** — abyss handlers call `log_conversation` *before* `backend.run`, so the markdown log already contains the current user message. `OpenAICompatBackend._build_messages` drops a trailing user turn whose content matches `request.user_prompt` to avoid sending the same input twice.
-- **`max_history` precedence** — explicit caller override (above the dataclass default of 20) wins, otherwise `bot.yaml`'s `backend.max_history` is honored, otherwise the dataclass default applies. `_load_history` reads `cap + 1` so dedup never trims below the configured window.
-- **Tests** — `tests/conftest.py::clear_llm_backend_cache` autouse fixture wipes the per-bot cache between tests. End-to-end OpenRouter tests under `tests/evaluation/test_openrouter_e2e.py` are gated on `OPENROUTER_API_KEY` and excluded from CI.
+- **Shutdown** — `bot_manager` calls `abyss.llm.close_all()` before stopping the SDK pool so resources release cleanly.
+- **Tests** — `tests/conftest.py::clear_llm_backend_cache` autouse fixture wipes the per-bot cache between tests.
 
 ### 13.7. Dashboard Chat (Internal HTTP/SSE Server)
 

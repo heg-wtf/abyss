@@ -18,7 +18,7 @@ reached from the phone via a Tailscale-hosted dashboard.
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Skills](#skills)
-- [LLM Backends](#llm-backends)
+- [LLM Backend](#llm-backend)
 - [Memory & Recall](#memory--recall)
 - [Slash Commands](#slash-commands)
 - [File Handling](#file-handling)
@@ -119,39 +119,13 @@ abyss skills setup <name>      # Activate (check requirements)
 abyss skills import <url>      # Import a custom skill from a GitHub repo
 ```
 
-## LLM Backends
+## LLM Backend
 
-Each bot picks its LLM backend in `bot.yaml`. The default is **Claude Code** (no config change required for existing bots); **OpenAI-compatible** is opt-in for cheap / fast text-only chat via OpenRouter, MiniMax, or any OpenAI-compatible endpoint.
+Every bot runs on **Claude Code** — the full agent surface: tools (Bash / Read / Write / Edit / Grep), MCP-backed skills, and `--resume`-based session continuity via the Python Agent SDK pool.
 
-| | Claude Code (default) | OpenAI-Compatible (opt-in) |
-|---|---|---|
-| Driver | `claude -p` + Python Agent SDK | httpx → any OpenAI-compatible chat completions API |
-| Tools (Bash / Read / Write / Edit / Grep) | ✅ | ❌ |
-| MCP servers (skills with `mcp.json`) | ✅ | ❌ |
-| Session continuity (`--resume`) | ✅ | replays last `max_history` turns from disk |
-| Streaming | SDK pool (per-token) | SSE chunks |
-| Cancellation | SDK interrupt + subprocess kill | cancels in-flight HTTPX task |
+> v2026.05.15 dropped the OpenAI-compatible backends (`openai_compat` / `openrouter` / `minimax`). abyss is a Claude Code persona agent toolkit — the simpler surface is the point. The `LLMBackend` Protocol + registry stay in place so a future full-agent backend can be slotted in.
 
-**OpenRouter** sits in front of 200+ models (Anthropic / OpenAI / DeepSeek / Qwen / etc.). **MiniMax** offers fast, cost-effective multilingual models. Any OpenAI-compatible endpoint is supported via `provider: custom`. Step-by-step setup: [docs/OPENROUTER_SETUP.md](docs/OPENROUTER_SETUP.md) · [docs/MINIMAX_SETUP.md](docs/MINIMAX_SETUP.md).
-
-```yaml
-# bot.yaml — opt-in OpenRouter
-backend:
-  type: openrouter
-  api_key_env: OPENROUTER_API_KEY
-  model: anthropic/claude-haiku-4.5
-  max_history: 20
-  max_tokens: 4096
-
-# bot.yaml — opt-in MiniMax (direct)
-backend:
-  type: openai_compat
-  provider: minimax
-  api_key_env: MINIMAX_API_KEY
-  model: MiniMax-Text-01
-  max_history: 20
-  max_tokens: 4096
-```
+If your `bot.yaml` still has a `backend.type` set to one of the removed values, abyss will refuse to start that bot with a migration hint. Remove the `backend:` block (or set `backend.type: claude_code`) and the bot boots normally.
 
 ## Memory & Recall
 
@@ -216,8 +190,7 @@ Use the `/send` command to retrieve workspace files.
 | Configuration | PyYAML |
 | Cron Scheduler | croniter |
 | Encrypted Backup | pyzipper (AES-256) |
-| LLM Backend (default) | Claude Code CLI (`claude -p`, streaming) + Python Agent SDK persistent session pool |
-| LLM Backend (opt-in) | OpenAI-compatible via httpx — OpenRouter (200+ models), MiniMax (direct), or any custom endpoint (text-only chat, SSE streaming) |
+| LLM Backend | Claude Code CLI (`claude -p`, streaming) + Python Agent SDK persistent session pool — only registered backend |
 | Conversation Index | SQLite FTS5 (stdlib, no extra dependency) |
 | Logging | Rich (RichHandler, colorized console) |
 | Process Manager | launchd (macOS) |
@@ -320,7 +293,7 @@ abyss/
 │   ├── dashboard_ui.py     # Rich checklist UI for `abyss dashboard` lifecycle
 │   ├── tool_metrics.py     # Per-bot tool call metrics (jsonl + p50/p95/p99)
 │   ├── conversation_index.py # SQLite FTS5 index over conversation markdown
-│   ├── llm/                # LLM backend layer (claude_code, openai_compat, openrouter)
+│   ├── llm/                # LLM backend layer (claude_code only post-v2026.05.15)
 │   ├── mcp_servers/        # Bundled stdio MCP servers (conversation_search)
 │   ├── hooks/              # Claude Code hooks (log_tool_metrics, precompact_hook)
 │   ├── skill.py            # Skill management (create/attach/install/MCP/CLAUDE.md composition)

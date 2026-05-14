@@ -33,6 +33,12 @@ def get_backend(bot_config: dict[str, Any]) -> LLMBackend:
     cls = _BACKENDS.get(backend_type)
     if cls is None:
         registered = ", ".join(registered_backend_types()) or "(none)"
+        if backend_type in {"openai_compat", "openrouter", "minimax"}:
+            raise ValueError(
+                f"Backend {backend_type!r} was removed in v2026.05.15. "
+                "abyss is now Claude Code only — remove the `backend` block "
+                "from bot.yaml or set `backend.type: claude_code`."
+            )
         raise ValueError(
             f"Unknown LLM backend type: {backend_type!r}. Registered backends: {registered}"
         )

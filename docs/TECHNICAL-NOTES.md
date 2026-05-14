@@ -1023,12 +1023,18 @@ in the scope. Header formats:
   is future work.
 
 
-## LLM Backends
+## LLM Backend
 
-Per-bot LLM selection lives behind ``abyss.llm.LLMBackend``. Two
-backends ship — Claude Code (full agent, default) and OpenRouter
-(text-only chat against 200+ models). New backends drop in by
-registering a class via ``abyss.llm.register``.
+Per-bot LLM selection lives behind ``abyss.llm.LLMBackend``. One
+backend ships — Claude Code (full agent). The Protocol + registry stay
+in place so a future full-agent backend can drop in via
+``abyss.llm.register`` without touching call sites.
+
+> **v2026.05.15** — the OpenAI-compatible backends (``openai_compat`` /
+> ``openrouter`` / ``minimax``) were removed. abyss is a Claude Code
+> persona agent toolkit; text-only chat shims diluted the value.
+> ``bot.yaml`` files that still set ``backend.type`` to one of those
+> values fail registration with a migration hint at startup.
 
 ### Resolution
 
@@ -1051,67 +1057,6 @@ session continuity, SDK pool persistence.
 ``cancel(session_key)`` calls ``cancel_sdk_session`` then
 ``cancel_process``. ``close()`` is a no-op (process-wide lifecycle
 managed by ``bot_manager.close_all`` / ``cancel_all_processes``).
-
-### OpenRouter backend
-
-``OpenRouterBackend`` POSTs to ``{base_url}/chat/completions``
-(default ``https://openrouter.ai/api/v1``). The request body follows
-OpenAI's chat completions schema:
-
-* ``messages[0]`` is the bot's ``CLAUDE.md`` as a ``system`` message
-  (falls back from the per-session copy to the bot-level copy).
-* The next ``max_history`` entries are user / assistant turns parsed
-  from the most recent ``conversation-YYMMDD.md`` files (newest first,
-  reversed before sending).
-* The current user prompt closes the list.
-
-**User-message dedup.** abyss handlers call ``log_conversation``
-*before* ``backend.run``, so the markdown log already contains the
-current user message. ``_build_messages`` drops a trailing user turn
-whose stripped content matches ``request.user_prompt`` so the model
-never sees the same input twice (which would inflate token usage and
-bias responses toward the repeated text). Older turns with different
-content are preserved.
-
-**``max_history`` precedence.** ``_resolve_max_history(request)``
-returns:
-
-1. ``request.max_history`` when the caller explicitly raised it above
-   the dataclass default of 20 (lets cron / heartbeat widen the
-   window for a one-off run).
-2. Otherwise the bot-configured ``backend.max_history``.
-3. Otherwise 0 (history disabled).
-
-``_load_history`` loads ``cap + 1`` entries so dedup never trims
-below the configured window; the final cap is enforced after dedup.
-
-Streaming uses SSE (``stream=True`` with
-``stream_options={"include_usage": true}``) and forwards each
-``delta.content`` chunk to the caller's ``on_chunk`` callback.
-
-API key is read from ``backend.api_key`` (set directly in bot.yaml). The
-``Authorization`` header is sent alongside ``HTTP-Referer`` and
-``X-Title`` headers (per OpenRouter's attribution guidelines).
-
-Failure modes are mapped to ``RuntimeError`` with actionable text:
-
-* 401 / 403 → "OpenRouter rejected the API key".
-* 429 → "OpenRouter rate limit hit".
-* 5xx → "OpenRouter upstream error" + first 300 chars of body.
-
-``cancel(session_key)`` cancels the in-flight ``asyncio.Task``
-registered for that key. ``close()`` calls ``httpx.AsyncClient.aclose``.
-
-### Limits intentionally accepted
-
-* OpenRouter has no tool-calling support in this backend. Bots with
-  MCP / Bash / file tools should stay on Claude Code.
-* No ``--resume``-style continuity. Long conversations rely on
-  history replay; trim ``max_history`` for cost-sensitive bots.
-* Subagent spawning is unavailable.
-* Token compaction (``token_compact.py``) still uses the direct
-  ``run_claude`` subprocess path because it's a system utility, not a
-  bot turn.
 
 ## Voice Mode (Dashboard Chat STT/TTS)
 
