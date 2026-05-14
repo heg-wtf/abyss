@@ -129,10 +129,14 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* ``--font-pretendard`` is declared by ``next/font/local`` on the
+     ``<body>`` element (see ``app/layout.tsx``), so the ``font-sans``
+     stack must be applied where that variable is actually in scope.
+     Applying it on ``html`` made the lookup fall through to the
+     system fallback chain — on macOS / iOS that bottoms out at
+     ``Apple SD Gothic Neo`` for Korean glyphs, which is what the
+     font inspector picked up before this fix. */
   body {
-    @apply bg-background text-foreground;
-  }
-  html {
-    @apply font-sans;
+    @apply bg-background text-foreground font-sans;
   }
 }
