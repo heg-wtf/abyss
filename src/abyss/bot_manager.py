@@ -420,18 +420,20 @@ def _stop_qmd_daemon() -> None:
 
 def start_bots(
     bot_name: str | None = None,
-    foreground: bool = False,
+    daemon: bool = False,
     dashboard_port: int = 3847,
 ) -> None:
-    """Start bot(s) — daemon by default, foreground via ``foreground=True``.
+    """Start bot(s) — foreground by default, daemon via ``daemon=True``.
 
-    When ``foreground`` is ``False`` (the default), abyss registers a
-    launchd job that re-invokes ``abyss start --foreground`` in the
-    background. When ``foreground`` is ``True``, the asyncio loop runs
-    directly in the current process — used both for manual debugging
-    and as the actual workload launchd ends up executing.
+    The default is foreground so the user sees the ``BuildProgress``
+    boot checklist (Prepare bots → SDK → QMD → API server → dashboard
+    build → schedulers) live in the terminal. ``daemon=True`` registers
+    a launchd job whose only job is to re-invoke the same command
+    *without* ``--daemon`` so the actual workload runs foreground inside
+    launchd. There is no recursion because the inner invocation drops
+    the flag.
     """
-    if not foreground:
+    if daemon:
         _start_daemon(dashboard_port=dashboard_port)
         return
 
@@ -446,15 +448,17 @@ def start_bots(
 def _start_daemon(dashboard_port: int = 3847) -> None:
     """Start abyss as a launchd daemon.
 
-    The launchd job runs ``abyss start --foreground`` so the registered
-    job is the actual workload (not another daemon registration).
+    The launchd job runs ``abyss start --port PORT`` (no ``--daemon``)
+    so the registered process is the actual workload. The build
+    checklist still gets written to ``daemon-stdout.log``; foreground
+    callers see it live in the terminal.
     """
     plist_path = _plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
     venv_bin = Path(sys.executable).parent
     abyss_executable = venv_bin / "abyss"
-    extra_args = ["--foreground", "--port", str(dashboard_port)]
+    extra_args = ["--port", str(dashboard_port)]
     if not abyss_executable.exists():
         abyss_executable = Path(sys.executable)
         abyss_arguments = [str(abyss_executable), "-m", "abyss.cli", "start", *extra_args]

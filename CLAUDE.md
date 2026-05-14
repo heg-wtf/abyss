@@ -216,7 +216,7 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 - Started automatically as a child subprocess of `abyss start` (v2026.05.15 retired the standalone `abyss dashboard` subcommand). PID file at `~/.abyss/abysscope.pid`
 - Status detection: PID file first, then port 3847 fallback (detects externally started dashboards)
 - `abyss status` includes dashboard info (local + network URL)
-- `abyss start --foreground` runs inline; `--port` overrides the dashboard port (default 3847)
+- Foreground by default so the Rich `BuildProgress` checklist is visible in the terminal; `abyss start --daemon` registers a launchd job and detaches. `--port` overrides the dashboard port (default 3847)
 - Bundled in wheel via `force-include` (abysscope_data/), works after `pip install`
 - Cron editor: inline view/edit toggle in bot detail, supports recurring + one-shot jobs, skills picker
 - Log management: view, filter, delete (single/bulk/by-age), daemon log truncate

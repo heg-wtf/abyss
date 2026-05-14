@@ -881,8 +881,8 @@
               boots the API server, the dashboard subprocess, and the per-bot
               schedulers as a single Rich `BuildProgress` checklist; the
               standalone `abyss dashboard` subcommand and the `--daemon` flag
-              are retired (daemon is the default, `--foreground` for
-              debugging). The OpenAI-compatible backends
+              are retired (foreground is the default so the boot
+              checklist is visible; `--daemon` for background). The OpenAI-compatible backends
               (`openai_compat` / `openrouter` / `minimax`) are removed too —
               abyss is a Claude Code persona agent toolkit, the simpler
               surface is the point. Mobile chat picks up
