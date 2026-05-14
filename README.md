@@ -2,8 +2,18 @@
 
 # abyss
 
-Personal AI assistant powered by Telegram + Claude Code.
-A multi-bot, file-based session system that runs locally on Mac.
+Personal AI assistant powered by a PWA + Claude Code.
+A multi-bot, file-based session system that runs locally on Mac and is
+reached from the phone via a Tailscale-hosted dashboard.
+
+> **v2026.05.14** — Telegram was retired. The mobile PWA + dashboard
+> chat (built into `abysscope`) are now the only user-facing surfaces.
+> Group collaboration (orchestrator + member) is gone with it and will
+> return on top of the PWA in a later release. See
+> [`docs/plan-drop-telegram-2026-05-14.md`](docs/plan-drop-telegram-2026-05-14.md)
+> for the full migration plan. Sections below that still describe
+> Telegram / group flows are kept for historical context until each
+> doc is rewritten.
 
 ## Table of Contents
 
@@ -244,7 +254,7 @@ Use the `/send` command to retrieve workspace files back via Telegram.
 |-----------|--------|
 | Package Manager | uv |
 | CLI | Typer + Rich |
-| Telegram | python-telegram-bot v21+ |
+| Chat / PWA | aiohttp HTTP+SSE (`abyss.chat_server`) reached over Tailscale |
 | Configuration | PyYAML |
 | Cron Scheduler | croniter |
 | Encrypted Backup | pyzipper (AES-256) |

@@ -54,7 +54,6 @@ def test_top_level_help_lists_known_subcommands():
         "global-memory",
         "heartbeat",
         "dashboard",
-        "group",
     ):
         assert sub in result.stdout, f"expected '{sub}' in top-level help"
 
@@ -79,7 +78,7 @@ def test_reindex_no_args_prompts_user(tmp_path, monkeypatch):
     monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
     result = runner.invoke(app, ["reindex"])
     assert result.exit_code != 0
-    # Guidance text mentions --bot or --group or --all (depends on FTS5 availability).
+    # Guidance text mentions --bot or --all (depends on FTS5 availability).
     assert "Traceback" not in result.stdout
 
 
@@ -106,7 +105,6 @@ SUB_APPS = [
     "global-memory",
     "heartbeat",
     "dashboard",
-    "group",
 ]
 
 
@@ -155,11 +153,6 @@ SUB_COMMAND_HELP = [
     ["dashboard", "stop", "--help"],
     ["dashboard", "restart", "--help"],
     ["dashboard", "status", "--help"],
-    ["group", "create", "--help"],
-    ["group", "list", "--help"],
-    ["group", "show", "--help"],
-    ["group", "delete", "--help"],
-    ["group", "status", "--help"],
 ]
 
 
@@ -192,12 +185,6 @@ def test_skills_builtins_lists_at_least_one_skill(tmp_path, monkeypatch):
     assert result.exit_code == 0
     # At least one builtin is bundled (mem-search, peon, etc.)
     assert "Traceback" not in result.stdout
-
-
-def test_group_list_empty(tmp_path, monkeypatch):
-    monkeypatch.setenv("ABYSS_HOME", str(tmp_path))
-    result = runner.invoke(app, ["group", "list"])
-    assert result.exit_code in (0, 1)
 
 
 def test_global_memory_show_when_missing(tmp_path, monkeypatch):

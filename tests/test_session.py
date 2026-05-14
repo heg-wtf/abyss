@@ -5,7 +5,6 @@ import pytest
 from abyss.session import (
     clear_bot_memory,
     clear_claude_session_id,
-    collect_session_chat_ids,
     conversation_status_summary,
     ensure_session,
     get_claude_session_id,
@@ -298,39 +297,9 @@ def test_clear_bot_memory_missing(bot_path):
     clear_bot_memory(bot_path)  # should not raise
 
 
-# --- collect_session_chat_ids tests ---
-
-
-def test_collect_session_chat_ids(bot_path):
-    """collect_session_chat_ids returns chat IDs from session directories."""
-    ensure_session(bot_path, 111)
-    ensure_session(bot_path, 222)
-    ensure_session(bot_path, 333)
-
-    chat_ids = collect_session_chat_ids(bot_path)
-    assert chat_ids == [111, 222, 333]
-
-
-def test_collect_session_chat_ids_empty(bot_path):
-    """collect_session_chat_ids returns empty list when no sessions exist."""
-    chat_ids = collect_session_chat_ids(bot_path)
-    assert chat_ids == []
-
-
-def test_collect_session_chat_ids_no_sessions_directory(tmp_path):
-    """collect_session_chat_ids returns empty list when sessions dir doesn't exist."""
-    chat_ids = collect_session_chat_ids(tmp_path / "nonexistent")
-    assert chat_ids == []
-
-
-def test_collect_session_chat_ids_ignores_non_chat_directories(bot_path):
-    """collect_session_chat_ids ignores directories that don't match chat_<id> pattern."""
-    ensure_session(bot_path, 111)
-    (bot_path / "sessions" / "not_a_chat").mkdir()
-    (bot_path / "sessions" / "chat_abc").mkdir()  # non-numeric
-
-    chat_ids = collect_session_chat_ids(bot_path)
-    assert chat_ids == [111]
+# ``collect_session_chat_ids`` only existed to fan cron / heartbeat
+# replies out to Telegram chat IDs. With the Telegram surface gone
+# the helper is gone too; the surrounding session helpers stay.
 
 
 # --- Daily conversation rotation tests ---
@@ -481,18 +450,6 @@ def test_session_directory_for_string_chat_id_uses_name_verbatim(tmp_path):
 
     out = session_directory(tmp_path, "chat_web_xyz")
     assert out == tmp_path / "sessions" / "chat_web_xyz"
-
-
-def test_collect_session_chat_ids_skips_non_integer_dirs(tmp_path):
-    from abyss.session import collect_session_chat_ids
-
-    sessions = tmp_path / "sessions"
-    sessions.mkdir()
-    (sessions / "chat_42").mkdir()
-    (sessions / "chat_99").mkdir()
-    (sessions / "chat_web_abc").mkdir()  # web session — must be skipped
-    (sessions / "chat_unparseable").mkdir()
-    assert sorted(collect_session_chat_ids(tmp_path)) == [42, 99]
 
 
 def test_conversation_status_summary_for_missing_directory(tmp_path):

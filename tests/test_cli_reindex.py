@@ -31,24 +31,6 @@ def configured_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
 
-    group_dir = home / "groups" / "team"
-    conv = group_dir / "conversation"
-    conv.mkdir(parents=True)
-    (conv / "260425.md").write_text(
-        "[09:30:15] user: kick off mission\n[09:30:16] @bot_a: acknowledged\n",
-        encoding="utf-8",
-    )
-    (group_dir / "group.yaml").write_text(
-        yaml.dump(
-            {
-                "name": "team",
-                "orchestrator": "alpha",
-                "members": ["alpha"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
     config = {
         "bots": [{"name": "alpha", "path": str(bot_path)}],
         "timezone": "UTC",
@@ -69,20 +51,14 @@ def test_reindex_bot(runner: CliRunner, configured_home: Path) -> None:
 
 
 @pytest.mark.enable_conversation_search
-def test_reindex_group(runner: CliRunner, configured_home: Path) -> None:
-    result = runner.invoke(app, ["reindex", "--group", "team"])
-    assert result.exit_code == 0, result.stdout
-    assert "indexed 2 message" in result.stdout
-    assert (configured_home / "groups" / "team" / "conversation.db").exists()
-
-
-@pytest.mark.enable_conversation_search
 def test_reindex_all(runner: CliRunner, configured_home: Path) -> None:
+    """``--all`` only walks the bot list now that the group surface
+    is gone. Returning two indexed messages from the single
+    configured bot is the new expected total."""
     result = runner.invoke(app, ["reindex", "--all"])
     assert result.exit_code == 0, result.stdout
     assert "alpha" in result.stdout
-    assert "team" in result.stdout
-    assert "Reindex complete: 4" in result.stdout
+    assert "Reindex complete: 2" in result.stdout
 
 
 @pytest.mark.enable_conversation_search

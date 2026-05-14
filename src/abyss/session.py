@@ -48,27 +48,6 @@ def collect_web_session_ids(bot_path: Path) -> list[str]:
     return out
 
 
-def collect_session_chat_ids(bot_path: Path) -> list[int]:
-    """Collect chat IDs from existing session directories.
-
-    Scans ``sessions/chat_<id>/`` directories and returns the list of chat IDs.
-    Used as a fallback when ``allowed_users`` is empty but the bot needs to
-    send proactive messages (cron results, heartbeat notifications).
-    """
-    sessions_directory = bot_path / "sessions"
-    if not sessions_directory.exists():
-        return []
-    chat_ids: list[int] = []
-    for child in sorted(sessions_directory.iterdir()):
-        if child.is_dir() and child.name.startswith("chat_"):
-            try:
-                chat_id = int(child.name.removeprefix("chat_"))
-                chat_ids.append(chat_id)
-            except ValueError:
-                continue
-    return chat_ids
-
-
 def ensure_session(
     bot_path: Path,
     chat_id: int | str,
@@ -94,29 +73,10 @@ def ensure_session(
     session_claude_md = directory / "CLAUDE.md"
     bot_claude_md = bot_path / "CLAUDE.md"
 
-    if bot_name is not None and isinstance(chat_id, int):
-        # Group binding only applies to integer Telegram chat IDs.
-        from abyss.group import find_group_by_chat_id
-
-        group_config = find_group_by_chat_id(chat_id)
-        if group_config is not None:
-            # Generate group-aware CLAUDE.md for this session
-            from abyss.config import load_bot_config
-            from abyss.skill import compose_claude_md
-
-            bot_config = load_bot_config(bot_name)
-            if bot_config:
-                content = compose_claude_md(
-                    bot_name=bot_name,
-                    personality=bot_config.get("personality", ""),
-                    role=bot_config.get("role", bot_config.get("description", "")),
-                    goal=bot_config.get("goal", ""),
-                    skill_names=bot_config.get("skills", []),
-                    bot_path=bot_path,
-                    group_context=group_config,
-                )
-                session_claude_md.write_text(content)
-                return directory
+    # Group-aware CLAUDE.md generation lived here when groups were
+    # bound to Telegram chat IDs. With the Telegram + group surface
+    # gone, every session uses the bot's plain CLAUDE.md until the
+    # new PWA multi-bot room model lands.
 
     if not session_claude_md.exists() and bot_claude_md.exists():
         shutil.copy2(bot_claude_md, session_claude_md)

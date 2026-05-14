@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Clock, HeartPulse, RefreshCw } from "lucide-react";
+import {
+  ArrowUp,
+  Clock,
+  HeartPulse,
+  Menu as MenuIcon,
+  RefreshCw,
+} from "lucide-react";
 import { BotAvatar } from "@/components/bot-avatar";
 import { SlideDrawer } from "@/components/mobile/slide-drawer";
 import { SessionsDrawerPanel } from "@/components/mobile/sessions-drawer-panel";
@@ -36,6 +42,8 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [refreshing, setRefreshing] = React.useState(false);
   const [sessionsOpen, setSessionsOpen] = React.useState(false);
+  const [draft, setDraft] = React.useState("");
+  const [sending, setSending] = React.useState(false);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -51,6 +59,76 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
     }
   };
 
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setSending(true);
+    // Optimistic user bubble so the input feels responsive while the
+    // SSE response streams in. We swap the placeholder out for the
+    // server-truthed messages once the assistant reply lands.
+    const optimistic: ChatMessage = {
+      role: "user",
+      content: text,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setDraft("");
+    let assistantText = "";
+    try {
+      const response = await fetch(
+        `/api/chat/routines/${routine.bot}/${routine.kind}/${routine.job_name}/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text }),
+        },
+      );
+      if (!response.ok || !response.body) {
+        setMessages((prev) => prev.filter((m) => m !== optimistic));
+        return;
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // SSE frames separated by blank lines.
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const line = frame
+            .split("\n")
+            .find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "chunk" && typeof event.text === "string") {
+              assistantText += event.text;
+            } else if (event.type === "done" && typeof event.text === "string") {
+              assistantText = event.text;
+            }
+          } catch {
+            // ignore malformed frame
+          }
+        }
+      }
+      if (assistantText) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: assistantText,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
   const Icon = routine.kind === "cron" ? Clock : HeartPulse;
 
   return (
@@ -58,11 +136,11 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <button
           type="button"
-          aria-label="Back to chats"
-          onClick={() => router.push("/mobile")}
+          aria-label="Open sessions"
+          onClick={() => setSessionsOpen(true)}
           className="rounded-full p-2 text-muted-foreground hover:bg-muted"
         >
-          <ArrowLeft className="size-5" />
+          <MenuIcon className="size-5" />
         </button>
         <BotAvatar
           botName={routine.bot}
@@ -106,6 +184,43 @@ export function MobileRoutineScreen({ bots, routine, initialMessages }: Props) {
           ))
         )}
       </ul>
+
+      <footer className="shrink-0 border-t bg-background">
+        <div className="flex items-end gap-1 px-2 py-2">
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing
+              ) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+            placeholder={`${routine.job_name}에게 답하기…`}
+            rows={1}
+            disabled={sending}
+            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden disabled:opacity-50"
+            style={{
+              maxHeight: "160px",
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Send routine reply"
+            disabled={!draft.trim() || sending}
+            onClick={() => void send()}
+            className="rounded-full bg-primary p-2 text-primary-foreground disabled:opacity-50"
+          >
+            <ArrowUp className="size-5" />
+          </button>
+        </div>
+      </footer>
 
       <SlideDrawer
         side="left"

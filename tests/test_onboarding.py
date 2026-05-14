@@ -1,8 +1,6 @@
 """Tests for abyss.onboarding module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from abyss.onboarding import (
     EnvironmentCheckResult,
@@ -15,7 +13,6 @@ from abyss.onboarding import (
     prompt_timezone,
     run_environment_checks,
     save_init_config,
-    validate_telegram_token,
 )
 
 
@@ -74,42 +71,10 @@ def test_run_environment_checks():
             assert "SQLite FTS5" in names
 
 
-@pytest.mark.asyncio
-async def test_validate_telegram_token_valid():
-    """validate_telegram_token returns bot info for valid token."""
-    mock_bot_info = MagicMock()
-    mock_bot_info.username = "test_bot"
-    mock_bot_info.first_name = "Test Bot"
-
-    with patch("telegram.Bot") as mock_bot_class:
-        mock_bot = MagicMock()
-        mock_bot.get_me = AsyncMock(return_value=mock_bot_info)
-        mock_bot_class.return_value = mock_bot
-
-        result = await validate_telegram_token("valid-token")
-        assert result is not None
-        assert result["username"] == "@test_bot"
-        assert result["botname"] == "Test Bot"
-
-
-@pytest.mark.asyncio
-async def test_validate_telegram_token_invalid():
-    """validate_telegram_token returns None for invalid token."""
-    with patch("telegram.Bot") as mock_bot_class:
-        mock_bot = MagicMock()
-        mock_bot.get_me = AsyncMock(side_effect=Exception("Invalid token"))
-        mock_bot_class.return_value = mock_bot
-
-        result = await validate_telegram_token("invalid-token")
-        assert result is None
-
-
 def test_create_bot(tmp_path, monkeypatch):
-    """create_bot creates all necessary files."""
+    """create_bot creates all necessary files (no Telegram token)."""
     monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
 
-    token = "123456:ABCDEF"
-    bot_info = {"username": "@test_bot", "botname": "Test Bot"}
     profile = {
         "name": "test-bot",
         "display_name": "My Test Bot",
@@ -118,7 +83,7 @@ def test_create_bot(tmp_path, monkeypatch):
         "goal": "Make life easier",
     }
 
-    create_bot(token, bot_info, profile)
+    create_bot(profile)
 
     bot_directory = tmp_path / ".abyss" / "bots" / "test-bot"
     assert (bot_directory / "bot.yaml").exists()
@@ -142,8 +107,6 @@ def test_create_bot_with_openrouter_backend_block(tmp_path, monkeypatch):
         "max_history": 10,
     }
     create_bot(
-        token="123456:ABCDEF",
-        bot_info={"username": "@or_bot", "botname": "OR Bot"},
         profile={
             "name": "or-bot",
             "display_name": "OR Bot",
@@ -200,8 +163,6 @@ def test_create_bot_restarts_daemon_when_running(tmp_path, monkeypatch):
     """create_bot restarts daemon automatically when daemon is running."""
     monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
 
-    token = "123456:ABCDEF"
-    bot_info = {"username": "@new_bot", "botname": "New Bot"}
     profile = {
         "name": "new-bot",
         "personality": "Helpful",
@@ -211,7 +172,7 @@ def test_create_bot_restarts_daemon_when_running(tmp_path, monkeypatch):
 
     with patch("abyss.onboarding._is_daemon_running", return_value=True):
         with patch("abyss.onboarding._restart_daemon") as mock_restart:
-            create_bot(token, bot_info, profile)
+            create_bot(profile)
             mock_restart.assert_called_once()
 
 
@@ -219,8 +180,6 @@ def test_create_bot_no_restart_when_daemon_not_running(tmp_path, monkeypatch):
     """create_bot does not restart when daemon is not running."""
     monkeypatch.setenv("ABYSS_HOME", str(tmp_path / ".abyss"))
 
-    token = "123456:ABCDEF"
-    bot_info = {"username": "@new_bot", "botname": "New Bot"}
     profile = {
         "name": "new-bot",
         "personality": "Helpful",
@@ -230,7 +189,7 @@ def test_create_bot_no_restart_when_daemon_not_running(tmp_path, monkeypatch):
 
     with patch("abyss.onboarding._is_daemon_running", return_value=False):
         with patch("abyss.onboarding._restart_daemon") as mock_restart:
-            create_bot(token, bot_info, profile)
+            create_bot(profile)
             mock_restart.assert_not_called()
 
 

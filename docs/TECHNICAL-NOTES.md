@@ -1,5 +1,15 @@
 # Technical Notes
 
+> **v2026.05.14** — Telegram and the group surface were removed.
+> Sections covering `sendMessageDraft` streaming, `markdown_to_telegram_html`,
+> `TELEGRAM_MESSAGE_LIMIT` chunking, `allowed_users` permissioning,
+> BotFather setup, and group orchestrator/member routing are kept
+> for historical context. The current delivery surface is the mobile
+> PWA chat (markdown rendering) + Web Push notifications. Cron and
+> heartbeat results land in `conversation-*.md` under each session
+> directory; the mobile Routines tab + FTS5 index pick them up.
+
+
 ## ABYSS_HOME Environment Variable
 
 The runtime data path defaults to `~/.abyss/` and can be changed via the `ABYSS_HOME` environment variable.

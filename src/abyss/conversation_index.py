@@ -8,7 +8,8 @@ maintains a parallel SQLite FTS5 index that lets Claude (via the
 Design points:
 
 * One DB per scope: ``~/.abyss/bots/<name>/conversation.db`` and
-  ``~/.abyss/groups/<name>/conversation.db``.
+  (Group databases used to live alongside the bot ones; that
+  surface was removed with the Telegram + group teardown.)
 * Schema is a single virtual table with a BM25-rankable ``content``
   column plus unindexed metadata (``chat_id``, ``role``, ``ts``,
   ``date_key``).
@@ -45,7 +46,7 @@ SESSION_HEADER_RE = re.compile(
     r"\((?P<ts>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+UTC\)\s*$"
 )
 
-# Single-line entry written by ``group.log_to_shared_conversation``:
+# Group log entries used to use this same one-line format:
 #     [09:30:15] @bot_name: hello world
 GROUP_LINE_RE = re.compile(
     r"^\[(?P<time>\d{2}:\d{2}:\d{2})\]\s+(?P<sender>[^:]+):\s?(?P<content>.*)$"
@@ -80,13 +81,6 @@ def db_path_for_bot(bot_name: str) -> Path:
     from abyss.config import bot_directory
 
     return bot_directory(bot_name) / "conversation.db"
-
-
-def db_path_for_group(group_name: str) -> Path:
-    """Return the FTS5 DB path for a given group."""
-    from abyss.group import group_directory
-
-    return group_directory(group_name) / "conversation.db"
 
 
 @contextmanager

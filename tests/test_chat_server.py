@@ -1439,25 +1439,30 @@ async def test_routines_endpoint_lists_cron_and_heartbeat(client, abyss_home):
 
 
 @pytest.mark.asyncio
-async def test_routine_messages_returns_parsed_pair(client, abyss_home):
-    """``GET /chat/routines/<bot>/<kind>/<job>/messages`` reuses the
-    same parser as the chat-session messages endpoint, so a routine
-    detail page can render the run history as a chat-like transcript.
+async def test_routine_messages_hide_legacy_user_trigger(client, abyss_home):
+    """``GET /chat/routines/.../messages`` drops legacy ``## user``
+    entries so the noisy cron / heartbeat trigger prompts left in
+    older ``conversation-*.md`` files do not surface in the mobile
+    Routines transcript. Real keyboard replies land as ``## human``
+    and are re-tagged as ``user`` on the way out so the existing
+    mobile bubble renderer keeps working.
     """
     cron_dir = abyss_home / "bots" / "alpha" / "cron_sessions" / "morning-brief"
     cron_dir.mkdir(parents=True)
     (cron_dir / "conversation-260514.md").write_text(
         "## user (2026-05-14 06:00:00 UTC)\n\nMorning summary\n\n"
         "## assistant (2026-05-14 06:00:01 UTC)\n\nHere's your brief.\n"
+        "## human (2026-05-14 06:01:00 UTC)\n\nThanks!\n"
+        "## assistant (2026-05-14 06:01:01 UTC)\n\nAnytime.\n"
     )
 
     resp = await client.get("/chat/routines/alpha/cron/morning-brief/messages")
     assert resp.status == 200
     body = await resp.json()
     roles = [m["role"] for m in body["messages"]]
-    assert roles == ["user", "assistant"]
-    assert "Morning summary" in body["messages"][0]["content"]
-    assert "Here's your brief" in body["messages"][1]["content"]
+    contents = [m["content"].strip() for m in body["messages"]]
+    assert roles == ["assistant", "user", "assistant"]
+    assert contents == ["Here's your brief.", "Thanks!", "Anytime."]
 
 
 @pytest.mark.asyncio
