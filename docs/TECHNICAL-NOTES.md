@@ -261,7 +261,7 @@ Slash command to deliver workspace files to the chat.
 
 ## launchd Daemon
 
-`abyss start` (daemon by default since v2026.05.15) creates `~/Library/LaunchAgents/com.abyss.daemon.plist` and runs `launchctl load`. Use `abyss start --foreground` for an inline / debugging run.
+`abyss start --daemon` creates `~/Library/LaunchAgents/com.abyss.daemon.plist` and runs `launchctl load`. Without ``--daemon`` (the default since v2026.05.15) abyss runs foreground so the Rich `BuildProgress` checklist is visible in the terminal.
 `KeepAlive` is enabled so the process auto-restarts on termination.
 `abyss stop` runs `launchctl unload` then deletes the plist.
 
