@@ -22,8 +22,8 @@ purplemux recommends for the same scenario.
 ### 2. Start abyss
 
 ```bash
-abyss start                     # daemon (default) — boots API + dashboard + schedulers
-abyss start --foreground        # run inline (Ctrl+C to stop)
+abyss start                     # foreground (default) — boot checklist visible
+abyss start --daemon            # background (launchd)
 ```
 
 By default the dashboard binds to loopback only. Bind to all interfaces

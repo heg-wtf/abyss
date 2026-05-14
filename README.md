@@ -80,10 +80,10 @@ abyss bot list
 abyss bot remove <name>
 
 # Run abyss (API + dashboard + schedulers)
-abyss start              # Daemon by default (launchd)
-abyss start --foreground # Run inline (Ctrl+C to stop)
+abyss start              # Foreground (default) — BuildProgress checklist visible
+abyss start --daemon     # Background (launchd)
 abyss start --port 8080  # Custom dashboard port (default 3847)
-abyss stop               # Stop daemon
+abyss stop               # Stop daemon + dashboard
 abyss status             # Show running status
 ```
 
@@ -256,8 +256,8 @@ abyss heartbeat run <bot>      # Run heartbeat immediately (test)
 abyss heartbeat edit <bot>     # Edit HEARTBEAT.md ($EDITOR)
 
 # Run abyss
-abyss start                    # Daemon by default (boots API + dashboard + schedulers)
-abyss start --foreground       # Run inline (Ctrl+C to stop)
+abyss start                    # Foreground (default) — boot checklist visible, Ctrl+C to stop
+abyss start --daemon           # Background (launchd)
 abyss start --port 8080        # Custom dashboard port (default 3847)
 abyss stop                     # Stop daemon + dashboard
 abyss restart                  # Stop then start
@@ -327,8 +327,8 @@ abyss/
 Abysscope is a web-based dashboard for managing `~/.abyss/` configuration, bots, skills, cron jobs, sessions, and logs. No terminal required. As of v2026.05.15 the dashboard boots automatically as part of `abyss start` — there is no separate `abyss dashboard` subcommand.
 
 ```bash
-abyss start                        # Daemon (default) — boots API + dashboard
-abyss start --foreground           # Run inline; Ctrl+C stops both
+abyss start                        # Foreground (default) — boot checklist visible
+abyss start --daemon               # Background (launchd)
 abyss start --port 8080            # Custom dashboard port (default 3847)
 abyss stop                         # Stop daemon + dashboard
 abyss status                       # Show running state (API + dashboard URLs)

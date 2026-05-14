@@ -386,8 +386,8 @@ def test_dashboard_subcommand_no_longer_exists():
     # confirm the runner rejected it rather than executing anything.
 
 
-def test_start_signature_drops_daemon_flag():
-    """``abyss start`` exposes ``--foreground``/``--port`` instead of ``--daemon``."""
+def test_start_signature_exposes_daemon_and_port():
+    """``abyss start`` exposes ``--daemon``/``--port`` (foreground default)."""
     import re
 
     from typer.testing import CliRunner
@@ -396,12 +396,11 @@ def test_start_signature_drops_daemon_flag():
 
     # Strip ANSI escapes — Typer + Rich split the dashes from the flag
     # name with color codes when running on CI, so a plain substring
-    # check on the raw stdout misses ``--foreground``.
+    # check on the raw stdout misses ``--daemon``.
     ansi = re.compile(r"\x1b\[[0-9;]*m")
     runner = CliRunner()
     result = runner.invoke(app, ["start", "--help"])
     assert result.exit_code == 0
     stripped = ansi.sub("", result.stdout)
-    assert "--daemon" not in stripped
-    assert "--foreground" in stripped
+    assert "--daemon" in stripped
     assert "--port" in stripped

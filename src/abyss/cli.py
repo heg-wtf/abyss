@@ -62,11 +62,12 @@ def init() -> None:
 @app.command()
 def start(
     bot: str = typer.Option(None, help="Start specific bot only"),
-    foreground: bool = typer.Option(
+    daemon: bool = typer.Option(
         False,
-        "--foreground",
-        "-f",
-        help="Run in the current terminal (no launchd registration). Daemon by default.",
+        "--daemon",
+        "-d",
+        help="Run as a launchd background daemon. Foreground by default so "
+        "the boot checklist is visible in the terminal.",
     ),
     port: int = typer.Option(
         3847,
@@ -77,12 +78,13 @@ def start(
 ) -> None:
     """Start abyss (API server + dashboard + per-bot schedulers).
 
-    Daemon by default — registers a launchd job and exits. Use
-    ``--foreground`` to run inline (Ctrl+C to stop).
+    Foreground by default — the Rich ``BuildProgress`` checklist
+    renders live in the terminal. Press Ctrl+C to stop. Use
+    ``--daemon`` to register a launchd job and detach.
     """
     from abyss.bot_manager import start_bots
 
-    start_bots(bot_name=bot, foreground=foreground, dashboard_port=port)
+    start_bots(bot_name=bot, daemon=daemon, dashboard_port=port)
 
 
 @app.command()
@@ -96,11 +98,12 @@ def stop() -> None:
 @app.command()
 def restart(
     bot: str = typer.Option(None, help="Restart specific bot only"),
-    foreground: bool = typer.Option(
+    daemon: bool = typer.Option(
         False,
-        "--foreground",
-        "-f",
-        help="Run in the current terminal (no launchd registration). Daemon by default.",
+        "--daemon",
+        "-d",
+        help="Run as a launchd background daemon. Foreground by default so "
+        "the boot checklist is visible in the terminal.",
     ),
     port: int = typer.Option(
         3847,
@@ -113,7 +116,7 @@ def restart(
     from abyss.bot_manager import start_bots, stop_bots
 
     stop_bots()
-    start_bots(bot_name=bot, foreground=foreground, dashboard_port=port)
+    start_bots(bot_name=bot, daemon=daemon, dashboard_port=port)
 
 
 @app.command()
