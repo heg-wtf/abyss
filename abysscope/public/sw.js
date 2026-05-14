@@ -64,7 +64,7 @@ self.addEventListener("notificationclick", (event) => {
             return client.focus();
           }
         }
-        const target = bot && sessionId ? `/mobile/chat/${bot}/${sessionId}` : "/mobile/sessions";
+        const target = bot && sessionId ? `/mobile/chat/${bot}/${sessionId}` : "/mobile";
         return self.clients.openWindow(target);
       }),
   );

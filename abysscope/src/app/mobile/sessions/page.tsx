@@ -1,19 +1,16 @@
-import { checkHealth, listChatBots } from "@/lib/abyss-api";
-import { MobileSessionsScreen } from "@/components/mobile/mobile-sessions-screen";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Mobile sessions list page (Phase 2 skeleton).
+ * Backward-compat redirect.
  *
- * Phase 3 will replace the placeholder with bot avatars, last-message
- * previews, and custom rename support. For now the screen only proves
- * the routing + layout integration: the API is queried server-side and
- * the result handed to a thin client shell.
+ * ``/mobile/sessions`` used to be the canonical chat-list URL; the
+ * Phase 4 polish flattened it into ``/mobile``. Anyone with a stale
+ * bookmark, an installed PWA whose ``start_url`` was the old path,
+ * or a Service Worker push-cache pointing here lands one redirect
+ * away instead of a 404.
  */
-export default async function MobileSessionsPage() {
-  const apiOnline = await checkHealth();
-  const bots = apiOnline ? await listChatBots().catch(() => []) : [];
-
-  return <MobileSessionsScreen apiOnline={apiOnline} bots={bots} />;
+export default function MobileSessionsRedirect() {
+  redirect("/mobile");
 }

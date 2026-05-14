@@ -36,10 +36,13 @@ describe("/mobile route skeleton", () => {
     expect(source).not.toMatch(/fixed inset-0/);
   });
 
-  it("root path auto-redirects mobile user agents to /mobile/sessions", () => {
+  it("root path auto-redirects mobile user agents to /mobile", () => {
     const source = read("middleware.ts");
     expect(source).toMatch(/Mobi\|Android\|iPhone/);
-    expect(source).toMatch(/\/mobile\/sessions/);
+    // ``/mobile`` is the canonical chat-list URL; ``/mobile/sessions``
+    // only exists as a backward-compat redirect now.
+    expect(source).toMatch(/"\/mobile"/);
+    expect(source).not.toMatch(/\/mobile\/sessions/);
     // ``?desktop=1`` opts out so the heatmap stays accessible from
     // the phone when needed.
     expect(source).toMatch(/desktop.*===.*"1"/);
@@ -52,16 +55,19 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/viewportFit: "cover"/);
   });
 
-  it("index page redirects to /mobile/sessions", () => {
+  it("/mobile is the chat list (no redirect hop)", () => {
     const source = read("app/mobile/page.tsx");
-    expect(source).toMatch(/redirect\("\/mobile\/sessions"\)/);
-  });
-
-  it("sessions page fetches bots server-side and renders the screen", () => {
-    const source = read("app/mobile/sessions/page.tsx");
     expect(source).toMatch(/listChatBots/);
     expect(source).toMatch(/MobileSessionsScreen/);
     expect(source).toMatch(/force-dynamic/);
+    // The earlier redirect to ``/mobile/sessions`` is gone — direct
+    // render instead.
+    expect(source).not.toMatch(/redirect\(/);
+  });
+
+  it("/mobile/sessions stays as a backward-compat redirect", () => {
+    const source = read("app/mobile/sessions/page.tsx");
+    expect(source).toMatch(/redirect\("\/mobile"\)/);
   });
 
   it("sidebar short-circuits on /mobile to free the viewport", () => {
@@ -110,7 +116,7 @@ describe("/mobile route skeleton", () => {
   it("chat screen renders header + input bar + workspace + slash sheets", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
     // Header has back link to sessions list and workspace toggle.
-    expect(source).toMatch(/href="\/mobile\/sessions"/);
+    expect(source).toMatch(/href="\/mobile"/);
     expect(source).toMatch(/aria-label="Workspace files"/);
     // Input bar order: slash, attach, textarea, send/voice toggle.
     expect(source).toMatch(/aria-label="Slash commands"/);
@@ -234,7 +240,7 @@ describe("/mobile route skeleton", () => {
 
   it("manifest declares PWA fields needed for iOS + Android install", () => {
     const source = read("app/manifest.ts");
-    expect(source).toMatch(/start_url: "\/mobile\/sessions"/);
+    expect(source).toMatch(/start_url: "\/mobile"/);
     expect(source).toMatch(/display: "standalone"/);
     expect(source).toMatch(/android-chrome-192x192\.png/);
     expect(source).toMatch(/android-chrome-512x512\.png/);

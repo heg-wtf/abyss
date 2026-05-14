@@ -90,7 +90,7 @@ don't get double-notified.
 
 1. Install the PWA (above).
 2. Open the PWA, tap the **bell** icon in the top-right of
-   ``/mobile/sessions``.
+   ``/mobile``.
 3. Tap **Enable**. iOS / Android will ask for notification
    permission — allow it.
 4. The bell turns solid; future replies arrive as native
@@ -124,8 +124,7 @@ moment either device leaves the network, so Tailscale is preferable.
 
 | Route | What it shows |
 |-------|---------------|
-| `/mobile`                              | Redirects to `/mobile/sessions`. |
-| `/mobile/sessions`                     | List of chats across every bot. Custom names, last-message preview, relative timestamps, long-press → rename / delete, top-right `New` button opens a bot picker. |
+| `/mobile`                              | List of chats across every bot. Custom names, last-message preview, relative timestamps, long-press → rename / delete, top-right `New` button opens a bot picker. (``/mobile/sessions`` redirects here for backward compatibility.) |
 | `/mobile/chat/<bot>/<sessionId>`       | Single chat: header (hamburger → sessions, bot name, workspace files), message list, fixed input bar with `[slash] [attach] [textarea] [voice/send]`. Slash commands route through the same `abyss.commands` backend used by the Telegram bot, so `/cron list`, `/help`, `/files`, etc. all work. |
 
 The desktop UI at `/chat` continues to work unchanged.

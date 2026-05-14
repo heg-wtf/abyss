@@ -1,15 +1,19 @@
-import { redirect } from "next/navigation";
+import { MobileSessionsScreen } from "@/components/mobile/mobile-sessions-screen";
+import { checkHealth, listChatBots } from "@/lib/abyss-api";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Root mobile entry.
+ * Mobile entry — chat list.
  *
- * Phase 2 ships only the route skeleton — the rich chat UI arrives in
- * Phase 4. Until then, sending users to the session picker is the
- * sensible default: a fresh-install mobile user has no active session,
- * and a returning user wants to pick which conversation to resume.
+ * ``/mobile`` *is* the sessions list. The earlier revision used a
+ * server redirect to ``/mobile/sessions`` to leave room for a
+ * different future landing screen (e.g. "open the last chat I was
+ * in"), but the indirection is just a wasted hop today and made the
+ * URL longer than it needs to be on a phone.
  */
-export default function MobileIndexPage() {
-  redirect("/mobile/sessions");
+export default async function MobileIndexPage() {
+  const apiOnline = await checkHealth();
+  const bots = apiOnline ? await listChatBots().catch(() => []) : [];
+  return <MobileSessionsScreen apiOnline={apiOnline} bots={bots} />;
 }
