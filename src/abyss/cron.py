@@ -476,9 +476,7 @@ async def execute_cron_job(
     # ``conversation_search`` MCP.
 
 
-def _log_task_exception(
-    bot_name: str, job_name: str
-) -> Callable[[asyncio.Task], None]:
+def _log_task_exception(bot_name: str, job_name: str) -> Callable[[asyncio.Task], None]:
     """Return a done-callback that surfaces fire-and-forget task errors.
 
     ``asyncio.create_task`` without an awaited future loses exceptions
