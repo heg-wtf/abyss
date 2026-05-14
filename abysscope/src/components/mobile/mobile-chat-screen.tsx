@@ -7,11 +7,11 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
+  Command,
   Folder,
   Menu as MenuIcon,
   Mic,
   Paperclip,
-  Slash,
   X,
 } from "lucide-react";
 import { BotAvatar } from "@/components/bot-avatar";
@@ -492,7 +492,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             className="rounded-full p-2 text-muted-foreground hover:bg-muted"
             onClick={handleSlashOpen}
           >
-            <Slash className="size-5" />
+            <Command className="size-5" />
           </button>
           <button
             type="button"
