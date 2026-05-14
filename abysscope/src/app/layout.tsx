@@ -26,10 +26,23 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Abysscope",
   description: "abyss dashboard",
+  // ``manifest`` resolves to ``/manifest.webmanifest`` (served by
+  // ``app/manifest.ts``) so the browser knows the PWA name, icons,
+  // start URL, and standalone display mode. Together with the Apple
+  // meta tags below this is the minimum surface iOS Safari needs to
+  // let "Add to Home Screen" install the dashboard as a PWA.
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Abyss",
+  },
   icons: {
     icon: [
       { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
       { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/android-chrome-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/android-chrome-512x512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: "/apple-touch-icon.png",
   },

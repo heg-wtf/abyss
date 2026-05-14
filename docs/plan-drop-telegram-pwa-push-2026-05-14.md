@@ -1,10 +1,11 @@
 # Plan: 텔레그램 하드 컷 + PWA Web Push로 모바일 전환
 
 - date: 2026-05-14
-- status: in-progress
+- status: done
 - author: claude
 - approved-by: ash84
 - branch: feat/drop-telegram-pwa-push
+- completed: 2026-05-14
 
 ## 1. 목적 및 배경
 

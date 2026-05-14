@@ -52,20 +52,61 @@ http://macbook.your-tailnet.ts.net:3847/mobile
 iOS Safari + Android Chrome both accept this URL over the Tailscale VPN
 without a public DNS record.
 
-### 4. HTTPS (optional, recommended later)
+### 4. HTTPS for PWA install + Web Push
 
-The Phase 1 mobile shell does **not** require HTTPS — slash commands,
-attachments, and chat streaming all work over plain HTTP on Tailscale.
-
-When PWA / Web Push lands (next plan), iOS will require HTTPS for
-service worker registration. Use `tailscale serve` to obtain a free
-HTTPS cert for the tailnet hostname:
+Once PWA install + Web Push are wired in (see *PWA install* and
+*Notifications* below), iOS Safari refuses to register a Service
+Worker over plain HTTP, so the dashboard needs an HTTPS origin.
+``tailscale serve`` is the simplest way to get one — Tailscale issues
+a free Let's Encrypt cert for the tailnet hostname:
 
 ```bash
 tailscale serve https / http://localhost:3847
 ```
 
-Then visit `https://macbook.your-tailnet.ts.net/mobile`.
+Then visit `https://macbook.your-tailnet.ts.net/mobile` on the phone.
+The HTTP URL keeps working for development.
+
+## PWA install
+
+1. Open the HTTPS dashboard URL in **iOS Safari** (16.4+).
+2. Tap **Share → Add to Home Screen**.
+3. Confirm the name (default "Abyss") and tap **Add**.
+4. Open the icon from the home screen — the browser chrome
+   disappears, the page runs full-screen, and a Service Worker
+   registers in the background.
+
+On **Android Chrome**, an "Install app" banner appears automatically
+after the manifest is detected; tap it (or use the ⋮ menu →
+**Install app**). The Service Worker registers immediately because
+Android does not require home-screen install for it.
+
+## Notifications
+
+The dashboard sends a Web Push notification when a bot replies, a
+cron job finishes, or a heartbeat reports something worth looking
+at. Tabs currently focused on the dashboard are skipped so you
+don't get double-notified.
+
+1. Install the PWA (above).
+2. Open the PWA, tap the **bell** icon in the top-right of
+   ``/mobile/sessions``.
+3. Tap **Enable**. iOS / Android will ask for notification
+   permission — allow it.
+4. The bell turns solid; future replies arrive as native
+   notifications. Tap a notification to jump straight to that
+   chat.
+
+To stop receiving pushes, open the same sheet and tap **Disable**.
+Or remove the PWA from the home screen — abyss will purge the
+subscription on the next failed delivery.
+
+### VAPID key backup
+
+The server's identity for Web Push lives at
+``~/.abyss/vapid-keys.json`` (mode 0600). Deleting that file
+invalidates **every** existing browser subscription — back it up
+alongside ``config.yaml`` if you rebuild the Mac.
 
 ## Alternative: same Wi-Fi only
 

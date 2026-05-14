@@ -214,6 +214,76 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/commandFile/);
   });
 
+  it("service worker handles push and notificationclick", () => {
+    const swPath = path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "..",
+      "public",
+      "sw.js"
+    );
+    const source = readFileSync(swPath, "utf8");
+    // SW shows notifications + routes clicks to the chat that fired.
+    expect(source).toMatch(/addEventListener\("push"/);
+    expect(source).toMatch(/addEventListener\("notificationclick"/);
+    expect(source).toMatch(/showNotification/);
+    expect(source).toMatch(/\/mobile\/chat\/\$\{bot\}\/\$\{sessionId\}/);
+  });
+
+  it("manifest declares PWA fields needed for iOS + Android install", () => {
+    const source = read("app/manifest.ts");
+    expect(source).toMatch(/start_url: "\/mobile\/sessions"/);
+    expect(source).toMatch(/display: "standalone"/);
+    expect(source).toMatch(/android-chrome-192x192\.png/);
+    expect(source).toMatch(/android-chrome-512x512\.png/);
+    expect(source).toMatch(/purpose: "maskable"/);
+  });
+
+  it("root layout points at the manifest + Apple PWA meta", () => {
+    const source = read("app/layout.tsx");
+    expect(source).toMatch(/manifest: "\/manifest\.webmanifest"/);
+    expect(source).toMatch(/appleWebApp:/);
+    expect(source).toMatch(/capable: true/);
+    // Pretendard wiring stays intact.
+    expect(source).toMatch(/--font-pretendard/);
+  });
+
+  it("use-web-push hook covers permission + subscribe + visibility", () => {
+    const source = read("hooks/use-web-push.ts");
+    expect(source).toMatch(/Notification\.requestPermission/);
+    expect(source).toMatch(/pushManager\.subscribe/);
+    expect(source).toMatch(/\/api\/push\/vapid-key/);
+    expect(source).toMatch(/\/api\/push\/subscribe/);
+    expect(source).toMatch(/\/api\/push\/visibility/);
+    // Notification clicks route the user back to the chat that fired.
+    expect(source).toMatch(/\/mobile\/chat\/\$\{nav\.bot\}\/\$\{nav\.sessionId\}/);
+    // Visibility heartbeat fires while the tab is focused.
+    expect(source).toMatch(/setInterval/);
+  });
+
+  it("mobile sessions header exposes the push toggle", () => {
+    const source = read("components/mobile/mobile-sessions-screen.tsx");
+    expect(source).toMatch(/PushToggle/);
+    expect(source).toMatch(/useWebPush/);
+    expect(source).toMatch(/Add to Home Screen/);
+  });
+
+  it("api proxy routes forward to the chat server push endpoints", () => {
+    const subscribe = read("app/api/push/subscribe/route.ts");
+    expect(subscribe).toMatch(/\/chat\/push\/subscribe/);
+    expect(subscribe).toMatch(/export async function POST/);
+    expect(subscribe).toMatch(/export async function DELETE/);
+
+    const vapid = read("app/api/push/vapid-key/route.ts");
+    expect(vapid).toMatch(/\/chat\/push\/vapid-key/);
+
+    const visibility = read("app/api/push/visibility/route.ts");
+    expect(visibility).toMatch(/\/chat\/push\/visibility/);
+    expect(visibility).toMatch(/keepalive: true/);
+  });
+
   it("handlers.py closes the file handle when replying with a document", () => {
     const handlersPath = path.resolve(
       __dirname,
