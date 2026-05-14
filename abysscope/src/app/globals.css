@@ -125,6 +125,23 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ``stream-dot`` drives the three-dot typing indicator rendered by
+   ``StreamProgress`` while a chat reply is streaming. Each dot uses the
+   same keyframes with a staggered ``animation-delay`` so they bounce
+   in sequence. Subtle enough to fit a chat bubble; clearly alive. */
+@keyframes stream-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
