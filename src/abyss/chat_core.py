@@ -1,12 +1,10 @@
-"""Backend-agnostic chat orchestration shared by Telegram handlers and the
-dashboard web chat server.
+"""Backend-agnostic chat orchestration for the dashboard + mobile PWA.
 
 Provides session bootstrap, conversation logging, LLM backend invocation, and
-``--resume`` fallback. Knows nothing about Telegram or HTTP — callers supply an
-``on_chunk`` callback to receive streaming text.
-
-The Telegram path in ``handlers.py`` keeps its own nested helpers for now; the
-two implementations stay in sync intentionally (small, well-tested logic).
+``--resume`` fallback. Knows nothing about HTTP / SSE — callers supply an
+``on_chunk`` callback to receive streaming text. The chat server (``chat_server.py``)
+is the only consumer today, but the function-level signatures keep the seams
+clean for future adapters (CLI streaming, MCP, etc.).
 """
 
 from __future__ import annotations
@@ -207,7 +205,7 @@ async def process_chat_message(
             timeout=timeout,
         )
     except Exception as error:
-        logger.error("chat_core: backend failure for %s/%s: %s", bot_name, chat_id, error)
+        logger.exception("chat_core: backend failure for %s/%s", bot_name, chat_id)
         full_text = f"Error: {error}"
 
     log_conversation(session_dir, "assistant", full_text)

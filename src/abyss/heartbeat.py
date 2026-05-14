@@ -106,8 +106,19 @@ def is_within_active_hours(active_hours: dict[str, str], now: datetime | None = 
     start_str = active_hours.get("start", "00:00")
     end_str = active_hours.get("end", "23:59")
 
-    start_hour, start_minute = map(int, start_str.split(":"))
-    end_hour, end_minute = map(int, end_str.split(":"))
+    try:
+        start_hour, start_minute = map(int, start_str.split(":"))
+        end_hour, end_minute = map(int, end_str.split(":"))
+    except (ValueError, AttributeError):
+        # Malformed config (e.g. "9am" or ``None``) used to crash the
+        # scheduler loop. Treat it as "always active" so the run still
+        # happens and the broken config is visible in the logs.
+        logger.warning(
+            "Invalid heartbeat active_hours range (start=%r, end=%r); treating as always active",
+            start_str,
+            end_str,
+        )
+        return True
 
     current_minutes = now.hour * 60 + now.minute
     start_minutes = start_hour * 60 + start_minute
@@ -257,7 +268,7 @@ async def execute_heartbeat(
         response = result.text
     except Exception as error:
         response = f"Heartbeat failed: {error}"
-        logger.error("Heartbeat for '%s' failed: %s", bot_name, error)
+        logger.exception("Heartbeat for '%s' failed", bot_name)
 
     # Persist the run to ``conversation-*.md`` so the mobile Routines
     # tab can render heartbeat history. Best-effort; failures must
@@ -281,13 +292,11 @@ async def execute_heartbeat(
         logger.info("Heartbeat for '%s': HEARTBEAT_OK, no notification needed", bot_name)
         return
 
-    # Web Push delivery (coexists with the Telegram callback below).
-    # ``send_push`` no-ops when there are no subscriptions, so this is
-    # safe on freshly-installed dashboards. Failures here must never
-    # break the Telegram path.
-    from contextlib import suppress as _suppress
+    # Web Push delivery — best-effort. ``send_push`` no-ops when no
+    # PWA subscriptions exist (e.g. fresh install, no HTTPS yet).
+    from contextlib import suppress
 
-    with _suppress(Exception):
+    with suppress(Exception):
         from abyss.web_push import send_push as _send_push
 
         preview = response.replace("\n", " ").strip()
