@@ -3,6 +3,8 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Folder,
@@ -444,6 +446,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           {activeStream.streaming && (
             <li className="flex min-w-0 justify-start">
               <div className="min-w-0 max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3 py-2 text-sm">
+                <StreamProgress streaming={activeStream.streaming} />
                 {activeStream.text ? (
                   <MarkdownBody content={activeStream.text} />
                 ) : (
@@ -656,6 +659,40 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
 // Pieces
 // ---------------------------------------------------------------------------
 
+/**
+ * Elapsed-time badge for an in-flight reply, à la Claude Desktop.
+ *
+ * Renders a tiny sparkle + "Ns" pill at the top of the streaming
+ * bubble. The seconds counter updates once a second via a single
+ * ``setInterval`` that resets whenever the bubble unmounts (which
+ * happens on stream completion).
+ */
+function StreamProgress({ streaming }: { streaming: boolean }) {
+  const [elapsed, setElapsed] = React.useState(0);
+  React.useEffect(() => {
+    if (!streaming) {
+      setElapsed(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [streaming]);
+
+  if (!streaming) return null;
+  return (
+    <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span aria-hidden className="inline-block animate-pulse">
+        ✱
+      </span>
+      <span className="tabular-nums">{elapsed}s</span>
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ConversationMessage }) {
   const isUser = message.role === "user";
   return (
@@ -726,7 +763,15 @@ function MarkdownBody({ content }: { content: string }) {
   // whole page. Tables get the same treatment.
   return (
     <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words [overflow-wrap:anywhere] prose-pre:my-2 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-background/40 prose-pre:p-2 prose-code:break-words prose-img:max-w-full prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
-      <ReactMarkdown>{content || ""}</ReactMarkdown>
+      {/* ``remarkBreaks`` turns single ``\n`` into ``<br>`` — without
+          it CommonMark collapses single newlines to a space, which
+          made schedule bullets and short status replies render as
+          one giant run-on paragraph on the phone. ``remarkGfm`` adds
+          tables / strikethrough / autolinks so assistant replies
+          render the same as on GitHub. */}
+      <ReactMarkdown remarkPlugins={[remarkBreaks, remarkGfm]}>
+        {content || ""}
+      </ReactMarkdown>
     </div>
   );
 }

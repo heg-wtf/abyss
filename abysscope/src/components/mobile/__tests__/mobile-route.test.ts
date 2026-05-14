@@ -55,14 +55,27 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/viewportFit: "cover"/);
   });
 
-  it("/mobile is the chat list (no redirect hop)", () => {
+  it("/mobile resolves to the most recent chat or a bootstrap fallback", () => {
     const source = read("app/mobile/page.tsx");
+    // Full sessions screen is gone — drawer is the only session
+    // switcher. ``/mobile`` either redirects into the latest chat or
+    // shows a bootstrap fallback when no chat exists yet.
     expect(source).toMatch(/listChatBots/);
-    expect(source).toMatch(/MobileSessionsScreen/);
+    expect(source).toMatch(/listChatSessions/);
+    expect(source).toMatch(/redirect\(/);
+    expect(source).toMatch(/MobileBootstrapScreen/);
     expect(source).toMatch(/force-dynamic/);
-    // The earlier redirect to ``/mobile/sessions`` is gone — direct
-    // render instead.
-    expect(source).not.toMatch(/redirect\(/);
+    expect(source).not.toMatch(/MobileSessionsScreen/);
+  });
+
+  it("bootstrap screen handles the no-chat / no-bot / offline cases", () => {
+    const source = read("components/mobile/mobile-bootstrap-screen.tsx");
+    expect(source).toMatch(/apiOnline/);
+    expect(source).toMatch(/bots\.length === 0/);
+    // Inline session creation uses the Next.js proxy so the phone
+    // hits the Mac instead of its own loopback.
+    expect(source).toMatch(/"\/api\/chat\/sessions"/);
+    expect(source).toMatch(/router\.replace\(/);
   });
 
   it("/mobile/sessions stays as a backward-compat redirect", () => {
@@ -78,28 +91,25 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/function SidebarImpl/);
   });
 
-  it("mobile sessions screen wires bot picker, rename, and delete flows", () => {
-    const source = read("components/mobile/mobile-sessions-screen.tsx");
-    // Bot picker uses base-ui Menu (matches the desktop chat-session-list).
-    expect(source).toMatch(/Menu\.Root/);
+  it("drawer session list owns rename / delete / inline-create flows", () => {
+    const source = read("components/mobile/sessions-drawer-panel.tsx");
     // Client-side fetches MUST hit the Next.js proxy (``/api/chat/...``)
     // and not the ``abyss-api`` helpers that point at the
     // ``127.0.0.1:3848`` sidecar — on a phone, ``127.0.0.1`` is the
     // phone, not the Mac, so direct calls silently fail.
     expect(source).toMatch(/fetch\(\s*`\/api\/chat\/sessions\?bot=/);
     expect(source).toMatch(/fetch\("\/api\/chat\/sessions"/);
-    expect(source).toMatch(/\/api\/chat\/sessions\/\$\{[^}]+bot[^}]*\}\/\$\{[^}]+id[^}]*\}/);
     expect(source).toMatch(/\/rename/);
     expect(source).not.toMatch(/listChatSessions\(/);
     expect(source).not.toMatch(/renameChatSession\(/);
     expect(source).not.toMatch(/deleteChatSession\(/);
     expect(source).not.toMatch(/createChatSession\(/);
-    // Long-press contract: touchstart + touchend cancel.
-    expect(source).toMatch(/useLongPress/);
-    expect(source).toMatch(/onTouchStart/);
-    expect(source).toMatch(/onTouchEnd/);
-    // Custom name takes priority over bot display name.
-    expect(source).toMatch(/session\.custom_name/);
+    // Custom name takes priority over bot display name (drawer uses
+    // ``sess`` as the loop var, sub-dialogs use ``session``).
+    expect(source).toMatch(/(?:sess|session)\.custom_name/);
+    // Per-row actions: ⋮ button + right-click both open the menu.
+    expect(source).toMatch(/onContextMenu/);
+    expect(source).toMatch(/MoreVertical/);
   });
 
   it("api helper exposes renameChatSession and proxy route exists", () => {
@@ -277,15 +287,19 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/setInterval/);
   });
 
-  it("mobile sessions header exposes the push toggle", () => {
-    const source = read("components/mobile/mobile-sessions-screen.tsx");
-    expect(source).toMatch(/PushToggle/);
-    // The toggle pulls state from the shared provider — calling
-    // ``useWebPush`` directly here would mount a second instance and
-    // re-register notification-click + visibility listeners.
-    expect(source).toMatch(/useWebPushContext/);
-    expect(source).not.toMatch(/= useWebPush\(/);
-    expect(source).toMatch(/Add to Home Screen/);
+  it("push toggle lives in its own module and is mounted in the drawer footer", () => {
+    const toggle = read("components/mobile/push-toggle.tsx");
+    expect(toggle).toMatch(/export function PushToggle/);
+    // Reads from the shared provider — calling ``useWebPush``
+    // directly here would mount a second instance and re-register
+    // notification-click + visibility listeners.
+    expect(toggle).toMatch(/useWebPushContext/);
+    expect(toggle).not.toMatch(/= useWebPush\(/);
+    expect(toggle).toMatch(/Add to Home Screen/);
+
+    const drawer = read("components/mobile/sessions-drawer-panel.tsx");
+    expect(drawer).toMatch(/import \{ PushToggle \}/);
+    expect(drawer).toMatch(/<PushToggle \/>/);
   });
 
   it("root layout mounts WebPushProvider once for every page", () => {
