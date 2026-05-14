@@ -218,7 +218,7 @@ export function SessionsDrawerPanel({
         )}
         {tab === "routines" ? (
           <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No routines yet. Cron + heartbeat results will land here.
+            No routines yet
           </li>
         ) : loading && sessions.length === 0 ? (
           <li className="px-4 py-3 text-sm text-muted-foreground">Loading…</li>
