@@ -146,8 +146,14 @@ export function SessionsDrawerPanel({
           ``Sessions`` header is gone. ``+ New chat`` lives as the
           first list row (Anthropic / Claude.ai mobile pattern)
           instead of a separate header button, which gives the list
-          a single column of consistent touch targets. */}
-      <div className="flex shrink-0 border-b bg-muted/20">
+          a single column of consistent touch targets.
+
+          ``h-14`` matches the workspace drawer header so the two
+          drawers feel symmetric when the user swings between them
+          — without this the chats tab bar sat ~23px shorter than
+          the workspace header and the chat surface visibly hopped
+          up and down behind the drawer. */}
+      <div className="flex h-14 shrink-0 border-b bg-muted/20">
         <TabButton
           active={tab === "chats"}
           onClick={() => setTab("chats")}
@@ -354,10 +360,10 @@ function TabButton({
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex-1 px-4 py-2 text-xs font-medium uppercase tracking-wider transition-colors ${
+      className={`flex-1 px-4 py-2 text-xs uppercase tracking-wider transition-colors ${
         active
-          ? "border-b-2 border-foreground text-foreground"
-          : "text-muted-foreground hover:text-foreground"
+          ? "border-b-2 border-foreground font-bold text-foreground"
+          : "font-semibold text-muted-foreground hover:text-foreground"
       }`}
     >
       {children}
