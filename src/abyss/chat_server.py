@@ -767,9 +767,7 @@ class ChatServer:
                 {
                     "name": name,
                     "display_name": (
-                        cfg.get("display_name")
-                        or cfg.get("telegram_botname")
-                        or name
+                        cfg.get("display_name") or cfg.get("telegram_botname") or name
                     ),
                     "type": backend_cfg.get("type", "claude_code"),
                 }
@@ -1191,9 +1189,7 @@ class ChatServer:
         if not reply_text:
             return
         display_name = (
-            bot_config.get("display_name")
-            or bot_config.get("telegram_botname")
-            or bot_name
+            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
         )
         preview = reply_text.replace("\n", " ").strip()
         if len(preview) > 120:
