@@ -320,15 +320,12 @@ def compose_claude_md(
     goal: str = "",
     skill_names: list[str] | None = None,
     bot_path: Path | None = None,
-    group_context: dict[str, Any] | None = None,
 ) -> str:
     """Compose a full CLAUDE.md combining bot profile and skill content.
 
     When skill_names is empty or None, output is identical to generate_claude_md().
     When bot_path is provided, a Memory section is appended with instructions
     for the bot to save and retrieve long-term memories.
-    When group_context is provided (a group config dict), a group context section
-    is appended with orchestrator/member role instructions.
     """
     from abyss.config import get_language
 
@@ -360,9 +357,8 @@ def compose_claude_md(
             "- Save generated files to the workspace/ directory.",
             "- Always ask for confirmation before executing dangerous commands "
             "(delete, restart, etc.).",
-            "- **절대로 Markdown 표(table)를 사용하지 마라.** "
-            "Telegram에서 표는 깨진다. "
-            "대신 이모지 + 한 줄씩 나열하라. "
+            "- 표(table)가 정말 필요하지 않다면 이모지 + 한 줄 나열을 우선한다. "
+            "모바일 PWA + 대시보드 채팅 둘 다 표는 렌더되지만 좁은 화면에서 가독성이 떨어진다. "
             "예시:\n"
             "  🌡 최저 -2°C / 최고 7°C\n"
             "  🌧 오전 한때 비 (5mm 미만)\n"
@@ -430,10 +426,6 @@ def compose_claude_md(
             sections.append(f"## {skill_name}")
             sections.append("")
             sections.append(markdown.strip())
-
-    # ``group_context`` is accepted but ignored for now — the group
-    # surface was removed alongside Telegram. Re-introducing it will
-    # land in the same PR as the PWA multi-bot room work.
 
     sections.append("")
     return "\n".join(sections)

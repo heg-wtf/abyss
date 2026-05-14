@@ -184,7 +184,6 @@ class TestReset:
         (directory / "workspace" / "keep.md").write_text("keep me")
         (directory / "conversation-260513.md").write_text("user: hi\n")
         outcome = await commands.cmd_reset(make_context(bot_path, bot_config, chat_id=11))
-        assert outcome.is_group is False
         assert "reset" in outcome.result.text.lower()
         assert (directory / "workspace" / "keep.md").exists()
         assert not (directory / "conversation-260513.md").exists()
