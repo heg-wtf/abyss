@@ -22,11 +22,18 @@ export default function ConversationPage() {
   const [conversationFiles, setConversationFiles] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>("");
   const [content, setContent] = useState<string>("");
+  // ``displayName`` is the user-facing bot label (``display_name`` from
+  // bot.yaml). Falls back to the URL slug so the breadcrumb never
+  // renders empty while the fetch is in flight.
+  const [displayName, setDisplayName] = useState<string>(name);
 
   useEffect(() => {
     fetch(`/api/bots/${name}`)
       .then((r) => r.json())
       .then((data) => {
+        if (typeof data?.display_name === "string" && data.display_name.trim()) {
+          setDisplayName(data.display_name);
+        }
         const session = (data.sessions || []).find(
           (s: SessionData) => s.chatId === chatId,
         );
@@ -100,7 +107,7 @@ export default function ConversationPage() {
           href={`/bots/${name}`}
           className="text-muted-foreground hover:text-foreground text-sm"
         >
-          {name}
+          {displayName}
         </Link>
         <span className="text-muted-foreground">/</span>
         <h1 className="text-lg font-bold">chat_{chatId}</h1>
