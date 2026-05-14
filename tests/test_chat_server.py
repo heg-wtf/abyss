@@ -1001,9 +1001,7 @@ async def test_slash_send_returns_file_metadata(client, abyss_home, patch_backen
 
 
 @pytest.mark.asyncio
-async def test_slash_messages_endpoint_returns_logged_pair(
-    client, abyss_home, patch_backend
-):
+async def test_slash_messages_endpoint_returns_logged_pair(client, abyss_home, patch_backend):
     """The slash exchange must come back through the standard
     ``/messages`` endpoint so a navigation away + return rebuilds the
     chat surface with the slash result intact. The opposite policy
@@ -1374,9 +1372,7 @@ async def test_slash_reply_does_not_trigger_push(client, abyss_home, patch_backe
 
 
 @pytest.mark.asyncio
-async def test_slash_command_logs_to_conversation_markdown(
-    client, abyss_home, patch_backend
-):
+async def test_slash_command_logs_to_conversation_markdown(client, abyss_home, patch_backend):
     """Slash command results must persist to ``conversation-*.md`` so
     navigating away from a chat and returning does not silently drop
     the reply. Regular LLM messages get this through
