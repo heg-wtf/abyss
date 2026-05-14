@@ -109,6 +109,7 @@ from abyss.llm import cached_backend, get_or_create
 from abyss.session import (
     WEB_SESSION_PREFIX,
     collect_web_session_ids,
+    log_conversation,
 )
 from abyss.session import (
     session_directory as build_session_directory,
@@ -1014,6 +1015,32 @@ class ChatServer:
                 payload["file"] = file_info
             await _sse_write(sse, payload)
             await _sse_write(sse, {"type": "done", "text": text})
+            # Persist the slash exchange to the conversation markdown
+            # so navigating away + back, or reloading, doesn't drop
+            # the reply. Regular messages get this through
+            # ``process_chat_message``; the dashboard slash path
+            # bypassed that until now, so users saw their /commands
+            # vanish whenever they switched chats.
+            try:
+                session_dir = build_session_directory(bot_path, _validate_session_id(session_id))
+                log_conversation(session_dir, "user", message)
+                assistant_log = text or ""
+                if file_info is not None:
+                    file_name = file_info.get("name", "file")
+                    file_url = file_info.get("url", "")
+                    file_line = f"📎 [{file_name}]({file_url})"
+                    assistant_log = (
+                        f"{assistant_log}\n\n{file_line}" if assistant_log else file_line
+                    )
+                if assistant_log:
+                    log_conversation(session_dir, "assistant", assistant_log)
+            except Exception as log_error:  # noqa: BLE001
+                logger.warning(
+                    "chat_server: slash log skipped bot=%s session=%s: %s",
+                    bot_name,
+                    session_id,
+                    log_error,
+                )
         except Exception as error:  # noqa: BLE001
             logger.error(
                 "chat_server: slash failed bot=%s session=%s cmd=%s: %s",
