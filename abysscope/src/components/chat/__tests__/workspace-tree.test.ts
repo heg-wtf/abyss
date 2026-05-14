@@ -42,24 +42,22 @@ describe("WorkspaceTree component guards", () => {
   });
 });
 
-describe("ChatView workspace integration", () => {
-  const source = read("chat-view.tsx");
+describe("WorkspaceTree mobile integration", () => {
+  // The desktop ``/chat`` page was deleted along with its
+  // ``chat-view.tsx`` consumer. WorkspaceTree now only mounts from
+  // ``mobile-chat-screen.tsx`` inside the right slide-drawer.
+  const source = readFileSync(
+    path.resolve(__dirname, "..", "..", "mobile", "mobile-chat-screen.tsx"),
+    "utf8",
+  );
 
   it("imports WorkspaceTree", () => {
-    expect(source).toMatch(/from "\.\/workspace-tree"/);
+    expect(source).toMatch(/from "@\/components\/chat\/workspace-tree"/);
     expect(source).toMatch(/WorkspaceTree/);
   });
 
-  it("renders a Folder button next to the Mic button", () => {
-    expect(source).toMatch(/\bFolder\b/);
-    expect(source).toMatch(/handleWorkspaceToggle/);
-  });
-
-  it("hides workspace panel while voice mode is active", () => {
-    expect(source).toMatch(/workspaceOpen && !voiceMode/);
-  });
-
-  it("opening voice closes the workspace panel", () => {
-    expect(source).toMatch(/setWorkspaceOpen\(false\)/);
+  it("renders inside the SlideDrawer", () => {
+    expect(source).toMatch(/SlideDrawer/);
+    expect(source).toMatch(/<WorkspaceTree/);
   });
 });

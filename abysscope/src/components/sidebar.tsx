@@ -85,12 +85,6 @@ function SidebarImpl() {
             active={pathname === "/"}
           />
           <CollapsedLink
-            href="/chat"
-            label="Chat"
-            icon="💬"
-            active={pathname === "/chat" || pathname.startsWith("/chat/")}
-          />
-          <CollapsedLink
             href="/bots"
             label="Bots"
             icon="🤖"
@@ -151,19 +145,6 @@ function SidebarImpl() {
         >
           <span>🏠</span>
           <span>Dashboard</span>
-        </Link>
-
-        <Link
-          href="/chat"
-          className={cn(
-            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-            pathname === "/chat" || pathname?.startsWith("/chat/")
-              ? "bg-accent text-accent-foreground font-medium"
-              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-          )}
-        >
-          <span>💬</span>
-          <span>Chat</span>
         </Link>
 
         <div>
