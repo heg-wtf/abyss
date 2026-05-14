@@ -1,4 +1,13 @@
-"""Bot lifecycle manager for abyss."""
+"""Bot lifecycle manager for abyss.
+
+Telegram polling is gone — the mobile PWA + dashboard chat are now
+the only user-facing surfaces. ``abyss start`` boots the dashboard
+chat server (HTTP/SSE on 127.0.0.1:3848), the per-bot cron and
+heartbeat schedulers, and the QMD HTTP daemon (when available). No
+``Application``, no ``run_polling``, no Telegram token. Conversation
+markdown files + the FTS5 index continue to live under each bot's
+session directory.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +24,6 @@ from pathlib import Path
 from rich.console import Console
 
 from abyss.config import abyss_home, bot_directory, load_bot_config, load_config
-from abyss.handlers import make_handlers, set_bot_commands
 from abyss.utils import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -36,9 +44,13 @@ def _plist_path() -> Path:
 
 
 async def _run_bots(bot_names: list[str] | None = None) -> None:
-    """Run one or more bots with long polling."""
-    from telegram.ext import Application
+    """Boot the dashboard surface + per-bot schedulers.
 
+    "Running" a bot now means: regenerate its CLAUDE.md, prime the
+    FTS5 index, and (if configured) attach cron / heartbeat
+    schedulers. The dashboard chat server is started once and serves
+    every bot.
+    """
     config = load_config()
     if not config or not config.get("bots"):
         console.print("[red]No bots configured. Run 'abyss init' first.[/red]")
@@ -63,7 +75,7 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
             console.print("[red]No matching bots found.[/red]")
             return
 
-    applications = []
+    prepared_bots: list[tuple[str, dict]] = []
 
     for bot_entry in bots_to_run:
         name = bot_entry["name"]
@@ -73,36 +85,22 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
                 console.print(f"[yellow]Skipping {name}: bot.yaml not found.[/yellow]")
                 continue
 
-            token = bot_config.get("telegram_token", "")
-            if not token:
-                console.print(f"[yellow]Skipping {name}: no token configured.[/yellow]")
-                continue
-
-            # Regenerate CLAUDE.md on every start
             from abyss.skill import regenerate_bot_claude_md
 
             regenerate_bot_claude_md(name)
 
             bot_path = bot_directory(name)
             _ensure_conversation_index(name, bot_path)
-            handlers = make_handlers(name, bot_path, bot_config)
-
-            application = Application.builder().token(token).build()
-
-            for handler in handlers:
-                application.add_handler(handler)
-
-            applications.append((name, application))
+            prepared_bots.append((name, bot_config))
             logger.info("Prepared bot: %s", name)
         except Exception as error:
             console.print(f"[red]Error preparing {name}: {error}[/red]")
             logger.error("Failed to prepare bot %s: %s", name, error)
 
-    if not applications:
+    if not prepared_bots:
         console.print("[red]No valid bots to start.[/red]")
         return
 
-    # Check Python Agent SDK availability
     from abyss.sdk_client import is_sdk_available
 
     if is_sdk_available():
@@ -110,7 +108,6 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     else:
         console.print("  [yellow]SDK[/yellow] Not available, using subprocess fallback")
 
-    # Start QMD HTTP daemon if QMD CLI is available (system-wide, all bots)
     if shutil.which("qmd"):
         qmd_started = await _start_qmd_daemon()
         if qmd_started:
@@ -119,8 +116,8 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
         else:
             console.print("  [yellow]QMD[/yellow] Daemon failed to start")
 
-    console.print(f"Starting {len(applications)} bot(s)...")
-    for name, _ in applications:
+    console.print(f"Starting {len(prepared_bots)} bot(s)...")
+    for name, _ in prepared_bots:
         console.print(f"  [green]OK[/green] {name}")
 
     pid_file = _pid_file()
@@ -128,7 +125,6 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     pid_file.write_text(str(os.getpid()))
 
     stop_event = asyncio.Event()
-
     loop = asyncio.get_event_loop()
 
     def signal_handler():
@@ -138,64 +134,29 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
 
-    started_applications = []
-    cron_tasks = []
+    cron_tasks: list[asyncio.Task] = []
+    heartbeat_tasks: list[asyncio.Task] = []
     chat_server = None
     try:
-        for name, application in applications:
-            try:
-                await application.initialize()
-                await application.start()
-                await application.updater.start_polling(drop_pending_updates=True)
-                started_applications.append((name, application))
-
-                try:
-                    await set_bot_commands(application)
-                except Exception as command_error:
-                    logger.warning("Failed to register commands for %s: %s", name, command_error)
-            except Exception as error:
-                console.print(f"[red]Failed to start {name}: {error}[/red]")
-                logger.error("Failed to start bot %s: %s", name, error)
-                with suppress(Exception):
-                    await application.shutdown()
-
-        if not started_applications:
-            console.print("[red]No bots started successfully.[/red]")
-            return
-
-        # Start cron schedulers for bots that have cron jobs
         from abyss.cron import list_cron_jobs, run_cron_scheduler
 
-        for name, application in started_applications:
-            bot_config = load_bot_config(name)
-            if not bot_config:
-                continue
+        for name, bot_config in prepared_bots:
             jobs = list_cron_jobs(name)
             if jobs:
-                task = asyncio.create_task(
-                    run_cron_scheduler(name, bot_config, application, stop_event)
-                )
+                task = asyncio.create_task(run_cron_scheduler(name, bot_config, stop_event))
                 cron_tasks.append(task)
                 console.print(f"  [green]CRON[/green] {name} ({len(jobs)} job(s))")
 
-        # Start heartbeat schedulers for bots that have heartbeat enabled
         from abyss.heartbeat import run_heartbeat_scheduler
 
-        heartbeat_tasks = []
-        for name, application in started_applications:
-            bot_config = load_bot_config(name)
-            if not bot_config:
-                continue
+        for name, bot_config in prepared_bots:
             heartbeat_config = bot_config.get("heartbeat", {})
             if heartbeat_config.get("enabled"):
-                task = asyncio.create_task(
-                    run_heartbeat_scheduler(name, bot_config, application, stop_event)
-                )
+                task = asyncio.create_task(run_heartbeat_scheduler(name, bot_config, stop_event))
                 heartbeat_tasks.append(task)
                 interval = heartbeat_config.get("interval_minutes", 30)
                 console.print(f"  [green]HEARTBEAT[/green] {name} (every {interval}m)")
 
-        # Start the dashboard chat server (HTTP/SSE on 127.0.0.1:3848)
         from abyss.chat_server import get_server as _get_chat_server
 
         chat_server = _get_chat_server()
@@ -209,53 +170,38 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
             console.print(f"  [yellow]CHAT[/yellow] failed to bind: {chat_error}")
             chat_server = None
 
-        console.print(f"\n{len(started_applications)} bot(s) running. Press Ctrl+C to stop.")
+        console.print(f"\n{len(prepared_bots)} bot(s) running. Press Ctrl+C to stop.")
         await stop_event.wait()
 
     finally:
         console.print("\nStopping bots...")
 
-        # Stop the dashboard chat server first (drains in-flight SSE)
         if chat_server is not None:
             with suppress(Exception):
                 await chat_server.stop()
 
-        # Close cached LLM backends (httpx clients, etc.) and SDK pool
         from abyss.llm import close_all as close_all_backends
         from abyss.sdk_client import close_pool
 
         await close_all_backends()
         await close_pool()
 
-        # Kill all running Claude Code subprocesses
         from abyss.claude_runner import cancel_all_processes
 
         killed = cancel_all_processes()
         if killed:
             console.print(f"  Killed {killed} running Claude process(es).")
 
-        # Cancel cron tasks
         for task in cron_tasks:
             task.cancel()
         if cron_tasks:
             await asyncio.gather(*cron_tasks, return_exceptions=True)
 
-        # Cancel heartbeat tasks
         for task in heartbeat_tasks:
             task.cancel()
         if heartbeat_tasks:
             await asyncio.gather(*heartbeat_tasks, return_exceptions=True)
 
-        for name, application in started_applications:
-            try:
-                await application.updater.stop()
-                await application.stop()
-                await application.shutdown()
-                logger.info("Stopped bot: %s", name)
-            except Exception as error:
-                logger.error("Error stopping %s: %s", name, error)
-
-        # Stop the QMD daemon
         _stop_qmd_daemon()
 
         if pid_file.exists():
@@ -268,12 +214,13 @@ QMD_DEFAULT_PORT = 8181
 
 
 def _ensure_conversation_index(bot_name: str, bot_path: Path) -> None:
-    """Initialize the FTS5 conversation index for a bot and its groups.
+    """Initialize the FTS5 conversation index for a bot.
 
-    Idempotent — safe to call on every bot start.
+    The group surface was removed alongside Telegram, so this only
+    primes the per-bot db now. Idempotent — safe to call on every
+    bot start.
     """
     from abyss import conversation_index
-    from abyss.group import find_groups_for_bot
 
     if not conversation_index.is_fts5_available():
         logger.warning("SQLite FTS5 not available; conversation_search index disabled")
@@ -281,13 +228,6 @@ def _ensure_conversation_index(bot_name: str, bot_path: Path) -> None:
 
     bot_db = bot_path / "conversation.db"
     conversation_index.ensure_schema(bot_db)
-
-    for group_config in find_groups_for_bot(bot_name):
-        group_name = group_config.get("name")
-        if not group_name:
-            continue
-        group_db = conversation_index.db_path_for_group(group_name)
-        conversation_index.ensure_schema(group_db)
 
 
 def _ensure_qmd_conversations_collection() -> None:
@@ -395,7 +335,6 @@ def _start_daemon() -> None:
     plist_path = _plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Find abyss in the same venv bin directory
     venv_bin = Path(sys.executable).parent
     abyss_executable = venv_bin / "abyss"
     if not abyss_executable.exists():
@@ -407,7 +346,6 @@ def _start_daemon() -> None:
     log_directory = abyss_home() / "logs"
     log_directory.mkdir(parents=True, exist_ok=True)
 
-    # Capture current PATH so the daemon can find claude CLI (npm global bin)
     current_path = os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
 
     newline = "\n"
@@ -480,7 +418,6 @@ def stop_bots() -> None:
     elif not plist_path.exists():
         console.print("[yellow]No running abyss process found.[/yellow]")
 
-    # Stop QMD daemon if running
     _stop_qmd_daemon()
 
 
@@ -505,7 +442,13 @@ def _show_dashboard_status() -> None:
             pid = int(lines[0])
             os.kill(pid, 0)
             port = int(lines[1]) if len(lines) > 1 else default_port
-        except (ValueError, ProcessLookupError, PermissionError, IndexError, OverflowError):
+        except (
+            ValueError,
+            ProcessLookupError,
+            PermissionError,
+            IndexError,
+            OverflowError,
+        ):
             pid = None
 
     if pid is None and not _is_port_in_use(default_port):
@@ -563,19 +506,19 @@ def show_status() -> None:
 
     table = Table(title="Bot Status")
     table.add_column("Name", style="cyan")
-    table.add_column("Telegram", style="green")
+    table.add_column("Display Name", style="green")
     table.add_column("Sessions", justify="right")
 
     for bot_entry in config["bots"]:
         name = bot_entry["name"]
-        bot_config = load_bot_config(name)
-        telegram_username = bot_config.get("telegram_username", "N/A") if bot_config else "N/A"
+        bot_config = load_bot_config(name) or {}
+        display_name = bot_config.get("display_name") or name
 
         session_directory = bot_directory(name) / "sessions"
         session_count = 0
         if session_directory.exists():
             session_count = len([d for d in session_directory.iterdir() if d.is_dir()])
 
-        table.add_row(name, telegram_username, str(session_count))
+        table.add_row(name, display_name, str(session_count))
 
     console.print(table)

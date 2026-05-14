@@ -386,7 +386,7 @@ def _parse_conversation_messages(
 
 def _bot_display_name(bot_name: str) -> str:
     cfg = load_bot_config(bot_name) or {}
-    return cfg.get("display_name") or cfg.get("telegram_botname") or bot_name
+    return cfg.get("display_name") or bot_name
 
 
 # ---------------------------------------------------------------------------
@@ -753,9 +753,7 @@ class ChatServer:
             out.append(
                 {
                     "name": name,
-                    "display_name": (
-                        cfg.get("display_name") or cfg.get("telegram_botname") or name
-                    ),
+                    "display_name": (cfg.get("display_name") or name),
                     "type": backend_cfg.get("type", "claude_code"),
                 }
             )
@@ -1072,9 +1070,7 @@ class ChatServer:
         """
         if not reply_text:
             return
-        display_name = (
-            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
-        )
+        display_name = bot_config.get("display_name") or bot_name
         preview = reply_text.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"

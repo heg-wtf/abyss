@@ -1,3 +1,3 @@
-"""abyss - Telegram + Claude Code personal AI assistant."""
+"""abyss - Personal AI assistant via PWA + Claude Code."""
 
-__version__ = "2026.05.13"
+__version__ = "2026.05.14"

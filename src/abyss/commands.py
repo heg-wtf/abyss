@@ -30,14 +30,6 @@ from abyss.config import (
     model_display_name,
     save_bot_config,
 )
-from abyss.group import (
-    bind_group,
-    clear_shared_conversation,
-    find_group_by_chat_id,
-    get_my_role,
-    load_group_config,
-    unbind_group,
-)
 from abyss.session import (
     clear_bot_memory,
     conversation_status_summary,
@@ -66,21 +58,17 @@ class CommandResult:
     parse_mode: ParseMode | None = "Markdown"
     file_path: Path | None = None  # Set by /send so the adapter uploads it.
     success: bool = True
-    silent: bool = False  # True means "do not send any reply" (e.g. group non-orchestrator skip).
+    silent: bool = False  # True means "do not send any reply" — kept for adapter parity.
 
 
 @dataclass
 class CommandContext:
     """Inputs for a slash command.
 
-    ``chat_id`` is the per-conversation key. Telegram passes the
-    Telegram chat id (``int``); the dashboard passes its session id
-    (``str``). The downstream ``session_directory`` helper accepts
-    both, and group lookups via ``find_group_by_chat_id`` only resolve
-    integer Telegram chat ids — for dashboard sessions the lookup
-    returns ``None`` and the command treats the chat as a DM. This
-    matches existing dashboard behaviour where group features are
-    Telegram-only.
+    ``chat_id`` is the per-conversation key. The dashboard chat
+    server passes its session id (``str``). The ``int`` variant
+    used to exist for Telegram chats; it's no longer hit but is
+    kept in the type so call sites that still annotate it compile.
     """
 
     bot_name: str
@@ -232,46 +220,12 @@ class ResetOutcome:
 
 
 async def cmd_reset(ctx: CommandContext) -> ResetOutcome:
-    """Reset this bot's conversation. Group-aware.
+    """Reset this bot's conversation.
 
     Returns a ``ResetOutcome`` so the adapter can close SDK pool
-    sessions for every affected bot. The text reply for the user is
-    inside ``outcome.result``.
+    sessions for the bot. The group fan-out path was removed
+    alongside the Telegram surface.
     """
-
-    group_config = find_group_by_chat_id(ctx.chat_id) if isinstance(ctx.chat_id, int) else None
-
-    if group_config is not None:
-        my_role = get_my_role(group_config, ctx.bot_name)
-        if my_role != "orchestrator":
-            # Only the orchestrator handles group /reset.
-            return ResetOutcome(
-                result=CommandResult(silent=True),
-                is_group=True,
-                is_orchestrator=False,
-            )
-
-        from abyss.config import bot_directory as get_bot_directory
-
-        affected: list[str] = [ctx.bot_name]
-        reset_session(ctx.bot_path, ctx.chat_id)
-
-        for member_name in group_config.get("members", []):
-            member_path = get_bot_directory(member_name)
-            reset_session(member_path, ctx.chat_id)
-            affected.append(member_name)
-
-        clear_shared_conversation(group_config["name"])
-
-        message = (
-            "\U0001f504 Group session reset. Shared conversation cleared. Workspace preserved."
-        )
-        return ResetOutcome(
-            result=CommandResult(text=message, parse_mode=None),
-            is_group=True,
-            is_orchestrator=True,
-            affected_bots=affected,
-        )
 
     reset_session(ctx.bot_path, ctx.chat_id)
     return ResetOutcome(
@@ -427,43 +381,11 @@ async def cmd_cancel(
     """Stop the running Claude/SDK task for this session.
 
     The actual cancellation primitives (backend cancel, SDK session
-    cancel, subprocess cancel) live in adapters because they may keep
-    different bookkeeping (Telegram vs. dashboard). The caller passes
-    an awaitable ``cancel_for(target_bot, session_key) -> bool`` that
-    returns ``True`` when something was cancelled.
+    cancel, subprocess cancel) live in the adapter (dashboard chat
+    server). The caller passes an awaitable
+    ``cancel_for(target_bot, session_key) -> bool`` that returns
+    ``True`` when something was cancelled.
     """
-
-    group_config = find_group_by_chat_id(ctx.chat_id) if isinstance(ctx.chat_id, int) else None
-
-    if group_config is not None:
-        my_role = get_my_role(group_config, ctx.bot_name)
-        if my_role != "orchestrator":
-            return CancelOutcome(
-                result=CommandResult(silent=True),
-                is_group=True,
-                is_orchestrator=False,
-            )
-
-        cancelled: list[str] = []
-        if await cancel_for(ctx.bot_name, f"{ctx.bot_name}:{ctx.chat_id}"):
-            cancelled.append(ctx.bot_name)
-        for member_name in group_config.get("members", []):
-            if await cancel_for(member_name, f"{member_name}:{ctx.chat_id}"):
-                cancelled.append(member_name)
-
-        if cancelled:
-            names = ", ".join(cancelled)
-            return CancelOutcome(
-                result=CommandResult(text=f"⛔ Cancelled: {names}", parse_mode=None),
-                is_group=True,
-                is_orchestrator=True,
-                cancelled_bots=cancelled,
-            )
-        return CancelOutcome(
-            result=CommandResult(text="No running processes in group.", parse_mode=None),
-            is_group=True,
-            is_orchestrator=True,
-        )
 
     session_key = f"{ctx.bot_name}:{ctx.chat_id}"
     if await cancel_for(ctx.bot_name, session_key):
@@ -477,89 +399,10 @@ async def cmd_cancel(
 
 
 # ---------------------------------------------------------------------------
-# Group binding (Telegram-only — chat_id must be int)
+# Group bind/unbind commands were removed alongside the Telegram +
+# group surface. Multi-bot rooms will be re-introduced on top of the
+# PWA / dashboard chat in a follow-up PR.
 # ---------------------------------------------------------------------------
-
-
-async def cmd_bind(ctx: CommandContext) -> CommandResult:
-    """Bind a group to the current Telegram chat.
-
-    Only the orchestrator processes the bind; other group members
-    silently skip via ``CommandResult.silent``. Dashboard sessions
-    (``chat_id`` is ``str``) cannot bind: the helper returns a clear
-    error rather than corrupting group state.
-    """
-
-    if not isinstance(ctx.chat_id, int):
-        return CommandResult(
-            text="Group bind is only available in Telegram chats.",
-            success=False,
-            parse_mode=None,
-        )
-
-    if not ctx.args:
-        return CommandResult(
-            text="Usage: `/bind <group_name>`",
-            success=False,
-        )
-
-    group_name = ctx.args[0]
-    group_config = load_group_config(group_name)
-    if group_config is None:
-        return CommandResult(
-            text=f"Group '{group_name}' not found.",
-            success=False,
-            parse_mode=None,
-        )
-
-    role = get_my_role(group_config, ctx.bot_name)
-    if role != "orchestrator":
-        return CommandResult(silent=True)
-
-    try:
-        bind_group(group_name, ctx.chat_id)
-    except ValueError as error:
-        return CommandResult(
-            text=f"Bind failed: {error}",
-            success=False,
-            parse_mode=None,
-        )
-
-    members = ", ".join(group_config.get("members", []))
-    return CommandResult(
-        text=(f"Group '{group_name}' activated.\nOrchestrator: {ctx.bot_name}\nMembers: {members}"),
-        parse_mode=None,
-    )
-
-
-async def cmd_unbind(ctx: CommandContext) -> CommandResult:
-    """Remove the group binding from the current Telegram chat."""
-
-    if not isinstance(ctx.chat_id, int):
-        return CommandResult(
-            text="Group unbind is only available in Telegram chats.",
-            success=False,
-            parse_mode=None,
-        )
-
-    group_config = find_group_by_chat_id(ctx.chat_id)
-    if group_config is None:
-        return CommandResult(
-            text="No group is bound to this chat.",
-            parse_mode=None,
-            success=False,
-        )
-
-    role = get_my_role(group_config, ctx.bot_name)
-    if role != "orchestrator":
-        return CommandResult(silent=True)
-
-    group_name = group_config["name"]
-    unbind_group(group_name)
-    return CommandResult(
-        text=f"Group '{group_name}' unbound from this chat.",
-        parse_mode=None,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1095,8 +938,6 @@ COMMAND_CATALOG: tuple[CommandSpec, ...] = (
     CommandSpec("compact", "Compact MD files"),
     CommandSpec("cancel", "Stop running process"),
     CommandSpec("version", "Show abyss version"),
-    CommandSpec("bind", "Bind a group to this chat"),
-    CommandSpec("unbind", "Remove group binding"),
 )
 
 

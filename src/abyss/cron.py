@@ -362,19 +362,23 @@ async def execute_cron_job(
     bot_name: str,
     job: dict[str, Any],
     bot_config: dict[str, Any],
-    send_message_callback: Any,
 ) -> None:
-    """Execute a single cron job and send results via callback.
+    """Execute a single cron job.
+
+    Delivery surfaces (in order):
+    1. ``conversation-*.md`` under the cron session — picked up by
+       the mobile Routines tab + FTS5 conversation index.
+    2. Web Push notification via ``web_push.send_push`` — no-op when
+       no PWA subscriptions are registered (e.g. when the dashboard
+       has never been served over HTTPS).
 
     Args:
         bot_name: Name of the bot.
         job: The cron job configuration dict.
         bot_config: The bot's configuration.
-        send_message_callback: Async callable(user_id, text) to send messages.
     """
     from abyss.config import DEFAULT_MODEL
     from abyss.llm import LLMRequest, get_or_create
-    from abyss.utils import markdown_to_telegram_html, split_message
 
     job_name = job["name"]
     raw_message = job.get("message", "")
@@ -452,65 +456,33 @@ async def execute_cron_job(
         preview = response.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"
-        display_name = (
-            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
-        )
+        display_name = bot_config.get("display_name") or bot_name
         await _send_push(
             title=f"⏰ {display_name}: {job_name}",
             body=preview or f"Cron job '{job_name}' finished.",
             bot=bot_name,
         )
 
-    # Send results to all allowed users (fallback to session chat IDs)
-    allowed_users = bot_config.get("allowed_users", [])
-    if not allowed_users:
-        from abyss.session import collect_session_chat_ids
-
-        bot_path = bot_directory(bot_name)
-        allowed_users = collect_session_chat_ids(bot_path)
-        if allowed_users:
-            logger.info(
-                "Cron job '%s': no allowed_users configured, using %d session chat ID(s)",
-                job_name,
-                len(allowed_users),
-            )
-        else:
-            logger.warning(
-                "Cron job '%s': no allowed_users and no session chat IDs, skipping send",
-                job_name,
-            )
-            return
-
-    header = f"[cron: {job_name}]\n\n"
-    html_response = markdown_to_telegram_html(header + response)
-    chunks = split_message(html_response)
-
-    for user_id in allowed_users:
-        for chunk in chunks:
-            try:
-                await send_message_callback(chat_id=user_id, text=chunk, parse_mode="HTML")
-            except Exception:
-                try:
-                    await send_message_callback(chat_id=user_id, text=chunk)
-                except Exception as send_error:
-                    logger.error("Failed to send cron result to user %d: %s", user_id, send_error)
+    # Telegram delivery is gone — the markdown log + Web Push above
+    # are the only fan-out paths now. Anything that wants the result
+    # reads it from the mobile Routines tab, the dashboard, or via
+    # ``conversation_search`` MCP.
 
 
 async def run_cron_scheduler(
     bot_name: str,
     bot_config: dict[str, Any],
-    application: Any,
     stop_event: asyncio.Event,
 ) -> None:
     """Run the cron scheduler loop for a bot.
 
-    Checks every 30 seconds for jobs that need to run.
-    Uses application.bot.send_message as the message callback.
+    Checks every 30 seconds for jobs that need to run. Delivery is
+    handled inside ``execute_cron_job`` (markdown log + Web Push) —
+    no Telegram callback is plumbed any more.
 
     Args:
         bot_name: Name of the bot.
         bot_config: The bot's configuration.
-        application: The telegram Application instance.
         stop_event: Event that signals shutdown.
     """
     last_run_times: dict[str, datetime] = {}
@@ -568,7 +540,6 @@ async def run_cron_scheduler(
                             bot_name=bot_name,
                             job=job,
                             bot_config=bot_config,
-                            send_message_callback=application.bot.send_message,
                         )
                     )
 

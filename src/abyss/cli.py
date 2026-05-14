@@ -6,7 +6,10 @@ from pathlib import Path
 
 import typer
 
-app = typer.Typer(help="abyss - Telegram + Claude Code AI assistant", invoke_without_command=True)
+app = typer.Typer(
+    help="abyss - Personal AI assistant via PWA + Claude Code",
+    invoke_without_command=True,
+)
 
 
 ASCII_ART = r"""
@@ -16,13 +19,13 @@ ASCII_ART = r"""
  ██║     ██║     ██║     ██╔══██║██║███╗██║
  ╚██████╗╚██████╗███████╗██║  ██║╚███╔███╔╝
   ╚═════╝ ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝
-  Telegram + Claude Code AI Assistant
+  Personal AI assistant — PWA + Claude Code
 """
 
 
 @app.callback()
 def main(context: typer.Context) -> None:
-    """abyss - Telegram + Claude Code AI assistant."""
+    """abyss - Personal AI assistant via PWA + Claude Code."""
     if context.invoked_subcommand is None:
         from rich.console import Console
 
@@ -48,8 +51,6 @@ heartbeat_app = typer.Typer(help="Heartbeat management")
 app.add_typer(heartbeat_app, name="heartbeat")
 dashboard_app = typer.Typer(help="Abysscope web dashboard")
 app.add_typer(dashboard_app, name="dashboard")
-group_app = typer.Typer(help="Group management for multi-bot collaboration")
-app.add_typer(group_app, name="group")
 
 
 @app.command()
@@ -112,23 +113,19 @@ def reindex(
     bot: str = typer.Option(
         None, "--bot", "-b", help="Rebuild a specific bot's conversation index."
     ),
-    group: str = typer.Option(
-        None, "--group", "-g", help="Rebuild a specific group's conversation index."
-    ),
-    all_scopes: bool = typer.Option(
-        False, "--all", help="Rebuild every bot and group conversation index."
-    ),
+    all_scopes: bool = typer.Option(False, "--all", help="Rebuild every bot's conversation index."),
 ) -> None:
     """Rebuild SQLite FTS5 conversation indexes from markdown logs.
 
     Markdown is the source of truth — this command wipes the affected
     DB and re-inserts every parsed message. Safe to run repeatedly.
+
+    The ``--group`` scope was retired alongside the group surface.
     """
     from rich.console import Console
 
     from abyss import conversation_index
     from abyss.config import bot_directory, load_config
-    from abyss.group import group_directory, list_groups
 
     console = Console()
 
@@ -137,19 +134,14 @@ def reindex(
         raise typer.Exit(code=1)
 
     selected_bots: list[str] = []
-    selected_groups: list[str] = []
-
     if bot:
         selected_bots = [bot]
-    if group:
-        selected_groups = [group]
     if all_scopes:
         config = load_config() or {}
         selected_bots = [entry["name"] for entry in config.get("bots", [])]
-        selected_groups = [entry["name"] for entry in list_groups()]
 
-    if not selected_bots and not selected_groups:
-        console.print("[yellow]Specify --bot NAME, --group NAME, or --all.[/yellow]")
+    if not selected_bots:
+        console.print("[yellow]Specify --bot NAME or --all.[/yellow]")
         raise typer.Exit(code=2)
 
     total = 0
@@ -162,17 +154,6 @@ def reindex(
         db_path = bot_path / "conversation.db"
         count = conversation_index.reindex_session_dir(db_path, sessions_root)
         console.print(f"[green]bot[/green] {bot_name}: indexed {count} message(s)")
-        total += count
-
-    for group_name in selected_groups:
-        gdir = group_directory(group_name)
-        if not gdir.exists():
-            console.print(f"[yellow]Skip group {group_name}: directory missing.[/yellow]")
-            continue
-        conv_dir = gdir / "conversation"
-        db_path = gdir / "conversation.db"
-        count = conversation_index.reindex_group_dir(db_path, conv_dir)
-        console.print(f"[green]group[/green] {group_name}: indexed {count} message(s)")
         total += count
 
     console.print(f"[bold]Reindex complete: {total} total messages.[/bold]")
@@ -636,18 +617,18 @@ def bot_list() -> None:
 
     table = Table(title="Registered Bots")
     table.add_column("Name", style="cyan")
+    table.add_column("Display Name", style="green")
     table.add_column("Model", style="magenta")
-    table.add_column("Telegram", style="green")
     table.add_column("Path", style="dim")
 
     for bot_entry in config["bots"]:
         from abyss.config import DEFAULT_MODEL, bot_directory, load_bot_config
 
-        bot_config = load_bot_config(bot_entry["name"])
-        telegram_username = bot_config.get("telegram_username", "N/A") if bot_config else "N/A"
-        model = bot_config.get("model", DEFAULT_MODEL) if bot_config else DEFAULT_MODEL
+        bot_config = load_bot_config(bot_entry["name"]) or {}
+        display_name = bot_config.get("display_name") or bot_entry["name"]
+        model = bot_config.get("model", DEFAULT_MODEL)
         path = str(bot_directory(bot_entry["name"]))
-        table.add_row(bot_entry["name"], model, telegram_username, path)
+        table.add_row(bot_entry["name"], display_name, model, path)
 
     console.print(table)
 
@@ -1969,287 +1950,3 @@ def heartbeat_edit(bot: str = typer.Argument(help="Bot name")) -> None:
 
     editor = os.environ.get("EDITOR", "vi")
     subprocess.run([editor, str(heartbeat_md_path)])
-
-
-# --- Group commands ---
-
-
-@group_app.command("create")
-def group_create(
-    name: str = typer.Argument(help="Group name"),
-    orchestrator: str = typer.Option(..., "--orchestrator", "-o", help="Orchestrator bot name"),
-    members: str = typer.Option(..., "--members", "-m", help="Comma-separated member bot names"),
-) -> None:
-    """Create a new group for multi-bot collaboration."""
-    from rich.console import Console
-
-    from abyss.group import create_group
-
-    console = Console()
-    member_list = [m.strip() for m in members.split(",") if m.strip()]
-
-    if not member_list:
-        console.print("[red]At least one member is required.[/red]")
-        raise typer.Exit(1)
-
-    try:
-        create_group(name=name, orchestrator=orchestrator, members=member_list)
-    except ValueError as error:
-        console.print(f"[red]{error}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]Group '{name}' created.[/green]")
-    console.print(f"  Orchestrator: [cyan]{orchestrator}[/cyan]")
-    console.print(f"  Members: [cyan]{', '.join(member_list)}[/cyan]")
-    console.print(
-        f"\nNext: Add bots to a Telegram group, then run [green]/bind {name}[/green] in the group."
-    )
-    console.print("\n[bold]BotFather Setup:[/bold]")
-    console.print(f"  [cyan]{orchestrator}[/cyan] (orchestrator):")
-    console.print("    → BotFather → Edit Bot → Group Privacy → [yellow]DISABLE[/yellow]")
-    console.print(f"  [cyan]{', '.join(member_list)}[/cyan] (members):")
-    console.print(
-        "    → BotFather MiniApp → Bot Settings"
-        " → Bot-to-Bot Communication Mode → [green]ENABLE[/green]"
-    )
-    console.print(
-        "    (Group Privacy can stay ON — members only need @mentions from the orchestrator)"
-    )
-
-
-@group_app.command("list")
-def group_list() -> None:
-    """List all groups."""
-    from rich.console import Console
-    from rich.table import Table
-
-    from abyss.group import list_groups
-
-    console = Console()
-    groups = list_groups()
-
-    if not groups:
-        console.print("[yellow]No groups configured. Run 'abyss group create'.[/yellow]")
-        return
-
-    table = Table(title="Groups")
-    table.add_column("Name", style="cyan")
-    table.add_column("Orchestrator", style="magenta")
-    table.add_column("Members", style="white")
-    table.add_column("Telegram", style="dim")
-
-    for group_config in groups:
-        chat_id = group_config.get("telegram_chat_id")
-        telegram_status = f"bound ({chat_id})" if chat_id else "not bound"
-        table.add_row(
-            group_config["name"],
-            group_config["orchestrator"],
-            ", ".join(group_config.get("members", [])),
-            telegram_status,
-        )
-
-    console.print(table)
-
-
-@group_app.command("show")
-def group_show(name: str = typer.Argument(help="Group name")) -> None:
-    """Show group details."""
-    from rich.console import Console
-
-    from abyss.config import load_bot_config
-    from abyss.group import list_workspace_files, load_group_config
-
-    console = Console()
-    group_config = load_group_config(name)
-
-    if not group_config:
-        console.print(f"[red]Group '{name}' not found.[/red]")
-        raise typer.Exit(1)
-
-    chat_id = group_config.get("telegram_chat_id")
-    telegram_status = f"{chat_id} (bound)" if chat_id else "not bound"
-
-    console.print(f"[bold]Name:[/bold] [cyan]{group_config['name']}[/cyan]")
-
-    orchestrator_name = group_config["orchestrator"]
-    orchestrator_config = load_bot_config(orchestrator_name)
-    orchestrator_username = ""
-    if orchestrator_config:
-        orchestrator_username = f" ({orchestrator_config.get('telegram_username', '')})"
-    console.print(
-        f"[bold]Orchestrator:[/bold] [magenta]{orchestrator_name}{orchestrator_username}[/magenta]"
-    )
-
-    member_parts: list[str] = []
-    for member_name in group_config.get("members", []):
-        member_config = load_bot_config(member_name)
-        if member_config:
-            username = member_config.get("telegram_username", "")
-            member_parts.append(f"{member_name} ({username})")
-        else:
-            member_parts.append(member_name)
-    console.print(f"[bold]Members:[/bold] {', '.join(member_parts)}")
-
-    console.print(f"[bold]Telegram:[/bold] {telegram_status}")
-
-    workspace_files = list_workspace_files(name)
-    console.print(f"[bold]Workspace:[/bold] {len(workspace_files)} files")
-
-
-@group_app.command("delete")
-def group_delete(name: str = typer.Argument(help="Group name")) -> None:
-    """Delete a group and all its data."""
-    from rich.console import Console
-
-    from abyss.group import delete_group, load_group_config
-
-    console = Console()
-
-    if not load_group_config(name):
-        console.print(f"[red]Group '{name}' not found.[/red]")
-        raise typer.Exit(1)
-
-    confirmed = typer.confirm(f"Delete group '{name}'? This will remove all group data.")
-    if not confirmed:
-        console.print("[yellow]Cancelled.[/yellow]")
-        return
-
-    try:
-        delete_group(name)
-    except ValueError as error:
-        console.print(f"[red]{error}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]Group '{name}' deleted.[/green]")
-
-
-@group_app.command("status")
-def group_status(
-    name: str | None = typer.Argument(default=None, help="Group name (omit to list all groups)"),
-) -> None:
-    """Show group status. Detailed if GROUP_NAME given; otherwise all."""
-    import os
-
-    from rich.console import Console
-    from rich.table import Table
-
-    from abyss.config import abyss_home
-    from abyss.group import (
-        list_groups,
-        list_workspace_files,
-        load_group_config,
-        load_shared_conversation,
-    )
-
-    console = Console()
-
-    def _is_daemon_running() -> bool:
-        """Return True if the abyss daemon/process is running."""
-        from pathlib import Path
-
-        pid_file = abyss_home() / "abyss.pid"
-        plist_path = Path.home() / "Library" / "LaunchAgents" / "com.abyss.daemon.plist"
-        if plist_path.exists():
-            return True
-        if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
-                return True
-            except (ValueError, ProcessLookupError, OSError, OverflowError):
-                return False
-        return False
-
-    def _bot_status_icon(bot_name: str, daemon_running: bool) -> str:
-        """Return 🟢 if daemon is running and bot is in config, else 🔴."""
-        from abyss.config import bot_exists
-
-        if daemon_running and bot_exists(bot_name):
-            return "🟢"
-        return "🔴"
-
-    if name is not None:
-        # --- Detailed view for a single group ---
-        group_config = load_group_config(name)
-        if not group_config:
-            console.print(f"[red]Group '{name}' not found.[/red]")
-            raise typer.Exit(1)
-
-        daemon_running = _is_daemon_running()
-
-        chat_id = group_config.get("telegram_chat_id")
-        if chat_id:
-            telegram_status = f"[green]bound ({chat_id})[/green]"
-        else:
-            telegram_status = "[yellow]not bound[/yellow]"
-
-        console.print(f"[bold]Name:[/bold] [cyan]{group_config['name']}[/cyan]")
-        console.print(f"[bold]Telegram:[/bold] {telegram_status}")
-
-        orchestrator_name = group_config["orchestrator"]
-        orch_icon = _bot_status_icon(orchestrator_name, daemon_running)
-        console.print(
-            f"[bold]Orchestrator:[/bold] {orch_icon} [magenta]{orchestrator_name}[/magenta]"
-        )
-
-        members = group_config.get("members", [])
-        if members:
-            console.print("[bold]Members:[/bold]")
-            for member_name in members:
-                member_icon = _bot_status_icon(member_name, daemon_running)
-                console.print(f"  {member_icon} [white]{member_name}[/white]")
-        else:
-            console.print("[bold]Members:[/bold] [dim](none)[/dim]")
-
-        workspace_files = list_workspace_files(name)
-        console.print(f"[bold]Workspace files:[/bold] [cyan]{len(workspace_files)}[/cyan]")
-
-        console.print("[bold]Recent conversation:[/bold]")
-        conversation = load_shared_conversation(name, max_lines=5)
-        if conversation:
-            for line in conversation.strip().splitlines()[-5:]:
-                console.print(f"  [dim]{line}[/dim]")
-        else:
-            console.print("  [dim]No recent activity[/dim]")
-
-    else:
-        # --- Summary table for all groups ---
-        groups = list_groups()
-
-        if not groups:
-            console.print("[yellow]No groups configured. Run 'abyss group create'.[/yellow]")
-            return
-
-        daemon_running = _is_daemon_running()
-
-        table = Table(title="Group Status")
-        table.add_column("Name", style="cyan")
-        table.add_column("Orchestrator", style="magenta")
-        table.add_column("Members", style="white")
-        table.add_column("Bots Running", justify="center")
-        table.add_column("Telegram", style="dim")
-
-        for group_config in groups:
-            group_name = group_config["name"]
-            orchestrator_name = group_config["orchestrator"]
-            members = group_config.get("members", [])
-            all_bots = [orchestrator_name, *members]
-
-            from abyss.config import bot_exists
-
-            running_count = sum(1 for bot in all_bots if daemon_running and bot_exists(bot))
-            total_count = len(all_bots)
-            running_label = f"[green]{running_count}[/green]/[white]{total_count}[/white]"
-
-            chat_id = group_config.get("telegram_chat_id")
-            telegram_status = f"bound ({chat_id})" if chat_id else "not bound"
-
-            table.add_row(
-                group_name,
-                orchestrator_name,
-                ", ".join(members) if members else "[dim](none)[/dim]",
-                running_label,
-                telegram_status,
-            )
-
-        console.print(table)

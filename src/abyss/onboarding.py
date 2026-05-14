@@ -27,8 +27,6 @@ from abyss.config import (
 
 console = Console()
 
-MAXIMUM_TOKEN_RETRY = 3
-
 
 @dataclass
 class EnvironmentCheckResult:
@@ -132,53 +130,6 @@ def display_environment_checks(checks: list[EnvironmentCheckResult]) -> bool:
                 console.print(f"\n  {check.message}")
             all_passed = False
     return all_passed
-
-
-async def validate_telegram_token(token: str) -> dict | None:
-    """Validate a Telegram bot token. Returns bot info dict or None."""
-    from telegram import Bot
-
-    try:
-        bot = Bot(token=token)
-        bot_info = await bot.get_me()
-        return {
-            "username": f"@{bot_info.username}",
-            "botname": bot_info.first_name,
-        }
-    except Exception:
-        return None
-
-
-def prompt_telegram_token() -> tuple[str, dict]:
-    """Prompt user for Telegram bot token with retry. Returns (token, bot_info)."""
-    from abyss.utils import prompt_input
-
-    console.print("\n[bold]Connecting Telegram bot.[/bold]")
-    console.print()
-    console.print("  1. Send a DM to @BotFather on Telegram.")
-    console.print("  2. Create a bot with the /newbot command.")
-    console.print("  3. Enter the issued token below.")
-    console.print()
-
-    for attempt in range(MAXIMUM_TOKEN_RETRY):
-        token = prompt_input("Bot Token:")
-        console.print("Verifying token...")
-
-        bot_info = asyncio.run(validate_telegram_token(token))
-        if bot_info:
-            console.print(
-                f"[green]OK[/green] Bot verified: {bot_info['username']} ({bot_info['botname']})"
-            )
-            return token, bot_info
-
-        remaining = MAXIMUM_TOKEN_RETRY - attempt - 1
-        if remaining > 0:
-            console.print(f"[red]Invalid token. {remaining} attempts remaining.[/red]")
-        else:
-            console.print("[red]Maximum retry attempts exceeded.[/red]")
-            raise typer.Exit(1)
-
-    raise typer.Exit(1)
 
 
 def prompt_bot_profile() -> dict:
@@ -370,21 +321,21 @@ def prompt_backend_choice() -> dict | None:
 
 
 def create_bot(
-    token: str,
-    bot_info: dict,
     profile: dict,
     backend_block: dict | None = None,
 ) -> None:
-    """Create bot configuration files."""
+    """Create bot configuration files.
+
+    Telegram fields are gone from ``bot.yaml`` — the dashboard chat
+    + mobile PWA are now the only inbox/outbox. ``allowed_users``
+    used to gate Telegram messaging; access is now enforced at the
+    network layer (Tailscale / loopback origin on the dashboard).
+    """
     bot_config: dict = {
-        "telegram_token": token,
-        "telegram_username": bot_info["username"],
-        "telegram_botname": bot_info["botname"],
         "display_name": profile.get("display_name", ""),
         "personality": profile["personality"],
         "role": profile["role"],
         "goal": profile.get("goal", ""),
-        "allowed_users": [],
         "claude_args": [],
         "streaming": False,
         "heartbeat": {
@@ -411,8 +362,7 @@ def create_bot(
             f"  Personality: {profile['personality']}\n"
             f"  Role:      {profile['role']}\n"
             f"  Goal:      {profile.get('goal', '')}\n"
-            f"  Path:      {home / 'bots' / profile['name']}\n"
-            f"  Telegram:  {bot_info['username']}",
+            f"  Path:      {home / 'bots' / profile['name']}",
             title=profile["name"],
         )
     )
@@ -443,11 +393,10 @@ def run_onboarding() -> None:
 
 
 def add_bot() -> None:
-    """Add a new bot (reuses onboarding Steps 2+3)."""
-    token, bot_info = prompt_telegram_token()
+    """Add a new bot — profile + backend, no Telegram token required."""
     profile = prompt_bot_profile()
     backend_block = prompt_backend_choice()
-    create_bot(token, bot_info, profile, backend_block=backend_block)
+    create_bot(profile, backend_block=backend_block)
 
 
 def _display_sdk_status() -> None:
@@ -542,12 +491,8 @@ def run_doctor() -> None:
             console.print(f"  [red]FAIL[/red] {name}: bot.yaml missing")
             continue
 
-        token = bot_config.get("telegram_token", "")
-        bot_info = asyncio.run(validate_telegram_token(token))
-        if bot_info:
-            console.print(f"  [green]OK[/green] {name}: token valid ({bot_info['username']})")
-        else:
-            console.print(f"  [red]FAIL[/red] {name}: token invalid")
+        display_name = bot_config.get("display_name") or name
+        console.print(f"  [green]OK[/green] {name}: {display_name}")
 
         session_directory = bot_directory(name) / "sessions"
         if session_directory.exists():
@@ -564,29 +509,5 @@ def run_doctor() -> None:
     console.print("\n[bold]QMD:[/bold]")
     _display_qmd_status()
 
-    # Groups status
-    from abyss.group import list_groups
-
-    groups = list_groups()
-    if groups:
-        console.print(f"\n[bold]Groups ({len(groups)}):[/bold]")
-        for group_config in groups:
-            group_name = group_config.get("name", "?")
-            orchestrator = group_config.get("orchestrator", "?")
-            members = group_config.get("members", [])
-            bot_to_bot_mode = group_config.get("bot_to_bot_mode")
-            chat_id = group_config.get("telegram_chat_id")
-            bound_status = "[green]bound[/green]" if chat_id else "[yellow]unbound[/yellow]"
-            console.print(
-                f"  {bound_status} {group_name}"
-                f" (orchestrator: {orchestrator}, members: {', '.join(members)})"
-            )
-            if chat_id and not bot_to_bot_mode:
-                console.print(
-                    f"       [yellow]⚠[/yellow]  bot_to_bot_mode not set"
-                    f" — member bots ({', '.join(members)}) require Group Privacy OFF"
-                )
-                console.print(
-                    "         or enable Bot-to-Bot Communication Mode in BotFather"
-                    " MiniApp for each member bot."
-                )
+    # Group surface was removed alongside Telegram; a fresh PWA-
+    # native multi-bot room model will land in a separate PR.

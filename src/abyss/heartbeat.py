@@ -7,7 +7,7 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from abyss.config import bot_directory, load_bot_config, save_bot_config
 
@@ -185,24 +185,24 @@ def save_heartbeat_markdown(bot_name: str, content: str) -> None:
 async def execute_heartbeat(
     bot_name: str,
     bot_config: dict[str, Any],
-    send_message_callback: Callable,
 ) -> None:
-    """Execute a heartbeat check and notify users if needed.
+    """Execute a heartbeat check and surface anything worth attention.
 
     1. Prepare heartbeat session directory
     2. Read HEARTBEAT.md and compose prompt
     3. Run Claude with the prompt
-    4. If response contains HEARTBEAT_OK → log only, no message
-    5. If response does NOT contain HEARTBEAT_OK → send to allowed_users
+    4. If response contains HEARTBEAT_OK → markdown log only, no
+       notification.
+    5. Otherwise the run is logged to ``conversation-*.md`` (mobile
+       Routines tab + FTS5 index) and a Web Push notification fires
+       — no Telegram fan-out any more.
 
     Args:
         bot_name: Name of the bot.
         bot_config: The bot's configuration.
-        send_message_callback: Async callable(chat_id, text, ...) to send messages.
     """
     from abyss.config import DEFAULT_MODEL
     from abyss.llm import LLMRequest, get_or_create
-    from abyss.utils import markdown_to_telegram_html, split_message
 
     model = bot_config.get("model", DEFAULT_MODEL)
     attached_skills = bot_config.get("skills", [])
@@ -290,52 +290,17 @@ async def execute_heartbeat(
         preview = response.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"
-        display_name = (
-            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
-        )
+        display_name = bot_config.get("display_name") or bot_name
         await _send_push(
             title=f"💓 {display_name}",
             body=preview or "Heartbeat check ran.",
             bot=bot_name,
         )
 
-    # Send notification to all allowed users (fallback to session chat IDs)
-    allowed_users = bot_config.get("allowed_users", [])
-    if not allowed_users:
-        from abyss.session import collect_session_chat_ids
-
-        bot_path = bot_directory(bot_name)
-        allowed_users = collect_session_chat_ids(bot_path)
-        if allowed_users:
-            logger.info(
-                "Heartbeat for '%s': no allowed_users configured, using %d session chat ID(s)",
-                bot_name,
-                len(allowed_users),
-            )
-        else:
-            logger.warning(
-                "Heartbeat for '%s': no allowed_users and no session chat IDs, skipping send",
-                bot_name,
-            )
-            return
-
-    header = f"[heartbeat: {bot_name}]\n\n"
-    html_response = markdown_to_telegram_html(header + response)
-    chunks = split_message(html_response)
-
-    for user_id in allowed_users:
-        for chunk in chunks:
-            try:
-                await send_message_callback(chat_id=user_id, text=chunk, parse_mode="HTML")
-            except Exception:
-                try:
-                    await send_message_callback(chat_id=user_id, text=chunk)
-                except Exception as send_error:
-                    logger.error(
-                        "Failed to send heartbeat result to user %d: %s",
-                        user_id,
-                        send_error,
-                    )
+    # Telegram fan-out is gone. The markdown log + Web Push above
+    # are the only delivery paths now — any consumer reads the
+    # result from the mobile Routines tab, the dashboard, or via
+    # ``conversation_search``.
 
 
 # --- Scheduler ---
@@ -344,7 +309,6 @@ async def execute_heartbeat(
 async def run_heartbeat_scheduler(
     bot_name: str,
     bot_config: dict[str, Any],
-    application: Any,
     stop_event: asyncio.Event,
 ) -> None:
     """Run the heartbeat scheduler loop for a bot.
@@ -358,7 +322,6 @@ async def run_heartbeat_scheduler(
     Args:
         bot_name: Name of the bot.
         bot_config: The bot's configuration.
-        application: The telegram Application instance.
         stop_event: Event that signals shutdown.
     """
     heartbeat_config = bot_config.get("heartbeat", {})
@@ -388,7 +351,6 @@ async def run_heartbeat_scheduler(
                     await execute_heartbeat(
                         bot_name=bot_name,
                         bot_config=current_bot_config,
-                        send_message_callback=application.bot.send_message,
                     )
                 else:
                     logger.debug("Heartbeat for '%s': outside active hours, skipping", bot_name)
