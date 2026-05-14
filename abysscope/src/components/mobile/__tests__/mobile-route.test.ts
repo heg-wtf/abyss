@@ -21,19 +21,42 @@ function read(relPath: string): string {
 }
 
 describe("/mobile route skeleton", () => {
-  it("layout grows to the dynamic viewport with safe-area padding", () => {
-    const source = read("app/mobile/layout.tsx");
-    // ``-m-6`` cancels the desktop main's ``p-6`` padding, ``h-dvh``
-    // hugs the iOS Safari dynamic viewport (handles the collapsing
-    // address bar). We intentionally avoid ``position: fixed`` here
-    // because iOS Safari pushes ``fixed`` containers off screen when
-    // the soft keyboard opens — the "blank page on mobile" symptom
-    // from the first real-device pass.
-    expect(source).toMatch(/-m-6/);
-    expect(source).toMatch(/h-dvh/);
-    expect(source).toMatch(/safe-area-inset-top/);
-    expect(source).toMatch(/safe-area-inset-bottom/);
-    expect(source).not.toMatch(/fixed inset-0/);
+  it("layout delegates the viewport-fitting shell to MobileShell", () => {
+    const layoutSource = read("app/mobile/layout.tsx");
+    expect(layoutSource).toMatch(/MobileShell/);
+    // The shell owns the viewport sizing now — assert the load-bearing
+    // bits live there instead of the layout file. ``position: fixed``
+    // pins the shell to the layout viewport; combined with locking
+    // ``html`` / ``body`` overflow, iOS can no longer scroll the
+    // document up when the soft keyboard opens (which used to expose
+    // a tall blank strip below the input bar).
+    const shellSource = read("components/mobile/mobile-shell.tsx");
+    expect(shellSource).toMatch(/fixed inset-x-0 z-10/);
+    // ``100dvh`` is the SSR fallback before ``visualViewport.height``
+    // kicks in on the client.
+    expect(shellSource).toMatch(/100dvh/);
+    expect(shellSource).toMatch(/safe-area-inset-top/);
+    expect(shellSource).toMatch(/safe-area-inset-bottom/);
+    expect(shellSource).toMatch(/html\.style\.overflow = "hidden"/);
+    expect(shellSource).toMatch(/body\.style\.overflow = "hidden"/);
+  });
+
+  it("visual-viewport hook drives the mobile shell height + offset", () => {
+    const hook = read("hooks/use-visual-viewport-height.ts");
+    // Tracks resize/scroll on visualViewport AND window — some iOS
+    // versions only fire one or the other when the keyboard opens.
+    expect(hook).toMatch(/visualViewport/);
+    expect(hook).toMatch(/addEventListener\("resize"/);
+    expect(hook).toMatch(/addEventListener\("scroll"/);
+    expect(hook).toMatch(/window\.addEventListener\("resize"/);
+    // Exposes both height + offsetTop so the shell can ride the
+    // visual viewport when iOS scrolls the layout viewport on focus.
+    expect(hook).toMatch(/offsetTop/);
+
+    const shell = read("components/mobile/mobile-shell.tsx");
+    expect(shell).toMatch(/useVisualViewport/);
+    expect(shell).toMatch(/\$\{vp\.height\}px/);
+    expect(shell).toMatch(/\$\{vp\.offsetTop\}px/);
   });
 
   it("root path auto-redirects mobile user agents to /mobile", () => {
