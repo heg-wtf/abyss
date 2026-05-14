@@ -21,11 +21,28 @@ function read(relPath: string): string {
 }
 
 describe("/mobile route skeleton", () => {
-  it("layout uses fixed full-screen wrapper with safe-area padding", () => {
+  it("layout grows to the dynamic viewport with safe-area padding", () => {
     const source = read("app/mobile/layout.tsx");
-    expect(source).toMatch(/fixed inset-0/);
+    // ``-m-6`` cancels the desktop main's ``p-6`` padding, ``h-dvh``
+    // hugs the iOS Safari dynamic viewport (handles the collapsing
+    // address bar). We intentionally avoid ``position: fixed`` here
+    // because iOS Safari pushes ``fixed`` containers off screen when
+    // the soft keyboard opens — the "blank page on mobile" symptom
+    // from the first real-device pass.
+    expect(source).toMatch(/-m-6/);
+    expect(source).toMatch(/h-dvh/);
     expect(source).toMatch(/safe-area-inset-top/);
     expect(source).toMatch(/safe-area-inset-bottom/);
+    expect(source).not.toMatch(/fixed inset-0/);
+  });
+
+  it("root path auto-redirects mobile user agents to /mobile/sessions", () => {
+    const source = read("middleware.ts");
+    expect(source).toMatch(/Mobi\|Android\|iPhone/);
+    expect(source).toMatch(/\/mobile\/sessions/);
+    // ``?desktop=1`` opts out so the heatmap stays accessible from
+    // the phone when needed.
+    expect(source).toMatch(/desktop.*===.*"1"/);
   });
 
   it("layout exports a mobile viewport config", () => {
@@ -59,10 +76,18 @@ describe("/mobile route skeleton", () => {
     const source = read("components/mobile/mobile-sessions-screen.tsx");
     // Bot picker uses base-ui Menu (matches the desktop chat-session-list).
     expect(source).toMatch(/Menu\.Root/);
-    expect(source).toMatch(/createChatSession/);
-    // Custom name renames go through the new API helper.
-    expect(source).toMatch(/renameChatSession/);
-    expect(source).toMatch(/deleteChatSession/);
+    // Client-side fetches MUST hit the Next.js proxy (``/api/chat/...``)
+    // and not the ``abyss-api`` helpers that point at the
+    // ``127.0.0.1:3848`` sidecar — on a phone, ``127.0.0.1`` is the
+    // phone, not the Mac, so direct calls silently fail.
+    expect(source).toMatch(/fetch\(\s*`\/api\/chat\/sessions\?bot=/);
+    expect(source).toMatch(/fetch\("\/api\/chat\/sessions"/);
+    expect(source).toMatch(/\/api\/chat\/sessions\/\$\{[^}]+bot[^}]*\}\/\$\{[^}]+id[^}]*\}/);
+    expect(source).toMatch(/\/rename/);
+    expect(source).not.toMatch(/listChatSessions\(/);
+    expect(source).not.toMatch(/renameChatSession\(/);
+    expect(source).not.toMatch(/deleteChatSession\(/);
+    expect(source).not.toMatch(/createChatSession\(/);
     // Long-press contract: touchstart + touchend cancel.
     expect(source).toMatch(/useLongPress/);
     expect(source).toMatch(/onTouchStart/);
