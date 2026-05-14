@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/landing/logo.png" width="80" alt="abyss logo" /></p>
+<p align="center"><img src="docs/landing/logo-square.png" width="80" alt="abyss logo" /></p>
 
 # abyss
 
