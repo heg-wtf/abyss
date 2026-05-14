@@ -1,7 +1,8 @@
-"""Rich-powered checklist UI for dashboard lifecycle commands.
+"""Rich-powered checklist UI for the ``abyss start`` boot sequence.
 
-Used by ``abyss dashboard start`` and ``abyss dashboard restart`` to replace
-raw ``next build`` log output with a stable, in-place updated checklist.
+Used by ``abyss start`` / ``abyss restart`` to render bot prep, API
+server boot, dashboard build / install / start, and scheduler attach as
+an in-place updated checklist instead of streaming raw subprocess output.
 
 Each step renders one line:
 
@@ -138,9 +139,13 @@ class BuildProgress:
             finally:
                 self._live.update(self.render())
 
-    def _refresh(self) -> None:
+    def refresh(self) -> None:
+        """Re-render the checklist (e.g. after mutating step state directly)."""
         if self._live is not None:
             self._live.update(self.render())
+
+    def _refresh(self) -> None:  # backwards-compat alias
+        self.refresh()
 
     def get(self, name: str) -> BuildStep:
         return self._step_index[name]

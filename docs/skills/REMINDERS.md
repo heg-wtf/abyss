@@ -88,7 +88,7 @@ If the above methods fail, granting **Full Disk Access** to your terminal app is
 
 Full Disk Access includes Reminders access.
 
-> **Note**: If running abyss as a daemon (`abyss start --daemon`), the shell used by `launchd` also needs permission.
+> **Note**: When abyss runs as a daemon (default for `abyss start`), the shell used by `launchd` also needs permission.
 
 ## Installation & Setup
 

@@ -53,7 +53,6 @@ def test_top_level_help_lists_known_subcommands():
         "memory",
         "global-memory",
         "heartbeat",
-        "dashboard",
     ):
         assert sub in result.stdout, f"expected '{sub}' in top-level help"
 
@@ -104,7 +103,6 @@ SUB_APPS = [
     "memory",
     "global-memory",
     "heartbeat",
-    "dashboard",
 ]
 
 
@@ -149,10 +147,6 @@ SUB_COMMAND_HELP = [
     ["heartbeat", "disable", "--help"],
     ["heartbeat", "run", "--help"],
     ["heartbeat", "edit", "--help"],
-    ["dashboard", "start", "--help"],
-    ["dashboard", "stop", "--help"],
-    ["dashboard", "restart", "--help"],
-    ["dashboard", "status", "--help"],
 ]
 
 

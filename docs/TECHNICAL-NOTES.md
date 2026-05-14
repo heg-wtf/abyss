@@ -261,7 +261,7 @@ Slash command to deliver workspace files to the chat.
 
 ## launchd Daemon
 
-`abyss start --daemon` creates `~/Library/LaunchAgents/com.abyss.daemon.plist` and runs `launchctl load`.
+`abyss start` (daemon by default since v2026.05.15) creates `~/Library/LaunchAgents/com.abyss.daemon.plist` and runs `launchctl load`. Use `abyss start --foreground` for an inline / debugging run.
 `KeepAlive` is enabled so the process auto-restarts on termination.
 `abyss stop` runs `launchctl unload` then deletes the plist.
 
@@ -639,7 +639,7 @@ If all above methods fail, adding Terminal.app to **System Settings > Privacy & 
 
 ### Daemon Mode Note
 
-When running via `abyss start --daemon`, the shell used by `launchd` also needs the same permissions.
+When running via `abyss start`, the shell used by `launchd` also needs the same permissions.
 
 ## Heartbeat (Periodic Situation Awareness)
 
