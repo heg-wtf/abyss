@@ -18,54 +18,11 @@ function read(relPath: string): string {
 }
 
 describe("UI regression guards", () => {
-  it("BotSelector trigger renders display_name, not the slug", () => {
-    const source = read("chat/bot-selector.tsx");
-    // The shadcn SelectValue placeholder is the failure mode — it
-    // shows whatever the option's `value` prop is (the slug). The fix
-    // explicitly looks up the BotSummary and renders display_name.
-    // Strip comment lines so a description that mentions the JSX tag
-    // doesn't trip the regex.
-    const code = source
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//"))
-      .join("\n");
-    expect(code).not.toMatch(/<SelectValue\b/);
-    expect(code).toMatch(/selected\?\.display_name|selected\.display_name/);
-  });
-
-  it("ChatSessionList shows bot_display_name with avatar fallback", () => {
-    const source = read("chat/chat-session-list.tsx");
-    expect(source).toMatch(/session\.bot_display_name/);
-    expect(source).toMatch(/from "@\/components\/bot-avatar"/);
-  });
-
-  it("ChatView routes display_name through delete confirm and prompt", () => {
-    const source = read("chat/chat-view.tsx");
-    // Delete confirm should not name-drop the slug verbatim.
-    expect(source).not.toMatch(/Delete chat with \$\{session\.bot\}/);
-    expect(source).toMatch(/session\.bot_display_name/);
-    // Streaming prompt placeholder uses the display name.
-    expect(source).toMatch(/activeSession\.bot_display_name/);
-  });
-
-  it("ChatView isolates stream + messages per session", () => {
-    const source = read("chat/chat-view.tsx");
-    // Must use the multi-session hook, not the legacy single-stream one.
-    expect(source).toMatch(/useMultiSessionChatStream/);
-    expect(source).not.toMatch(/\buseChatStream\b/);
-    // messages are stored per sessionId in a Map.
-    expect(source).toMatch(
-      /sessionMessages[\s\S]*Map<string,\s*ConversationMessage\[\]>/
-    );
-    // PromptInput disabled is keyed on the active session's stream only,
-    // never a global flag. The bug was `stream.streaming` blocking all
-    // sessions during any one's response.
-    expect(source).toMatch(/activeStream\.streaming/);
-    expect(source).not.toMatch(/disabled=\{!activeSession \|\| stream\.streaming\}/);
-    // Delete must cancel the session's in-flight stream so it does not
-    // keep writing into a discarded message Map.
-    expect(source).toMatch(/stream\.cancel\(session\.id\)/);
-  });
+  // The desktop ``/chat`` surface (chat-view, chat-session-list,
+  // chat-message, bot-selector, prompt-input, voice-screen) was
+  // removed once the mobile shell became the canonical chat surface.
+  // The display-name + per-session-stream guards now live in the
+  // mobile regression suite (`mobile/__tests__/mobile-route.test.ts`).
 
   it("Sidebar exposes a collapse toggle persisted to localStorage", () => {
     const source = read("sidebar.tsx");
@@ -75,9 +32,13 @@ describe("UI regression guards", () => {
     expect(source).toMatch(/aria-label="Expand sidebar"/);
   });
 
-  it("ChatMessage renders the bot's avatar and display name", () => {
-    const source = read("chat/chat-message.tsx");
-    expect(source).toMatch(/BotAvatar/);
-    expect(source).toMatch(/botDisplayName/);
+  it("Sidebar no longer links to the deleted /chat route", () => {
+    const source = read("sidebar.tsx");
+    // The Chat menu item + its CollapsedLink twin were removed when
+    // the desktop chat surface went away. Catching either link
+    // resurfacing here keeps a careless squash from re-adding a
+    // dead route.
+    expect(source).not.toMatch(/href="\/chat"/);
+    expect(source).not.toMatch(/label="Chat"/);
   });
 });
