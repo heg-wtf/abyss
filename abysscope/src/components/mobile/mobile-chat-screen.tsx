@@ -381,7 +381,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && event.ctrlKey) {
       event.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
@@ -444,7 +444,12 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             <MessageBubble key={message.id} message={message} />
           ))}
           {activeStream.streaming && (
-            <li className="flex min-w-0 justify-start">
+            <li
+              className="flex min-w-0 justify-start"
+              role="status"
+              aria-live="polite"
+              aria-label="Assistant reply streaming"
+            >
               <div className="min-w-0 max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3 py-2 text-sm">
                 <StreamProgress streaming={activeStream.streaming} />
                 {activeStream.text ? (
@@ -641,12 +646,15 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* Active-stream cancel button */}
+      {/* Active-stream cancel button — large enough to meet the
+          44 px Apple HIG touch target so a one-handed thumb tap
+          actually lands on it. */}
       {activeStream.streaming && (
         <button
           type="button"
+          aria-label="Stop generating reply"
           onClick={() => stream.cancel(session.id)}
-          className="fixed bottom-20 left-1/2 -translate-x-1/2 rounded-full bg-secondary px-3 py-1 text-xs text-secondary-foreground shadow"
+          className="fixed bottom-20 left-1/2 min-h-[44px] min-w-[88px] -translate-x-1/2 rounded-full bg-secondary px-4 py-2 text-xs font-medium text-secondary-foreground shadow"
         >
           Stop
         </button>
@@ -753,7 +761,11 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
  * ``[overflow-wrap:anywhere]`` keep long URLs / Korean text from
  * blowing past the bubble width on narrow phones.
  */
-function MarkdownBody({ content }: { content: string }) {
+const MarkdownBody = React.memo(function MarkdownBody({
+  content,
+}: {
+  content: string;
+}) {
   // ``min-w-0`` lets this flex/grid child actually shrink below its
   // content's intrinsic width. ``break-words`` +
   // ``[overflow-wrap:anywhere]`` break long unbreakable strings
@@ -774,7 +786,7 @@ function MarkdownBody({ content }: { content: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function PendingAttachmentChip({
   attachment,

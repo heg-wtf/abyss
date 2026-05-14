@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import {
   getRoutineMessages,
-  listChatBots,
   listRoutines,
   type RoutineSummary,
 } from "@/lib/abyss-api";
@@ -25,10 +24,7 @@ export default async function MobileRoutinePage({
   const { bot, kind, job } = await params;
   if (kind !== "cron" && kind !== "heartbeat") notFound();
 
-  const [routines, bots] = await Promise.all([
-    listRoutines().catch(() => [] as RoutineSummary[]),
-    listChatBots().catch(() => []),
-  ]);
+  const routines = await listRoutines().catch(() => [] as RoutineSummary[]);
   const routine = routines.find(
     (entry) =>
       entry.bot === bot && entry.kind === kind && entry.job_name === job,
@@ -42,10 +38,6 @@ export default async function MobileRoutinePage({
   ).catch(() => []);
 
   return (
-    <MobileRoutineScreen
-      bots={bots}
-      routine={routine}
-      initialMessages={messages}
-    />
+    <MobileRoutineScreen routine={routine} initialMessages={messages} />
   );
 }
