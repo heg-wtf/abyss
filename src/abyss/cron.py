@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -429,7 +430,7 @@ async def execute_cron_job(
         response = result.text
     except Exception as error:
         response = f"Cron job '{job_name}' failed: {error}"
-        logger.error("Cron job '%s' failed: %s", job_name, error)
+        logger.exception("Cron job '%s' failed", job_name)
 
     # Persist the run to ``conversation-*.md`` so the mobile Routines
     # tab and any future history surface have something to render.
@@ -449,13 +450,12 @@ async def execute_cron_job(
     except Exception as log_error:  # noqa: BLE001
         logger.warning("Cron job '%s' conversation log skipped: %s", job_name, log_error)
 
-    # Web Push delivery (coexists with the Telegram callback below).
-    # ``send_push`` no-ops when no PWA subscriptions exist, so this is
-    # safe on freshly-installed dashboards. Failures must never break
-    # the Telegram path that follows.
-    from contextlib import suppress as _suppress
+    # Web Push delivery — best-effort. ``send_push`` no-ops when no
+    # PWA subscriptions exist (e.g. fresh install, no HTTPS yet), so
+    # the call is safe to make every run.
+    from contextlib import suppress
 
-    with _suppress(Exception):
+    with suppress(Exception):
         from abyss.web_push import send_push as _send_push
 
         preview = response.replace("\n", " ").strip()
@@ -474,6 +474,32 @@ async def execute_cron_job(
     # are the only fan-out paths now. Anything that wants the result
     # reads it from the mobile Routines tab, the dashboard, or via
     # ``conversation_search`` MCP.
+
+
+def _log_task_exception(bot_name: str, job_name: str) -> Callable[[asyncio.Task], None]:
+    """Return a done-callback that surfaces fire-and-forget task errors.
+
+    ``asyncio.create_task`` without an awaited future loses exceptions
+    unless someone calls ``task.exception()``. The done-callback runs
+    that check + logs anything found so a broken cron job is visible
+    in the daemon log instead of disappearing.
+    """
+
+    def _cb(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is None:
+            return
+        logger.error(
+            "Cron job '%s' (bot=%s) raised: %s",
+            job_name,
+            bot_name,
+            exc,
+            exc_info=exc,
+        )
+
+    return _cb
 
 
 async def run_cron_scheduler(
@@ -542,13 +568,17 @@ async def run_cron_scheduler(
                                 last_run_times[job_name] = now_utc
 
                 if should_run:
-                    asyncio.create_task(
+                    task = asyncio.create_task(
                         execute_cron_job(
                             bot_name=bot_name,
                             job=job,
                             bot_config=bot_config,
                         )
                     )
+                    # Fire-and-forget tasks swallow exceptions
+                    # silently — surface them through the logger so a
+                    # broken cron job is debuggable.
+                    task.add_done_callback(_log_task_exception(bot_name, job_name))
 
                     # Handle one-shot cleanup
                     if "at" in job:

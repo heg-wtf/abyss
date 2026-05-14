@@ -1,11 +1,12 @@
-"""Internal HTTP/SSE server for the abysscope dashboard chat.
+"""Internal HTTP/SSE server for the abysscope dashboard + mobile PWA.
 
-Runs inside the same asyncio event loop as the Telegram bots (bot_manager).
-Bound to ``127.0.0.1:${ABYSS_CHAT_PORT:-3848}`` (loopback only). The Next.js
+Runs inside the same asyncio event loop as the per-bot cron / heartbeat
+schedulers (see ``bot_manager.run_bots``). Bound to
+``127.0.0.1:${ABYSS_CHAT_PORT:-3848}`` (loopback only). The Next.js
 dashboard at port 3847 proxies requests here.
 
-Sessions are stored under ``~/.abyss/bots/<bot>/sessions/chat_web_<uuid>/``,
-fully separate from Telegram chats — there is no sync.
+Sessions are stored under ``~/.abyss/bots/<bot>/sessions/chat_web_<uuid>/``;
+each chat owns its own directory + Claude session id.
 
 Endpoints
 ---------
@@ -1386,11 +1387,15 @@ class ChatServer:
         elif command_name == "skills":
             result = await commands.cmd_skills(ctx)
         elif command_name == "heartbeat":
-            # ``/heartbeat run`` requires Telegram's send_message callback.
-            # Status / on / off work; ``run`` falls back to a clear hint.
+            # ``/heartbeat run`` used to depend on a Telegram send-message
+            # callback; with Telegram gone the path is not wired up to
+            # the PWA chat surface yet. Status / on / off still work
+            # because they only mutate config.
             if ctx.args and ctx.args[0].lower() == "run":
                 return (
-                    "⚠️ /heartbeat run requires the Telegram bot. Use the Telegram chat for now."
+                    "⚠️ /heartbeat run is not yet wired into the PWA chat. "
+                    "The scheduled heartbeat still fires; this is the "
+                    "manual-trigger path."
                 ), None
             result = await commands.cmd_heartbeat(ctx)
         elif command_name == "compact":
@@ -1400,19 +1405,16 @@ class ChatServer:
             run_result = await commands.cmd_compact_run(ctx)
             return f"{preview.text}\n\n{run_result.text}", None
         elif command_name == "cron":
-            # ``run`` (needs Telegram send_message) and ``edit`` (multi-step)
-            # are not available on the dashboard yet — fall back with a hint.
+            # ``run`` (manual trigger) and ``edit`` (multi-step prompt)
+            # are not available on the PWA chat surface yet. Other
+            # subcommands (list, add, remove, enable, disable) work.
             sub = ctx.args[0].lower() if ctx.args else ""
             if sub in {"run", "edit"}:
                 return (
-                    f"⚠️ /cron {sub} requires the Telegram bot. Use the Telegram chat for now."
+                    f"⚠️ /cron {sub} is not yet wired into the PWA chat. "
+                    "Edit the bot's cron.yaml directly for now."
                 ), None
             result = await commands.cmd_cron(ctx)
-        elif command_name in {"bind", "unbind"}:
-            return (
-                f"⚠️ /{command_name} is not yet available on the dashboard. "
-                "Use the Telegram bot for now."
-            ), None
         else:
             raise LookupError(f"unknown command: /{command_name}")
 
@@ -1564,11 +1566,16 @@ class ChatServer:
             with suppress(FileNotFoundError):
                 stored_path.unlink()
             raise
-        except Exception as error:
+        except Exception:
             logger.exception("upload failed for bot=%s session=%s", bot_name, session_id)
             with suppress(FileNotFoundError):
                 stored_path.unlink()
-            return web.json_response({"error": "upload_failed", "detail": str(error)}, status=500)
+            # Detail kept generic — the underlying ``open`` / ``shutil``
+            # error can leak filesystem paths and the daemon log has
+            # the full trace anyway.
+            return web.json_response(
+                {"error": "upload_failed", "detail": "upload failed"}, status=500
+            )
 
         return web.json_response(
             {
@@ -1666,7 +1673,10 @@ class ChatServer:
         )
 
         try:
-            assert self._http_session is not None
+            if self._http_session is None:
+                raise RuntimeError(
+                    "HTTP session not initialised — chat_server start() must run first"
+                )
             async with self._http_session.post(
                 ELEVENLABS_STT_URL,
                 headers={"xi-api-key": ELEVENLABS_API_KEY},
@@ -1694,7 +1704,10 @@ class ChatServer:
             return web.json_response({"error": "ELEVENLABS_API_KEY not set"}, status=503)
 
         try:
-            assert self._http_session is not None
+            if self._http_session is None:
+                raise RuntimeError(
+                    "HTTP session not initialised — chat_server start() must run first"
+                )
             async with self._http_session.post(
                 "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
                 headers={"xi-api-key": ELEVENLABS_API_KEY},
@@ -1733,7 +1746,10 @@ class ChatServer:
         url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
 
         try:
-            assert self._http_session is not None
+            if self._http_session is None:
+                raise RuntimeError(
+                    "HTTP session not initialised — chat_server start() must run first"
+                )
             async with self._http_session.post(
                 url,
                 headers={

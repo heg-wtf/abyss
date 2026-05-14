@@ -942,6 +942,8 @@ async def test_slash_cron_usage(client, patch_backend):
 
 @pytest.mark.asyncio
 async def test_slash_cron_run_falls_back(client, patch_backend):
+    """``/cron run`` is not yet wired into the PWA chat — surface a
+    clear hint instead of crashing on the missing scheduler hook."""
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
     sse = await client.post(
@@ -950,11 +952,13 @@ async def test_slash_cron_run_falls_back(client, patch_backend):
     )
     events = await _parse_sse_events(sse)
     result = next(e for e in events if e["type"] == "command_result")
-    assert "Telegram" in result["text"]
+    assert "not yet wired" in result["text"]
 
 
 @pytest.mark.asyncio
 async def test_slash_cron_edit_falls_back(client, patch_backend):
+    """``/cron edit`` requires multi-step prompting that the PWA
+    chat doesn't yet support — surface a hint, not a crash."""
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
     sse = await client.post(
@@ -963,7 +967,7 @@ async def test_slash_cron_edit_falls_back(client, patch_backend):
     )
     events = await _parse_sse_events(sse)
     result = next(e for e in events if e["type"] == "command_result")
-    assert "Telegram" in result["text"]
+    assert "not yet wired" in result["text"]
 
 
 @pytest.mark.asyncio
@@ -1085,6 +1089,8 @@ async def test_slash_heartbeat_status(client, patch_backend, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_slash_heartbeat_run_falls_back(client, patch_backend):
+    """``/heartbeat run`` (manual trigger) is not yet wired into the
+    PWA chat — return a hint, not a crash."""
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
     sse = await client.post(
@@ -1093,7 +1099,7 @@ async def test_slash_heartbeat_run_falls_back(client, patch_backend):
     )
     events = await _parse_sse_events(sse)
     result = next(e for e in events if e["type"] == "command_result")
-    assert "Telegram" in result["text"]
+    assert "not yet wired" in result["text"]
 
 
 @pytest.mark.asyncio
@@ -1115,7 +1121,11 @@ async def test_slash_compact_no_targets(client, patch_backend, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_slash_bind_unbind_still_telegram_only(client, patch_backend):
+async def test_slash_bind_unbind_unknown_after_group_removal(client, patch_backend):
+    """``/bind`` and ``/unbind`` were removed when the group surface
+    was retired in v2026.05.14. The slash dispatcher should treat
+    them as unknown commands so a fresh PWA-native group rewrite can
+    re-introduce the names later without colliding with stubs."""
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
     for cmd in ("/bind team", "/unbind"):
@@ -1124,8 +1134,9 @@ async def test_slash_bind_unbind_still_telegram_only(client, patch_backend):
             json={"bot": "alpha", "session_id": sid, "message": cmd},
         )
         events = await _parse_sse_events(sse)
-        result = next(e for e in events if e["type"] == "command_result")
-        assert "Telegram" in result["text"]
+        # Unknown commands return an error event, not a command_result.
+        types = [event["type"] for event in events]
+        assert "error" in types or "command_result" not in types
 
 
 # ---------------------------------------------------------------------------

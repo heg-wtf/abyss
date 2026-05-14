@@ -1,18 +1,15 @@
-"""Platform-independent slash command implementations.
+"""Slash command implementations, transport-agnostic.
 
 Each ``cmd_*`` function performs a single slash command and returns a
-``CommandResult``. Adapters (Telegram handlers, dashboard chat server)
-translate between their platform's request/response types and these
-pure functions.
+``CommandResult``. The dashboard chat server (``chat_server.py``) is
+the only adapter today; the layering survives so future transports
+(MCP server, CLI subcommands, etc.) can reuse the same logic.
 
-The functions never reference ``telegram.Update`` or aiohttp request
-objects. They only depend on ``CommandContext`` and abyss internals
-(``session``, ``config``, ``group``...).
-
-Phase 1 covers the commands that do not require Claude invocations or
-multi-message conversational state. Streaming-heavy or stateful
-commands (cron add, skills attach, compact, bind/unbind multi-step
-flows) are extracted in subsequent phases.
+The functions depend on ``CommandContext`` + abyss internals
+(``session``, ``config``, ``skill``, ``cron``, ``heartbeat``). Some
+multi-step flows (``/cron edit``, ``/compact``) return richer
+``*Outcome`` dataclasses so the adapter can chain follow-up state
+without leaking that state back into the pure command.
 """
 
 from __future__ import annotations
@@ -214,8 +211,6 @@ class ResetOutcome:
     """Detailed outcome of ``cmd_reset`` so adapters can drive pool/SDK cleanup."""
 
     result: CommandResult
-    is_group: bool = False
-    is_orchestrator: bool = False
     affected_bots: list[str] = field(default_factory=list)
 
 
@@ -368,8 +363,6 @@ async def cmd_send(ctx: CommandContext) -> CommandResult:
 @dataclass
 class CancelOutcome:
     result: CommandResult
-    is_group: bool = False
-    is_orchestrator: bool = False
     cancelled_bots: list[str] = field(default_factory=list)
 
 

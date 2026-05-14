@@ -125,7 +125,7 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     pid_file.write_text(str(os.getpid()))
 
     stop_event = asyncio.Event()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def signal_handler():
         logger.info("Shutdown signal received")
