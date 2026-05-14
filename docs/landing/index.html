@@ -855,8 +855,8 @@
 <span class="prompt">$</span> <span class="cmd">abyss</span> init
 <span class="prompt">$</span> <span class="cmd">abyss</span> bot add
 
-<span class="comment"># Run</span>
-<span class="prompt">$</span> <span class="cmd">abyss</span> start <span class="flag">--daemon</span>
+<span class="comment"># Run — API + dashboard + schedulers in one</span>
+<span class="prompt">$</span> <span class="cmd">abyss</span> start
 <span class="prompt">$</span> <span class="cmd">abyss</span> status
 
 <span class="comment"># Skills</span>
@@ -865,10 +865,7 @@
 
 <span class="comment"># Automation</span>
 <span class="prompt">$</span> <span class="cmd">abyss</span> cron add my-bot
-<span class="prompt">$</span> <span class="cmd">abyss</span> heartbeat enable my-bot
-
-<span class="comment"># Dashboard</span>
-<span class="prompt">$</span> <span class="cmd">abyss</span> dashboard start <span class="flag">--daemon</span></pre>
+<span class="prompt">$</span> <span class="cmd">abyss</span> heartbeat enable my-bot</pre>
         </div>
       </div>
     </section>
@@ -961,7 +958,7 @@
               path-traversal guard. New
               <strong>build progress UI</strong> for
               <code style="font-family: 'JetBrains Mono', monospace;"
-                >abyss dashboard restart</code
+                >abyss restart</code
               >: replaces the raw
               <code style="font-family: 'JetBrains Mono', monospace;">next build</code>
               firehose with a 4-step Rich checklist, captures the build log
