@@ -67,11 +67,15 @@ async def _send_command_result(
         return
 
     if result.file_path is not None:
+        # Context-manage the file handle so we never leak a descriptor
+        # when ``reply_document`` raises (the original inline ``open()``
+        # had no matching close path).
         try:
-            await update.effective_message.reply_document(
-                document=open(result.file_path, "rb"),
-                filename=result.file_path.name,
-            )
+            with open(result.file_path, "rb") as document:
+                await update.effective_message.reply_document(
+                    document=document,
+                    filename=result.file_path.name,
+                )
         except Exception as error:
             await update.effective_message.reply_text(f"Failed to send file: {error}")
             logger.error("Failed to send file %s: %s", result.file_path, error)

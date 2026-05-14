@@ -50,6 +50,16 @@ interface Props {
 interface ConversationMessage extends ChatMessage {
   id: string;
   streaming?: boolean;
+  /**
+   * Slash commands like ``/send`` return a downloadable file
+   * alongside (or instead of) text. Mirrors the desktop chat-view
+   * field so we render a download chip on the assistant bubble.
+   */
+  commandFile?: {
+    name: string;
+    path: string;
+    url: string;
+  } | null;
 }
 
 interface PendingAttachment {
@@ -220,12 +230,25 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
       timestamp: new Date().toISOString(),
       attachments: pending
         .filter((p) => p.uploaded)
-        .map((p) => ({
-          display_name: p.uploaded!.display_name,
-          real_name: p.uploaded!.path,
-          mime: p.uploaded!.mime,
-          url: attachmentUrl(session.bot, session.id, p.uploaded!.display_name),
-        })),
+        .map((p) => {
+          // ``uploaded.path`` is the stored ``uploads/<uuid>__<name>``
+          // form. The file-serving endpoint expects just the
+          // ``<uuid>__<name>`` portion, so strip the ``uploads/``
+          // prefix once and pass that to both ``real_name`` and
+          // ``attachmentUrl``. Previous revisions used
+          // ``display_name`` which is the original (user-friendly)
+          // filename — those links pointed at non-existent files
+          // until the chat was reloaded from server history.
+          const realName = p.uploaded!.path.startsWith("uploads/")
+            ? p.uploaded!.path.slice("uploads/".length)
+            : p.uploaded!.path;
+          return {
+            display_name: p.uploaded!.display_name,
+            real_name: realName,
+            mime: p.uploaded!.mime,
+            url: attachmentUrl(session.bot, session.id, realName),
+          };
+        }),
     };
     setMessages((prev) => [...prev, userMessage]);
     setDraft("");
@@ -238,18 +261,26 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         display,
         attachmentPaths
       );
-      if (reply) {
+      // Skip the assistant bubble only when both text *and* file are
+      // empty (e.g. ``AbortError`` early return). ``/send <filename>``
+      // returns empty text + a non-null ``commandFile``; we still
+      // want a bubble so the user can tap the download chip.
+      if (reply.text || reply.commandFile) {
         setMessages((prev) => [
           ...prev,
           {
             id: newId(),
             role: "assistant",
-            content: reply,
+            content: reply.text,
             timestamp: new Date().toISOString(),
+            commandFile: reply.commandFile ?? null,
           },
         ]);
       }
     } catch (error) {
+      // Roll back the optimistic user bubble so the chat does not
+      // silently swallow a failed send.
+      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
       setTransientError(
         error instanceof Error ? error.message : String(error)
       );
@@ -538,6 +569,19 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
                 📎 {att.display_name}
               </a>
             ))}
+          </div>
+        ) : null}
+        {message.commandFile ? (
+          <div className="mt-2">
+            <a
+              href={message.commandFile.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              download={message.commandFile.name}
+              className="inline-flex items-center gap-2 rounded-md border bg-background/30 px-2 py-1 text-xs text-current underline-offset-2 hover:underline"
+            >
+              ⬇️ {message.commandFile.name}
+            </a>
           </div>
         ) : null}
         <div className="mt-1 text-right text-[10px] opacity-60">

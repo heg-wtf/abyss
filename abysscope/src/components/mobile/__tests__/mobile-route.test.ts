@@ -180,6 +180,59 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/useLayoutEffect/);
   });
 
+  it("stream hook forwards command_result file payload to the caller", () => {
+    const source = read("components/chat/use-chat-stream.ts");
+    // The hook must thread ``event.file`` through to the caller —
+    // dropping it makes ``/send <filename>`` render as a blank
+    // assistant bubble (codex P1 review on PR #50).
+    expect(source).toMatch(/event\.file \?\? null/);
+    // SendResult is the new return shape; both surfaces consume it.
+    expect(source).toMatch(/SendResult/);
+    expect(source).toMatch(/commandFile/);
+  });
+
+  it("optimistic attachment URLs use the stored real_name, not the original filename", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // ``uploaded.path`` is ``uploads/<uuid>__<name>``; the file
+    // endpoint expects the ``<uuid>__<name>`` portion. Previous
+    // revisions used ``display_name`` and produced 404 links until
+    // the chat reloaded from history (codex P2 review on PR #50).
+    expect(source).toMatch(/startsWith\("uploads\/"\)/);
+    expect(source).toMatch(/realName/);
+    expect(source).not.toMatch(/url: attachmentUrl\([^,]+,\s*[^,]+,\s*p\.uploaded!\.display_name/);
+  });
+
+  it("mobile chat renders a download chip for /send command_file payloads", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    expect(source).toMatch(/message\.commandFile/);
+    expect(source).toMatch(/href=\{message\.commandFile\.url\}/);
+  });
+
+  it("desktop chat-message renders a download chip for commandFile prop", () => {
+    const source = read("components/chat/chat-message.tsx");
+    expect(source).toMatch(/CommandFileChip/);
+    expect(source).toMatch(/commandFile/);
+  });
+
+  it("handlers.py closes the file handle when replying with a document", () => {
+    const handlersPath = path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "..",
+      "..",
+      "src",
+      "abyss",
+      "handlers.py"
+    );
+    const source = readFileSync(handlersPath, "utf8");
+    // ``reply_document`` used to receive ``open(...)`` inline with no
+    // matching close path — github-code-quality bot flagged this on
+    // PR #50. The fix wraps the handle in a ``with`` block.
+    expect(source).toMatch(/with open\(result\.file_path, "rb"\) as document:/);
+  });
+
   it("workspace sheet defers its chrome to WorkspaceTree's own header", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
     // WorkspaceTree already renders a header with Workspace title +

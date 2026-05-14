@@ -2,10 +2,16 @@
 
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
-import { FileText, User } from "lucide-react";
+import { Download, FileText, User } from "lucide-react";
 import { BotAvatar } from "@/components/bot-avatar";
 import { cn } from "@/lib/utils";
 import type { ChatAttachmentRef } from "@/lib/abyss-api";
+
+interface CommandFileRef {
+  name: string;
+  path: string;
+  url: string;
+}
 
 interface Props {
   role: "user" | "assistant";
@@ -14,6 +20,12 @@ interface Props {
   botName?: string | null;
   botDisplayName?: string | null;
   attachments?: ChatAttachmentRef[];
+  /**
+   * Optional download chip for slash commands like ``/send`` that
+   * return a workspace file. The chip links to the existing
+   * ``/api/chat/sessions/<bot>/<id>/file/<name>`` proxy.
+   */
+  commandFile?: CommandFileRef | null;
   timestamp?: string | null;
 }
 
@@ -30,6 +42,7 @@ export function ChatMessage({
   botName,
   botDisplayName,
   attachments,
+  commandFile,
   timestamp,
 }: Props) {
   const isUser = role === "user";
@@ -75,8 +88,28 @@ export function ChatMessage({
             <div className="whitespace-pre-wrap">{content}</div>
           ) : null}
         </div>
+        {commandFile && (
+          <div className="mt-2">
+            <CommandFileChip file={commandFile} />
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+function CommandFileChip({ file }: { file: CommandFileRef }) {
+  return (
+    <a
+      href={file.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      download={file.name}
+      className="inline-flex items-center gap-2 rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+    >
+      <Download className="size-3.5" />
+      <span className="truncate">{file.name}</span>
+    </a>
   );
 }
 
