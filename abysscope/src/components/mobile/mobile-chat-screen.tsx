@@ -292,7 +292,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-w-0 flex-col overflow-x-hidden">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <Link
@@ -337,8 +337,8 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             <MessageBubble key={message.id} message={message} />
           ))}
           {activeStream.streaming && (
-            <li className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl bg-muted px-3 py-2 text-sm">
+            <li className="flex min-w-0 justify-start">
+              <div className="min-w-0 max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3 py-2 text-sm">
                 {activeStream.text ? (
                   <MarkdownBody content={activeStream.text} />
                 ) : (
@@ -512,9 +512,9 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
 function MessageBubble({ message }: { message: ConversationMessage }) {
   const isUser = message.role === "user";
   return (
-    <li className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <li className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${
+        className={`min-w-0 max-w-[85%] overflow-hidden rounded-2xl px-3 py-2 text-sm ${
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground"
@@ -557,8 +557,15 @@ function MessageBubble({ message }: { message: ConversationMessage }) {
  * blowing past the bubble width on narrow phones.
  */
 function MarkdownBody({ content }: { content: string }) {
+  // ``min-w-0`` lets this flex/grid child actually shrink below its
+  // content's intrinsic width. ``break-words`` +
+  // ``[overflow-wrap:anywhere]`` break long unbreakable strings
+  // (URLs, Korean blobs without spaces) instead of pushing the
+  // bubble wider. ``<pre>`` blocks get their own ``overflow-x-auto``
+  // so a wide code line scrolls within the bubble — never the
+  // whole page. Tables get the same treatment.
   return (
-    <div className="prose prose-sm dark:prose-invert min-w-0 max-w-none break-words [overflow-wrap:anywhere] prose-pre:my-2 prose-pre:rounded-md prose-pre:bg-background/40 prose-pre:p-2 prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
+    <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words [overflow-wrap:anywhere] prose-pre:my-2 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-background/40 prose-pre:p-2 prose-code:break-words prose-img:max-w-full prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
       <ReactMarkdown>{content || ""}</ReactMarkdown>
     </div>
   );
