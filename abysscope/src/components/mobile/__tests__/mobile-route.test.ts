@@ -115,14 +115,22 @@ describe("/mobile route skeleton", () => {
 
   it("chat screen renders header + input bar + workspace + slash sheets", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
-    // Header has back link to sessions list and workspace toggle.
-    expect(source).toMatch(/href="\/mobile"/);
+    // Hamburger opens the sessions slide-drawer rather than
+    // navigating away from the chat — the user explicitly asked
+    // for the "drawer pushes the chat" pattern.
+    expect(source).toMatch(/aria-label="Open sessions"/);
+    expect(source).toMatch(/setSessionsOpen\(true\)/);
     expect(source).toMatch(/aria-label="Workspace files"/);
     // Input bar order: slash, attach, textarea, send/voice toggle.
     expect(source).toMatch(/aria-label="Slash commands"/);
     expect(source).toMatch(/aria-label="Attach file"/);
     expect(source).toMatch(/aria-label="Send message"/);
-    expect(source).toMatch(/aria-label="Voice/);
+    // Voice button has two states (recording / idle), so we just
+    // pin the start-recording label.
+    expect(source).toMatch(/Start voice dictation/);
+    // Workspace + sessions slide in from the side instead of
+    // stacking a centred Dialog.
+    expect(source).toMatch(/<SlideDrawer/);
     // Workspace sheet reuses the existing WorkspaceTree component.
     expect(source).toMatch(/WorkspaceTree/);
     // Slash command sheet hits the catalog endpoint.
@@ -330,14 +338,39 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/with open\(result\.file_path, "rb"\) as document:/);
   });
 
-  it("workspace sheet defers its chrome to WorkspaceTree's own header", () => {
+  it("workspace and sessions slide in from the side instead of a centred modal", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
-    // WorkspaceTree already renders a header with Workspace title +
-    // Finder + Refresh + Close buttons. Letting the Dialog render its
-    // own header / close button would surface two titles and two X
-    // buttons (the bug the user reported). We keep the title in
-    // sr-only form for a11y and disable the Dialog's built-in close.
-    expect(source).toMatch(/showCloseButton=\{false\}/);
-    expect(source).toMatch(/DialogTitle className="sr-only">Workspace/);
+    // Workspace + sessions both go through the shared SlideDrawer
+    // primitive. The Dialog-based workspace (with its showCloseButton
+    // and sr-only DialogTitle dance to avoid a duplicated header)
+    // is gone — the slide drawer lets WorkspaceTree own the chrome
+    // naturally, and the user gets the "push the chat aside" feel
+    // they asked for.
+    expect(source).toMatch(/side="right"/);
+    expect(source).toMatch(/side="left"/);
+    // The user is no longer routed off to ``/mobile`` for sessions;
+    // hamburger now just opens the drawer.
+    expect(source).not.toMatch(/href="\/mobile"/);
+  });
+
+  it("SlideDrawer is a generic left/right side drawer with backdrop", () => {
+    const source = read("components/mobile/slide-drawer.tsx");
+    expect(source).toMatch(/side: "left" \| "right"/);
+    expect(source).toMatch(/Escape/);
+    expect(source).toMatch(/translate-x-0/);
+    expect(source).toMatch(/-translate-x-full/);
+  });
+
+  it("chat screen wires voice dictation and swipe navigation", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Mic button used to be a disabled stub. It now drives a real
+    // dictation pipeline backed by ElevenLabs Scribe through the
+    // shared ``useVoiceMode`` hook.
+    expect(source).toMatch(/useVoiceMode/);
+    expect(source).toMatch(/onTranscript:/);
+    // Horizontal swipes on the message area page between sibling
+    // sessions of the same bot.
+    expect(source).toMatch(/onMessagesTouchStart/);
+    expect(source).toMatch(/goToSibling/);
   });
 });

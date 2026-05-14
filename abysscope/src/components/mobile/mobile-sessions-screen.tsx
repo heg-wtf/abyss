@@ -583,11 +583,8 @@ function PushToggle() {
   const push = useWebPushContext();
   const [open, setOpen] = React.useState(false);
 
-  if (push.status === "unsupported") {
-    return null;
-  }
-
   const subscribed = push.status === "subscribed";
+  const unsupported = push.status === "unsupported";
 
   return (
     <>
@@ -596,6 +593,7 @@ function PushToggle() {
         aria-label={subscribed ? "Notifications on" : "Notifications off"}
         onClick={() => setOpen(true)}
         className="rounded-full p-2 hover:bg-muted"
+        title={`push: ${push.status}`}
       >
         {subscribed ? (
           <Bell className="size-4" />
@@ -614,6 +612,18 @@ function PushToggle() {
               double-notified.
             </DialogDescription>
           </DialogHeader>
+
+          <p className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+            Current status: <span className="font-mono">{push.status}</span>
+          </p>
+
+          {unsupported && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              This browser / origin does not support Web Push. Open the
+              dashboard over HTTPS (or localhost) in iOS Safari 16.4+,
+              Chrome, or Edge.
+            </p>
+          )}
 
           {push.status === "permission-denied" && (
             <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
@@ -649,7 +659,9 @@ function PushToggle() {
               <Button
                 onClick={() => push.enable()}
                 disabled={
-                  push.pending || push.status === "permission-denied"
+                  push.pending ||
+                  push.status === "permission-denied" ||
+                  push.status === "unsupported"
                 }
               >
                 {push.pending ? "Enabling…" : "Enable"}
