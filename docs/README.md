@@ -18,13 +18,6 @@ abyss 문서 인덱스. 루트 [README.md](../README.md) 가 사용자용 빠른
 | [MOBILE_ACCESS.md](MOBILE_ACCESS.md) | `/mobile` PWA 사용법, Tailscale 셋업, iOS/Android 홈 추가, Web Push 구독 |
 | [HTTPS_REQUIRED.md](HTTPS_REQUIRED.md) | secure-context 가 필요한 기능 정리 (Web Push, mic, Service Worker, clipboard). HTTPS 미적용 시 잠기는 항목 |
 
-## 백엔드 셋업
-
-| 문서 | 요약 |
-|------|------|
-| [MINIMAX_SETUP.md](MINIMAX_SETUP.md) | `openai_compat` 백엔드로 MiniMax 직접 연결 (`minimax`, `minimax_china`) |
-| [OPENROUTER_SETUP.md](OPENROUTER_SETUP.md) | OpenRouter 백엔드 — 가벼운 텍스트 전용 챗. 언제 Claude Code 대신 골라야 하는지 |
-
 ## 스킬 / 통합
 
 | 문서 | 요약 |
@@ -44,4 +37,4 @@ abyss 문서 인덱스. 루트 [README.md](../README.md) 가 사용자용 빠른
 - 핵심 4개 (ARCHITECTURE / TECHNICAL-NOTES / SECURITY / ROADMAP) 는 항상 최신.
 - 운영 문서는 기능이 추가될 때 함께 업데이트.
 - 릴리즈 시 ROADMAP 의 "Now" 섹션은 직후 버전을 가리키도록 갱신.
-- 신규 백엔드는 `*_SETUP.md` 패턴으로 추가.
+- 신규 통합/백엔드 가이드는 대문자 파일명으로 추가 (`*_SETUP.md` 권장).

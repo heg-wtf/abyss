@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -264,60 +263,13 @@ def _restart_daemon() -> None:
 
 
 def prompt_backend_choice() -> dict | None:
-    """Ask the user which LLM backend the bot should use.
+    """Backend prompt retired in v2026.05.15.
 
-    Returns ``None`` for the default Claude Code backend (no extra YAML
-    block needed) or a dict suitable for the ``backend:`` block when the
-    user picks a non-default backend.
+    abyss is Claude Code only — kept as a no-op so callers don't have to
+    branch. Returns ``None`` so ``create_bot`` omits the ``backend:``
+    block from ``bot.yaml``.
     """
-    from abyss.utils import prompt_input
-
-    console.print("\n[bold]Choose LLM backend.[/bold]")
-    console.print()
-    console.print("  1. Claude Code (default — full agent: tools, MCP, skills, /resume)")
-    console.print("  2. OpenRouter (text-only — cheap/fast chat across 200+ models)")
-    console.print()
-
-    choice = prompt_input("Backend [1]:", default="1").strip()
-    if choice in ("", "1"):
-        return None
-
-    if choice != "2":
-        console.print("[yellow]Unknown choice; defaulting to Claude Code.[/yellow]")
-        return None
-
-    console.print()
-    console.print(
-        "[yellow]Note:[/yellow] OpenRouter is text-only. "
-        "Skills with MCP tools will not be invokable. "
-        "Conversation history is replayed from disk; --resume continuity is unavailable."
-    )
-    console.print()
-
-    api_key_env = (
-        prompt_input("API key environment variable [OPENROUTER_API_KEY]:") or "OPENROUTER_API_KEY"
-    ).strip()
-    model = (
-        prompt_input("Model id [anthropic/claude-haiku-4.5]:") or "anthropic/claude-haiku-4.5"
-    ).strip()
-    max_history_raw = prompt_input("Max history turns [20]:") or "20"
-    try:
-        max_history = max(0, int(max_history_raw))
-    except ValueError:
-        max_history = 20
-
-    if not os.environ.get(api_key_env):
-        console.print(
-            f"[yellow]Warning:[/yellow] ${api_key_env} is not set. "
-            "Export it before starting this bot."
-        )
-
-    return {
-        "type": "openrouter",
-        "api_key_env": api_key_env,
-        "model": model,
-        "max_history": max_history,
-    }
+    return None
 
 
 def create_bot(
