@@ -126,15 +126,20 @@ def conversation_status_summary(session_directory: Path) -> str:
     return f"{total_size:,} bytes ({file_count} files)"
 
 
-def reset_session(bot_path: Path, chat_id: int) -> None:
-    """Reset a session by deleting all conversation files (keep workspace)."""
+def reset_session(bot_path: Path, chat_id: int | str) -> None:
+    """Reset a session by deleting all conversation files (keep workspace).
+
+    ``chat_id`` accepts both ``int`` (legacy / future numeric IDs) and
+    ``str`` (current dashboard ``chat_web_*`` IDs) — the underlying
+    ``session_directory`` already does.
+    """
     directory = session_directory(bot_path, chat_id)
     for conversation_file in _list_all_conversation_files(directory):
         conversation_file.unlink()
     clear_claude_session_id(directory)
 
 
-def reset_all_session(bot_path: Path, chat_id: int) -> None:
+def reset_all_session(bot_path: Path, chat_id: int | str) -> None:
     """Reset a session completely by deleting the entire session directory."""
     directory = session_directory(bot_path, chat_id)
     if directory.exists():
