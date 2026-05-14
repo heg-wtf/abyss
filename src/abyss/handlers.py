@@ -19,6 +19,7 @@ from telegram.ext import (
     filters,
 )
 
+from abyss import commands
 from abyss.claude_runner import (
     STREAMING_CURSOR,
     cancel_process,
@@ -28,33 +29,20 @@ from abyss.claude_runner import (
 from abyss.config import (
     DEFAULT_MODEL,
     DEFAULT_STREAMING,
-    VALID_MODELS,
-    is_valid_model,
-    model_display_name,
-    save_bot_config,
 )
 from abyss.group import (
-    bind_group,
-    clear_shared_conversation,
     find_group_by_chat_id,
     get_my_role,
-    load_group_config,
     log_to_shared_conversation,
-    unbind_group,
 )
 from abyss.llm import LLMRequest, cached_backend, get_or_create
 from abyss.session import (
-    clear_bot_memory,
     clear_claude_session_id,
-    conversation_status_summary,
     ensure_session,
     get_claude_session_id,
-    list_workspace_files,
     load_bot_memory,
     load_conversation_history,
     log_conversation,
-    reset_all_session,
-    reset_session,
     save_claude_session_id,
 )
 from abyss.utils import markdown_to_telegram_html, split_message
@@ -63,6 +51,53 @@ logger = logging.getLogger(__name__)
 
 SESSION_LOCKS: dict[str, asyncio.Lock] = {}
 MAX_QUEUE_SIZE = 5
+
+
+async def _send_command_result(
+    update: Update,
+    result: commands.CommandResult,
+) -> None:
+    """Render a ``CommandResult`` as one or more Telegram messages.
+
+    Centralises the Markdown/HTML/file response logic so each handler
+    can simply delegate to ``commands.cmd_*`` and call this helper.
+    """
+
+    if result.silent:
+        return
+
+    if result.file_path is not None:
+        # Context-manage the file handle so we never leak a descriptor
+        # when ``reply_document`` raises (the original inline ``open()``
+        # had no matching close path).
+        try:
+            with open(result.file_path, "rb") as document:
+                await update.effective_message.reply_document(
+                    document=document,
+                    filename=result.file_path.name,
+                )
+        except Exception as error:
+            await update.effective_message.reply_text(f"Failed to send file: {error}")
+            logger.error("Failed to send file %s: %s", result.file_path, error)
+        return
+
+    if not result.text:
+        return
+
+    parse_mode = result.parse_mode
+    if parse_mode == "HTML":
+        # ``CommandResult.parse_mode == "HTML"`` signals "this text is
+        # Markdown that needs Telegram-HTML conversion and chunking".
+        html = markdown_to_telegram_html(result.text)
+        for chunk in split_message(html):
+            try:
+                await update.effective_message.reply_text(chunk, parse_mode="HTML")
+            except Exception:
+                await update.effective_message.reply_text(chunk)
+        return
+
+    await update.effective_message.reply_text(result.text, parse_mode=parse_mode)
+
 
 STREAM_THROTTLE_SECONDS = 0.5
 STREAM_MIN_CHARS_BEFORE_SEND = 10
@@ -143,7 +178,6 @@ def should_handle_group_message(
 
     Returns True if this bot should process the message.
     """
-    from abyss.group import get_my_role
 
     my_role = get_my_role(group_config, bot_name)
     if my_role is None:
@@ -193,15 +227,10 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
     Returns a list of handler instances to add to the Application.
     """
     allowed_users = bot_config.get("allowed_users", [])
-    personality = bot_config.get("personality", "")
-    display_name = bot_config.get("display_name", "")
-    role = bot_config.get("role", bot_config.get("description", ""))
-    goal = bot_config.get("goal", "")
     claude_arguments = bot_config.get("claude_args", [])
     command_timeout = bot_config.get("command_timeout", 300)
     current_model = bot_config.get("model", DEFAULT_MODEL)
     streaming_enabled = bot_config.get("streaming", DEFAULT_STREAMING)
-    attached_skills = bot_config.get("skills", [])
     bot_username = bot_config.get("telegram_username", "")
     pending_cron_edits: dict[int, str] = {}  # chat_id -> job_name
 
@@ -212,327 +241,129 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             return False
         return True
 
+    def _make_context(update: Update, args: list[str] | None = None) -> commands.CommandContext:
+        return commands.CommandContext(
+            bot_name=bot_name,
+            bot_path=bot_path,
+            bot_config=bot_config,
+            chat_id=update.effective_chat.id,
+            args=args or [],
+        )
+
     async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command - introduce the bot."""
         if not await check_authorization(update):
             return
-
-        name_display = display_name or bot_name
-        text = (
-            f"\U0001f916 *{name_display}*\n\n"
-            f"\U0001f3ad *Personality:* {personality}\n"
-            f"\U0001f4bc *Role:* {role}\n"
-        )
-        if goal:
-            text += f"\U0001f3af *Goal:* {goal}\n"
-        text += (
-            "\n\U0001f4ac Send me a message to start chatting!\n"
-            "\U00002753 Type /help for available commands."
-        )
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_start(_make_context(update))
+        await _send_command_result(update, result)
 
     async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command."""
         if not await check_authorization(update):
             return
-
-        text = (
-            "\U0001f4cb *Available Commands:*\n\n"
-            "\U0001f44b /start - Bot introduction\n"
-            "\U0001f504 /reset - Clear conversation (keep workspace)\n"
-            "\U0001f5d1 /resetall - Delete entire session\n"
-            "\U0001f4c2 /files - List workspace files\n"
-            "\U0001f4e4 /send - Send workspace file\n"
-            "\U0001f4ca /status - Session status\n"
-            "\U0001f9e0 /model - Show or change model\n"
-            "\U0001f4e1 /streaming - Toggle streaming mode\n"
-            "\U0001f9e0 /memory - Show or clear memory\n"
-            "\U0001f9e9 /skills - Skill management\n"
-            "\u23f0 /cron - Cron job management\n"
-            "\U0001f493 /heartbeat - Heartbeat management\n"
-            "\U0001f4e6 /compact - Compact MD files\n"
-            "\u26d4 /cancel - Stop running process\n"
-            "\U00002139 /version - Show version\n"
-            "\U00002753 /help - Show this message"
-        )
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_help(_make_context(update))
+        await _send_command_result(update, result)
 
     async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /reset command.
 
-        In group mode, only the orchestrator handles /reset:
-        - Resets all bots' group sessions (orchestrator + members)
-        - Clears shared conversation log
-        - Preserves shared workspace files
-        In DM mode, resets only this bot's session.
+        Pure reset logic lives in ``commands.cmd_reset``; this adapter
+        closes the SDK pool sessions for every affected bot afterwards.
         """
         if not await check_authorization(update):
             return
 
-        chat_id = update.effective_chat.id
-        group_config = find_group_by_chat_id(chat_id)
+        outcome = await commands.cmd_reset(_make_context(update))
 
-        # Close pool sessions so fresh clients are created after reset
         from abyss.sdk_client import get_pool, is_sdk_available
 
-        if group_config is not None:
-            my_role = get_my_role(group_config, bot_name)
-            if my_role != "orchestrator":
-                return  # Only orchestrator handles group /reset
+        if is_sdk_available():
+            chat_id = update.effective_chat.id
+            for affected in outcome.affected_bots:
+                await get_pool().close_session(f"{affected}:{chat_id}")
 
-            from abyss.config import bot_directory as get_bot_directory
-
-            # Reset orchestrator's own session
-            reset_session(bot_path, chat_id)
-            if is_sdk_available():
-                await get_pool().close_session(f"{bot_name}:{chat_id}")
-
-            # Reset all member bots' sessions for this chat_id
-            for member_name in group_config.get("members", []):
-                member_path = get_bot_directory(member_name)
-                reset_session(member_path, chat_id)
-                if is_sdk_available():
-                    await get_pool().close_session(f"{member_name}:{chat_id}")
-
-            # Clear shared conversation log
-            clear_shared_conversation(group_config["name"])
-
-            message = (
-                "\U0001f504 Group session reset. Shared conversation cleared. Workspace preserved."
-            )
-        else:
-            reset_session(bot_path, chat_id)
-            if is_sdk_available():
-                await get_pool().close_session(f"{bot_name}:{chat_id}")
-            message = "\U0001f504 Conversation reset. Workspace files preserved."
-
-        await update.effective_message.reply_text(message)
+        await _send_command_result(update, outcome.result)
 
     async def resetall_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /resetall command."""
         if not await check_authorization(update):
             return
 
-        chat_id = update.effective_chat.id
-        reset_all_session(bot_path, chat_id)
-        # Close pool session
+        result = await commands.cmd_resetall(_make_context(update))
+
         from abyss.sdk_client import get_pool, is_sdk_available
 
         if is_sdk_available():
+            chat_id = update.effective_chat.id
             await get_pool().close_session(f"{bot_name}:{chat_id}")
-        await update.effective_message.reply_text("\U0001f5d1 Session completely reset.")
+
+        await _send_command_result(update, result)
 
     async def files_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /files command."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        session_directory = ensure_session(bot_path, chat_id)
-        files = list_workspace_files(session_directory)
-
-        if not files:
-            await update.effective_message.reply_text("\U0001f4c2 No files in workspace.")
-            return
-
-        file_list = "\n".join(f"  {f}" for f in files)
-        text = f"\U0001f4c2 *Workspace files:*\n```\n{file_list}\n```"
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_files(_make_context(update))
+        await _send_command_result(update, result)
 
     async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /status command."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        session_directory = ensure_session(bot_path, chat_id)
-
-        conversation_status = conversation_status_summary(session_directory)
-
-        files = list_workspace_files(session_directory)
-
-        text = (
-            f"\U0001f4ca *Session Status*\n\n"
-            f"\U0001f916 Bot: {bot_name}\n"
-            f"\U0001f4ac Chat ID: {chat_id}\n"
-            f"\U0001f4dd Conversation: {conversation_status}\n"
-            f"\U0001f4c2 Workspace files: {len(files)}"
-        )
-        await update.effective_message.reply_text(text, parse_mode="Markdown")
+        result = await commands.cmd_status(_make_context(update))
+        await _send_command_result(update, result)
 
     async def send_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /send command - send a workspace file to the user."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        session_directory = ensure_session(bot_path, chat_id)
-        workspace = session_directory / "workspace"
-
-        if not context.args:
-            files = list_workspace_files(session_directory)
-            if not files:
-                await update.effective_message.reply_text("\U0001f4c2 No files in workspace.")
-                return
-            file_list = "\n".join(f"  {f}" for f in files)
-            text = f"\U0001f4e4 Usage: `/send filename`\n\nAvailable files:\n```\n{file_list}\n```"
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        filename = " ".join(context.args)
-        file_path = workspace / filename
-
-        if not file_path.exists():
-            await update.effective_message.reply_text(
-                f"File not found: `{filename}`", parse_mode="Markdown"
-            )
-            return
-
-        if not file_path.is_file():
-            await update.effective_message.reply_text(
-                f"Not a file: `{filename}`", parse_mode="Markdown"
-            )
-            return
-
-        try:
-            await update.effective_message.reply_document(
-                document=open(file_path, "rb"),
-                filename=file_path.name,
-            )
-        except Exception as error:
-            await update.effective_message.reply_text(f"Failed to send file: {error}")
-            logger.error("Failed to send file %s: %s", filename, error)
+        result = await commands.cmd_send(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def model_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /model command - show or change the Claude model."""
         nonlocal current_model
         if not await check_authorization(update):
             return
+        result = await commands.cmd_model(_make_context(update, context.args))
+        # ``bot_config`` is the source of truth; re-sync the closure cache.
+        current_model = bot_config.get("model", DEFAULT_MODEL)
+        await _send_command_result(update, result)
 
-        if not context.args:
-            model_list = " / ".join(
-                f"*{model_display_name(m)}*" if m == current_model else model_display_name(m)
-                for m in VALID_MODELS
-            )
-            text = (
-                f"\U0001f9e0 Current model: *{model_display_name(current_model)}*\n\n"
-                f"Available: {model_list}\n"
-                "Usage: `/model sonnet`"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
+    async def _cancel_for(target_bot: str, target_key: str) -> bool:
+        """Cancel a bot's running task via its cached backend.
 
-        new_model = context.args[0].lower()
-        if not is_valid_model(new_model):
-            await update.effective_message.reply_text(
-                f"Invalid model: `{new_model}`\nAvailable: {', '.join(VALID_MODELS)}",
-                parse_mode="Markdown",
-            )
-            return
-
-        current_model = new_model
-        bot_config["model"] = new_model
-        save_bot_config(bot_name, bot_config)
-        await update.effective_message.reply_text(
-            f"\U0001f9e0 Model changed to *{model_display_name(new_model)}*",
-            parse_mode="Markdown",
-        )
+        Falls back to the legacy Claude Code cancel paths so bots
+        that haven't yet talked to their backend (no cached
+        instance) still get cancelled.
+        """
+        backend = cached_backend(target_bot)
+        if backend is not None and await backend.cancel(target_key):
+            return True
+        if await cancel_sdk_session(target_key):
+            return True
+        if is_process_running(target_key) and cancel_process(target_key):
+            return True
+        return False
 
     async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /cancel command - stop running Claude Code process.
-
-        In group mode, only the orchestrator handles /cancel:
-        - Cancels all bots' running processes for this group chat
-        - Does not affect DM processes
-        In DM mode, cancels only this bot's process.
-        """
+        """Handle /cancel command - stop running Claude Code process."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        group_config = find_group_by_chat_id(chat_id)
-
-        async def _cancel_for(target_bot: str, target_key: str) -> bool:
-            """Cancel a bot's running task via its cached backend.
-
-            Falls back to the legacy Claude Code cancel paths so bots
-            that haven't yet talked to their backend (no cached
-            instance) still get cancelled.
-            """
-            backend = cached_backend(target_bot)
-            if backend is not None and await backend.cancel(target_key):
-                return True
-            if await cancel_sdk_session(target_key):
-                return True
-            if is_process_running(target_key) and cancel_process(target_key):
-                return True
-            return False
-
-        if group_config is not None:
-            my_role = get_my_role(group_config, bot_name)
-            if my_role != "orchestrator":
-                return  # Only orchestrator handles group /cancel
-
-            cancelled_bots: list[str] = []
-
-            orchestrator_key = f"{bot_name}:{chat_id}"
-            if await _cancel_for(bot_name, orchestrator_key):
-                cancelled_bots.append(bot_name)
-
-            for member_name in group_config.get("members", []):
-                member_key = f"{member_name}:{chat_id}"
-                if await _cancel_for(member_name, member_key):
-                    cancelled_bots.append(member_name)
-
-            if cancelled_bots:
-                names = ", ".join(cancelled_bots)
-                await update.effective_message.reply_text(f"\u26d4 Cancelled: {names}")
-            else:
-                await update.effective_message.reply_text("No running processes in group.")
-            return
-
-        session_key = f"{bot_name}:{chat_id}"
-        if await _cancel_for(bot_name, session_key):
-            await update.effective_message.reply_text("\u26d4 Execution cancelled.")
-            return
-
-        await update.effective_message.reply_text("No running process to cancel.")
+        outcome = await commands.cmd_cancel(
+            _make_context(update),
+            cancel_for=_cancel_for,
+        )
+        await _send_command_result(update, outcome.result)
 
     async def streaming_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /streaming command - toggle streaming mode on/off."""
         nonlocal streaming_enabled
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            status_text = "on" if streaming_enabled else "off"
-            text = (
-                f"\U0001f4e1 Streaming: *{status_text}*\n\n"
-                "Usage: `/streaming on` or `/streaming off`"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        value = context.args[0].lower()
-        if value == "on":
-            streaming_enabled = True
-            bot_config["streaming"] = True
-            save_bot_config(bot_name, bot_config)
-            await update.effective_message.reply_text(
-                "\U0001f4e1 Streaming enabled.", parse_mode="Markdown"
-            )
-        elif value == "off":
-            streaming_enabled = False
-            bot_config["streaming"] = False
-            save_bot_config(bot_name, bot_config)
-            await update.effective_message.reply_text(
-                "\U0001f4e1 Streaming disabled.", parse_mode="Markdown"
-            )
-        else:
-            await update.effective_message.reply_text(
-                "Usage: `/streaming on` or `/streaming off`",
-                parse_mode="Markdown",
-            )
+        result = await commands.cmd_streaming(_make_context(update, context.args))
+        streaming_enabled = bot_config.get("streaming", DEFAULT_STREAMING)
+        await _send_command_result(update, result)
 
     async def _send_non_streaming_response(
         update: Update,
@@ -967,20 +798,12 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
             if not await check_authorization(update):
                 return
             job_name = pending_cron_edits.pop(chat_id)
-            new_message = (update.effective_message.text or "").strip()
-            if not new_message:
-                await update.effective_message.reply_text("Edit cancelled (empty message).")
-                return
-
-            from abyss.cron import edit_cron_job_message
-
-            if edit_cron_job_message(bot_name, job_name, new_message):
-                await update.effective_message.reply_text(
-                    f"\u2705 Job `{job_name}` message updated.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
+            result = await commands.cmd_cron_edit_apply(
+                _make_context(update),
+                job_name,
+                update.effective_message.text or "",
+            )
+            await _send_command_result(update, result)
             return
 
         group_config = find_group_by_chat_id(chat_id)
@@ -1019,10 +842,8 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         """Handle /version command."""
         if not await check_authorization(update):
             return
-
-        from abyss import __version__
-
-        await update.effective_message.reply_text(f"\U00002139 abyss v{__version__}")
+        result = await commands.cmd_version(_make_context(update))
+        await _send_command_result(update, result)
 
     async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle photo/document messages - download to workspace and forward to Claude."""
@@ -1105,267 +926,41 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
         """Handle /memory command - show or clear bot memory."""
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            memory_content = load_bot_memory(bot_path)
-            if not memory_content:
-                await update.effective_message.reply_text("\U0001f9e0 No memories saved yet.")
-                return
-            html = markdown_to_telegram_html(memory_content)
-            chunks = split_message(html)
-            for chunk in chunks:
-                try:
-                    await update.effective_message.reply_text(chunk, parse_mode="HTML")
-                except Exception:
-                    await update.effective_message.reply_text(chunk)
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "clear":
-            clear_bot_memory(bot_path)
-            await update.effective_message.reply_text("\U0001f9e0 Memory cleared.")
-        else:
-            await update.effective_message.reply_text(
-                "Usage: `/memory` (show) or `/memory clear`",
-                parse_mode="Markdown",
-            )
+        result = await commands.cmd_memory(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def skills_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /skills command - list, attach, or detach skills."""
-        nonlocal attached_skills
+        """Handle /skills command - list, attach, or detach skills.
+
+        ``cmd_skills`` mutates ``bot_config['skills']`` in place, so any
+        downstream code reading ``bot_config`` (Claude prompt building,
+        CLAUDE.md regen) picks up the change without a closure cache.
+        """
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            from abyss.builtin_skills import list_builtin_skills
-            from abyss.skill import list_skills
-
-            installed_skills = list_skills()
-            installed_names = {skill["name"] for skill in installed_skills}
-            builtin_skills = list_builtin_skills()
-            not_installed_builtins = [
-                skill for skill in builtin_skills if skill["name"] not in installed_names
-            ]
-
-            if not installed_skills and not not_installed_builtins:
-                await update.effective_message.reply_text("\U0001f9e9 No skills available.")
-                return
-
-            builtin_names = {skill["name"] for skill in builtin_skills}
-            my_skills = set(attached_skills) if attached_skills else set()
-
-            my_attached = []
-            available = []
-            not_installed = []
-            for skill in installed_skills:
-                type_display = "builtin" if skill["name"] in builtin_names else "custom"
-                if skill["name"] in my_skills:
-                    my_attached.append(f"\u2705 `{skill['name']}` ({type_display})")
-                else:
-                    available.append(f"\u2796 `{skill['name']}` ({type_display})")
-
-            for skill in not_installed_builtins:
-                not_installed.append(f"\U0001f4e6 `{skill['name']}` (builtin)")
-
-            lines = ["\U0001f9e9 *Used Skills:*\n"]
-            if my_attached:
-                lines.extend(my_attached)
-            else:
-                lines.append("No skills attached.")
-            if available:
-                lines.append("")
-                lines.append("\U0001f4cb *Available:*\n")
-                lines.extend(available)
-            if not_installed:
-                lines.append("")
-                lines.append("\U0001f4e6 *Not Installed:*\n")
-                lines.extend(not_installed)
-            lines.append("")
-            lines.append("`/skills attach <name>` | `/skills detach <name>`")
-
-            await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "list":
-            if not attached_skills:
-                await update.effective_message.reply_text(
-                    "\U0001f9e9 No skills attached to this bot."
-                )
-                return
-            skill_list = "\n".join(f"  - {s}" for s in attached_skills)
-            await update.effective_message.reply_text(
-                f"\U0001f9e9 *Attached Skills:*\n```\n{skill_list}\n```",
-                parse_mode="Markdown",
-            )
-
-        elif subcommand == "attach":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/skills attach <name>`", parse_mode="Markdown"
-                )
-                return
-
-            from abyss.skill import attach_skill_to_bot, is_skill, skill_status
-
-            skill_name = context.args[1]
-            if not is_skill(skill_name):
-                await update.effective_message.reply_text(f"Skill '{skill_name}' not found.")
-                return
-
-            status = skill_status(skill_name)
-            if status == "inactive":
-                await update.effective_message.reply_text(
-                    f"Skill '{skill_name}' is inactive. "
-                    f"Run `abyss skills setup {skill_name}` first.",
-                    parse_mode="Markdown",
-                )
-                return
-
-            if skill_name in attached_skills:
-                await update.effective_message.reply_text(
-                    f"Skill '{skill_name}' is already attached."
-                )
-                return
-
-            attach_skill_to_bot(bot_name, skill_name)
-            bot_config.setdefault("skills", [])
-            if skill_name not in bot_config["skills"]:
-                bot_config["skills"].append(skill_name)
-            attached_skills = bot_config["skills"]
-            await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' attached.")
-
-        elif subcommand == "detach":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/skills detach <name>`", parse_mode="Markdown"
-                )
-                return
-
-            from abyss.skill import detach_skill_from_bot
-
-            skill_name = context.args[1]
-            if skill_name not in attached_skills:
-                await update.effective_message.reply_text(f"Skill '{skill_name}' is not attached.")
-                return
-
-            detach_skill_from_bot(bot_name, skill_name)
-            if skill_name in bot_config.get("skills", []):
-                bot_config["skills"].remove(skill_name)
-            attached_skills = bot_config.get("skills", [])
-            await update.effective_message.reply_text(f"\U0001f9e9 Skill '{skill_name}' detached.")
-
-        elif subcommand == "import":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/skills import <github-url>`", parse_mode="Markdown"
-                )
-                return
-
-            from abyss.skill import (
-                activate_skill,
-                attach_skill_to_bot,
-                check_skill_requirements,
-                import_skill_from_github,
-                parse_github_url,
-            )
-
-            github_url = context.args[1]
-            name_override = context.args[2] if len(context.args) > 2 else None
-
-            try:
-                directory = import_skill_from_github(github_url, name=name_override)
-                skill_name = directory.name
-                errors = check_skill_requirements(skill_name)
-                if not errors:
-                    activate_skill(skill_name)
-            except ValueError as error:
-                await update.effective_message.reply_text(f"\u274c Import failed: {error}")
-                return
-            except FileExistsError:
-                components = parse_github_url(github_url)
-                skill_name = name_override or components["repo"]
-
-            if skill_name not in attached_skills:
-                attach_skill_to_bot(bot_name, skill_name)
-                bot_config.setdefault("skills", [])
-                if skill_name not in bot_config["skills"]:
-                    bot_config["skills"].append(skill_name)
-                attached_skills = bot_config["skills"]
-
-            await update.effective_message.reply_text(
-                f"\U0001f9e9 Skill '{skill_name}' imported and attached."
-            )
-
-        else:
-            await update.effective_message.reply_text(
-                "Unknown subcommand. Use: list, attach, detach, import",
-            )
+        result = await commands.cmd_skills(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def cron_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /cron command - list or run cron jobs."""
+        """Handle /cron command — list / add / remove / enable / disable / run / edit.
+
+        Pure subcommands (list/add/remove/enable/disable) delegate to
+        ``commands.cmd_cron``. ``run`` (Telegram ``send_message`` callback)
+        and ``edit`` (ForceReply + ``pending_cron_edits``) stay here.
+        """
         if not await check_authorization(update):
             return
 
-        from abyss.cron import (
-            add_cron_job,
-            disable_cron_job,
-            enable_cron_job,
-            execute_cron_job,
-            generate_unique_job_name,
-            get_cron_job,
-            list_cron_jobs,
-            next_run_time,
-            parse_natural_language_schedule,
-            remove_cron_job,
-            resolve_default_timezone,
-        )
+        subcommand = context.args[0].lower() if context.args else ""
 
-        if not context.args:
-            text = (
-                "\u23f0 *Cron Commands:*\n\n"
-                "`/cron list` - Show cron jobs\n"
-                "`/cron add <description>` - Create a job\n"
-                "`/cron edit <name>` - Edit job message\n"
-                "`/cron run <name>` - Run a job now\n"
-                "`/cron remove <name>` - Remove a job\n"
-                "`/cron enable <name>` - Enable a job\n"
-                "`/cron disable <name>` - Disable a job"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "list":
-            jobs = list_cron_jobs(bot_name)
-            if not jobs:
-                await update.effective_message.reply_text("\u23f0 No cron jobs configured.")
-                return
-
-            lines = ["\u23f0 *Cron Jobs:*\n"]
-            for job in jobs:
-                enabled = job.get("enabled", True)
-                status_icon = "\u2705" if enabled else "\U0001f6d1"
-                schedule_display = job.get("schedule") or f"at: {job.get('at', 'N/A')}"
-                timezone_label = job.get("timezone", resolve_default_timezone())
-                next_time = next_run_time(job) if enabled else None
-                next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
-                message_preview = job.get("message", "")[:80]
-                lines.append(
-                    f"{status_icon} `{job['name']}` (`{schedule_display}` {timezone_label})\n"
-                    f"   Next: {next_display} | {message_preview}"
-                )
-            await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-        elif subcommand == "run":
+        if subcommand == "run":
             if len(context.args) < 2:
                 await update.effective_message.reply_text(
                     "Usage: `/cron run <name>`", parse_mode="Markdown"
                 )
                 return
+
+            from abyss.cron import execute_cron_job, get_cron_job
 
             job_name = context.args[1]
             cron_job = get_cron_job(bot_name, job_name)
@@ -1373,7 +968,7 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(f"Job '{job_name}' not found.")
                 return
 
-            await update.effective_message.reply_text(f"\u23f0 Running job '{job_name}'...")
+            await update.effective_message.reply_text(f"⏰ Running job '{job_name}'...")
 
             async def send_typing_periodically() -> None:
                 try:
@@ -1384,7 +979,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     pass
 
             typing_task = asyncio.create_task(send_typing_periodically())
-
             try:
                 await execute_cron_job(
                     bot_name=bot_name,
@@ -1396,199 +990,48 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(f"Job failed: {error}")
             finally:
                 typing_task.cancel()
+            return
 
-        elif subcommand == "add":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron add <description>`\n"
-                    "Example: `/cron add 매일 아침 9시에 이메일 요약해줘`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            user_input = " ".join(context.args[1:])
-            await update.effective_message.reply_text("\u23f0 Parsing schedule...")
-
-            try:
-                timezone_name = resolve_default_timezone()
-                parsed = await parse_natural_language_schedule(
-                    user_input,
-                    timezone_name,
-                )
-            except (ValueError, RuntimeError) as error:
-                await update.effective_message.reply_text(
-                    f"Failed to parse: {error}\n\n"
-                    "Example: `/cron add 매일 아침 9시에 이메일 요약해줘`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = generate_unique_job_name(bot_name, parsed["name"])
-
-            job: dict[str, Any] = {
-                "name": job_name,
-                "message": parsed["message"],
-                "timezone": timezone_name,
-                "enabled": True,
-            }
-
-            if parsed["type"] == "recurring":
-                job["schedule"] = parsed["schedule"]
-            else:
-                job["at"] = parsed["at"]
-                job["delete_after_run"] = True
-
-            try:
-                add_cron_job(bot_name, job)
-            except ValueError as error:
-                await update.effective_message.reply_text(f"Failed: {error}")
-                return
-
-            from abyss.cron import next_run_time as compute_next_run
-
-            next_time = compute_next_run(job)
-            next_display = next_time.strftime("%m-%d %H:%M") if next_time else "-"
-
-            if parsed["type"] == "recurring":
-                schedule_line = f"Schedule: `{parsed['schedule']}` ({timezone_name})"
-            else:
-                schedule_line = f"Run at: {parsed['at']} ({timezone_name})"
-
-            await update.effective_message.reply_text(
-                f"\u23f0 *Cron job created:*\n\n"
-                f"  Name: `{job_name}`\n"
-                f"  {schedule_line}\n"
-                f"  Message: {parsed['message']}\n"
-                f"  Next: {next_display}",
-                parse_mode="Markdown",
-            )
-
-        elif subcommand == "remove":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron remove <name>`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = context.args[1]
-            if remove_cron_job(bot_name, job_name):
-                await update.effective_message.reply_text(
-                    f"\u23f0 Job `{job_name}` removed.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
-
-        elif subcommand == "enable":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron enable <name>`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = context.args[1]
-            if enable_cron_job(bot_name, job_name):
-                await update.effective_message.reply_text(
-                    f"\u2705 Job `{job_name}` enabled.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
-
-        elif subcommand == "disable":
-            if len(context.args) < 2:
-                await update.effective_message.reply_text(
-                    "Usage: `/cron disable <name>`",
-                    parse_mode="Markdown",
-                )
-                return
-
-            job_name = context.args[1]
-            if disable_cron_job(bot_name, job_name):
-                await update.effective_message.reply_text(
-                    f"\U0001f6d1 Job `{job_name}` disabled.",
-                    parse_mode="Markdown",
-                )
-            else:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
-
-        elif subcommand == "edit":
+        if subcommand == "edit":
             if len(context.args) < 2:
                 await update.effective_message.reply_text(
                     "Usage: `/cron edit <name>`", parse_mode="Markdown"
                 )
                 return
-
             job_name = context.args[1]
-            cron_job = get_cron_job(bot_name, job_name)
-            if not cron_job:
-                await update.effective_message.reply_text(f"Job '{job_name}' not found.")
+            outcome = await commands.cmd_cron_edit_start(_make_context(update), job_name)
+            if isinstance(outcome, commands.CommandResult):
+                await _send_command_result(update, outcome)
                 return
-
-            current_message = cron_job.get("message", "")
-            pending_cron_edits[update.effective_chat.id] = job_name
+            pending_cron_edits[update.effective_chat.id] = outcome.job_name
             await update.effective_message.reply_text(
-                f"\u270f\ufe0f Job `{job_name}` current message:\n\n"
-                f"{current_message}\n\n"
-                "Send new message:",
+                outcome.prompt_text,
                 parse_mode="Markdown",
                 reply_markup=ForceReply(selective=True),
             )
+            return
 
-        else:
-            await update.effective_message.reply_text(
-                "Unknown subcommand. Use: list, add, edit, run, remove, enable, disable",
-            )
+        if subcommand == "add":
+            # Pre-message keeps the original Telegram UX while the
+            # Claude natural-language parse runs.
+            await update.effective_message.reply_text("⏰ Parsing schedule...")
+
+        result = await commands.cmd_cron(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def heartbeat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /heartbeat command - manage heartbeat settings."""
+        """Handle /heartbeat command - manage heartbeat settings.
+
+        ``status``/``on``/``off`` are delegated to ``commands.cmd_heartbeat``.
+        ``run`` requires a Telegram-specific ``send_message`` callback so
+        it stays in this adapter.
+        """
         if not await check_authorization(update):
             return
 
-        from abyss.heartbeat import (
-            disable_heartbeat,
-            enable_heartbeat,
-            execute_heartbeat,
-            get_heartbeat_config,
-        )
+        if context.args and context.args[0].lower() == "run":
+            from abyss.heartbeat import execute_heartbeat
 
-        if not context.args:
-            heartbeat_config = get_heartbeat_config(bot_name)
-            enabled = heartbeat_config.get("enabled", False)
-            interval = heartbeat_config.get("interval_minutes", 30)
-            active_hours = heartbeat_config.get("active_hours", {})
-            start = active_hours.get("start", "07:00")
-            end = active_hours.get("end", "23:00")
-            status_text = "on" if enabled else "off"
-            text = (
-                f"\U0001f493 *Heartbeat Status*\n\n"
-                f"Status: *{status_text}*\n"
-                f"Interval: {interval}m\n"
-                f"Active hours: {start} - {end}\n\n"
-                "`/heartbeat on` - Enable\n"
-                "`/heartbeat off` - Disable\n"
-                "`/heartbeat run` - Run now"
-            )
-            await update.effective_message.reply_text(text, parse_mode="Markdown")
-            return
-
-        subcommand = context.args[0].lower()
-
-        if subcommand == "on":
-            if enable_heartbeat(bot_name):
-                await update.effective_message.reply_text("\U0001f493 Heartbeat enabled.")
-            else:
-                await update.effective_message.reply_text("Failed to enable heartbeat.")
-
-        elif subcommand == "off":
-            if disable_heartbeat(bot_name):
-                await update.effective_message.reply_text("\U0001f493 Heartbeat disabled.")
-            else:
-                await update.effective_message.reply_text("Failed to disable heartbeat.")
-
-        elif subcommand == "run":
             await update.effective_message.reply_text("\U0001f493 Running heartbeat check...")
 
             async def send_typing_periodically() -> None:
@@ -1600,7 +1043,6 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                     pass
 
             typing_task = asyncio.create_task(send_typing_periodically())
-
             try:
                 await execute_heartbeat(
                     bot_name=bot_name,
@@ -1612,35 +1054,26 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 await update.effective_message.reply_text(f"Heartbeat failed: {error}")
             finally:
                 typing_task.cancel()
+            return
 
-        else:
-            await update.effective_message.reply_text(
-                "Unknown subcommand. Use: on, off, run",
-            )
+        result = await commands.cmd_heartbeat(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def compact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /compact command — compress MD files to save tokens."""
+        """Handle /compact command — compress MD files to save tokens.
+
+        Pre-message + typing indicator stay here; the actual collect →
+        run → save → regen pipeline lives in ``commands.cmd_compact_*``.
+        """
         if not await check_authorization(update):
             return
 
-        from abyss.token_compact import (
-            collect_compact_targets,
-            format_compact_report,
-            run_compact,
-            save_compact_results,
-        )
-
-        targets = collect_compact_targets(bot_name)
-        if not targets:
-            await update.effective_message.reply_text("No compactable files found.")
+        ctx = _make_context(update, context.args)
+        preview = await commands.cmd_compact_preview(ctx)
+        if not preview.targets:
+            await update.effective_message.reply_text(preview.text)
             return
-
-        target_list = "\n".join(
-            f"  - {t.label} ({t.line_count} lines, ~{t.token_count:,} tokens)" for t in targets
-        )
-        await update.effective_message.reply_text(
-            f"\U0001f4e6 Found {len(targets)} file(s) to compact:\n{target_list}\n\nCompacting..."
-        )
+        await update.effective_message.reply_text(preview.text)
 
         async def send_typing_periodically() -> None:
             try:
@@ -1651,93 +1084,26 @@ def make_handlers(bot_name: str, bot_path: Path, bot_config: dict[str, Any]) -> 
                 pass
 
         typing_task = asyncio.create_task(send_typing_periodically())
-
         try:
-            results = await run_compact(bot_name, model=current_model)
-            report = format_compact_report(bot_name, results)
-
-            for chunk in split_message(report):
+            result = await commands.cmd_compact_run(ctx)
+            for chunk in split_message(result.text):
                 await update.effective_message.reply_text(chunk)
-
-            successful = [r for r in results if r.error is None]
-            if successful:
-                save_compact_results(results)
-
-                from abyss.skill import regenerate_bot_claude_md, update_session_claude_md
-
-                regenerate_bot_claude_md(bot_name)
-                update_session_claude_md(bot_path)
-                await update.effective_message.reply_text("\u2705 Compacted files saved.")
-            else:
-                await update.effective_message.reply_text("No files were successfully compacted.")
-        except Exception as error:
-            await update.effective_message.reply_text(f"Compact failed: {error}")
         finally:
             typing_task.cancel()
 
     async def bind_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /bind command — bind a group to a Telegram chat.
-
-        Only the orchestrator bot of the specified group processes this command.
-        Other bots in the group silently ignore it.
-        """
+        """Handle /bind command — bind a group to a Telegram chat."""
         if not await check_authorization(update):
             return
-
-        if not context.args:
-            await update.effective_message.reply_text(
-                "Usage: `/bind <group_name>`", parse_mode="Markdown"
-            )
-            return
-
-        group_name = context.args[0]
-        group_config = load_group_config(group_name)
-
-        if group_config is None:
-            await update.effective_message.reply_text(f"Group '{group_name}' not found.")
-            return
-
-        my_role = get_my_role(group_config, bot_name)
-        if my_role != "orchestrator":
-            # Not the orchestrator — silently ignore
-            return
-
-        chat_id = update.effective_chat.id
-        try:
-            bind_group(group_name, chat_id)
-        except ValueError as error:
-            await update.effective_message.reply_text(f"Bind failed: {error}")
-            return
-
-        # Build member list display
-        members_display = ", ".join(group_config.get("members", []))
-        await update.effective_message.reply_text(
-            f"Group '{group_name}' activated.\nOrchestrator: {bot_name}\nMembers: {members_display}"
-        )
+        result = await commands.cmd_bind(_make_context(update, context.args))
+        await _send_command_result(update, result)
 
     async def unbind_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /unbind command — remove group binding from this chat.
-
-        Only the orchestrator of the bound group processes this command.
-        """
+        """Handle /unbind command — remove group binding from this chat."""
         if not await check_authorization(update):
             return
-
-        chat_id = update.effective_chat.id
-        group_config = find_group_by_chat_id(chat_id)
-
-        if group_config is None:
-            await update.effective_message.reply_text("No group is bound to this chat.")
-            return
-
-        my_role = get_my_role(group_config, bot_name)
-        if my_role != "orchestrator":
-            # Not the orchestrator — silently ignore
-            return
-
-        group_name = group_config["name"]
-        unbind_group(group_name)
-        await update.effective_message.reply_text(f"Group '{group_name}' unbound from this chat.")
+        result = await commands.cmd_unbind(_make_context(update))
+        await _send_command_result(update, result)
 
     handlers = [
         CommandHandler("start", start_handler),

@@ -27,6 +27,17 @@ import { WorkspaceTree } from "./workspace-tree";
 interface ConversationMessage extends ChatMessageType {
   id: string;
   streaming?: boolean;
+  /**
+   * Slash commands like ``/send`` return a downloadable file
+   * alongside (or instead of) text. Populated from the stream
+   * hook's ``commandFile`` field so the assistant bubble can show
+   * a tappable download chip.
+   */
+  commandFile?: {
+    name: string;
+    path: string;
+    url: string;
+  } | null;
 }
 
 interface Props {
@@ -257,7 +268,12 @@ export function ChatView({ initialBots, apiOnline }: Props) {
     updateSessionMessages(session.id, (prev) =>
       prev.map((message) =>
         message.id === assistantId
-          ? { ...message, content: final, streaming: false }
+          ? {
+              ...message,
+              content: final.text,
+              commandFile: final.commandFile ?? null,
+              streaming: false,
+            }
           : message
       )
     );
@@ -477,6 +493,7 @@ export function ChatView({ initialBots, apiOnline }: Props) {
                   activeSession?.bot_display_name ?? activeSession?.bot ?? null
                 }
                 attachments={message.attachments}
+                commandFile={message.commandFile ?? null}
                 timestamp={message.timestamp}
               />
             ))}

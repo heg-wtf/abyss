@@ -134,7 +134,7 @@ async def test_reset_handler(bot_path, bot_config, mock_update):
     handlers = make_handlers("test-bot", bot_path, bot_config)
     reset_handler = handlers[2]
 
-    with patch("abyss.handlers.reset_session") as mock_reset:
+    with patch("abyss.commands.reset_session") as mock_reset:
         await reset_handler.callback(mock_update, MagicMock())
         mock_reset.assert_called_once_with(bot_path, 67890)
 
@@ -268,7 +268,7 @@ async def test_model_handler_change_model(bot_path, bot_config, mock_update):
     mock_context = MagicMock()
     mock_context.args = ["opus"]
 
-    with patch("abyss.handlers.save_bot_config") as mock_save:
+    with patch("abyss.commands.save_bot_config") as mock_save:
         await model_handler.callback(mock_update, mock_context)
         mock_save.assert_called_once()
         saved_config = mock_save.call_args[0][1]
@@ -386,6 +386,7 @@ async def test_skills_handler_list_attached_empty(bot_path, bot_config, mock_upd
 @pytest.mark.asyncio
 async def test_skills_handler_attach(bot_path, bot_config, mock_update):
     """Skills handler attach adds a skill."""
+    bot_config["skills"] = []
     handlers = make_handlers("test-bot", bot_path, bot_config)
     skills_handler = handlers[12]
 
@@ -397,10 +398,10 @@ async def test_skills_handler_attach(bot_path, bot_config, mock_update):
         patch("abyss.skill.skill_status", return_value="active"),
         patch("abyss.skill.attach_skill_to_bot") as mock_attach,
     ):
-        bot_config["skills"] = ["test-skill"]
         await skills_handler.callback(mock_update, mock_context)
         mock_attach.assert_called_once_with("test-bot", "test-skill")
 
+    assert "test-skill" in bot_config["skills"]
     call_text = mock_update.message.reply_text.call_args[0][0]
     assert "attached" in call_text
 
@@ -432,10 +433,10 @@ async def test_skills_handler_detach(bot_path, bot_config, mock_update):
     mock_context.args = ["detach", "test-skill"]
 
     with patch("abyss.skill.detach_skill_from_bot") as mock_detach:
-        bot_config["skills"] = []
         await skills_handler.callback(mock_update, mock_context)
         mock_detach.assert_called_once_with("test-bot", "test-skill")
 
+    assert "test-skill" not in bot_config["skills"]
     call_text = mock_update.message.reply_text.call_args[0][0]
     assert "detached" in call_text
 
@@ -554,7 +555,7 @@ async def test_streaming_handler_on(bot_path, bot_config, mock_update):
     mock_context = MagicMock()
     mock_context.args = ["on"]
 
-    with patch("abyss.handlers.save_bot_config") as mock_save:
+    with patch("abyss.commands.save_bot_config") as mock_save:
         await streaming_handler.callback(mock_update, mock_context)
         mock_save.assert_called_once()
         saved_config = mock_save.call_args[0][1]
@@ -574,7 +575,7 @@ async def test_streaming_handler_off(bot_path, bot_config, mock_update):
     mock_context = MagicMock()
     mock_context.args = ["off"]
 
-    with patch("abyss.handlers.save_bot_config") as mock_save:
+    with patch("abyss.commands.save_bot_config") as mock_save:
         await streaming_handler.callback(mock_update, mock_context)
         mock_save.assert_called_once()
         saved_config = mock_save.call_args[0][1]

@@ -12,6 +12,9 @@ Endpoints
 ``POST /chat``
     Body: ``{"bot": str, "session_id": str, "message": str}``. Returns
     ``text/event-stream`` with ``chunk``/``done``/``error`` events.
+    Messages starting with ``/`` are routed through ``abyss.commands``
+    instead of the LLM and emit a single ``command_result`` SSE event
+    followed by ``done`` — see ``/chat/commands`` for the catalog.
 
 ``POST /chat/cancel``
     Body: ``{"bot": str, "session_id": str}``. Cancels the in-flight backend
@@ -19,6 +22,10 @@ Endpoints
 
 ``GET /chat/bots``
     Returns ``{"bots": [{"name", "display_name", "type"}, ...]}``.
+
+``GET /chat/commands``
+    Returns ``{"commands": [{"name", "description", "usage"}, ...]}``
+    — the slash-command catalog for autocomplete UIs.
 
 ``GET /chat/sessions?bot=<name>``
     Returns ``{"sessions": [{"id", "bot", "updated_at", "preview"}, ...]}``
@@ -29,6 +36,10 @@ Endpoints
 
 ``DELETE /chat/sessions/<bot>/<session_id>``
     Removes the session directory.
+
+``POST /chat/sessions/<bot>/<session_id>/rename``
+    Body: ``{"name": str}``. Stores a user-facing name in
+    ``<session_dir>/.session_meta.json``. Empty name clears the field.
 
 ``GET /chat/sessions/<bot>/<session_id>/messages``
     Returns ``{"messages": [{"role", "content", "timestamp"}, ...]}``.
@@ -62,7 +73,13 @@ from typing import Any
 import aiohttp
 from aiohttp import web
 
+from abyss import commands
 from abyss.chat_core import process_chat_message
+from abyss.claude_runner import (
+    cancel_process,
+    cancel_sdk_session,
+    is_process_running,
+)
 from abyss.config import (
     abyss_home,
     bot_directory,
@@ -70,7 +87,7 @@ from abyss.config import (
     load_bot_config,
     load_config,
 )
-from abyss.llm import get_or_create
+from abyss.llm import cached_backend, get_or_create
 from abyss.session import (
     WEB_SESSION_PREFIX,
     collect_web_session_ids,
@@ -347,6 +364,56 @@ def _bot_display_name(bot_name: str) -> str:
     return cfg.get("display_name") or cfg.get("telegram_botname") or bot_name
 
 
+# ---------------------------------------------------------------------------
+# Per-session user metadata (custom name, …)
+# ---------------------------------------------------------------------------
+
+_SESSION_META_FILENAME = ".session_meta.json"
+MAX_CUSTOM_NAME_LENGTH = 64
+
+
+def _session_meta_path(session_dir: Path) -> Path:
+    return session_dir / _SESSION_META_FILENAME
+
+
+def _load_session_meta(session_dir: Path) -> dict[str, Any]:
+    """Read the user-controlled per-session metadata.
+
+    Currently only stores ``custom_name``; the file is small and lives
+    inside the session directory so deleting the session also removes
+    the name automatically.
+    """
+    meta_path = _session_meta_path(session_dir)
+    if not meta_path.exists():
+        return {}
+    try:
+        return json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_session_meta(session_dir: Path, meta: dict[str, Any]) -> None:
+    """Persist user metadata atomically (write tmp + rename)."""
+    meta_path = _session_meta_path(session_dir)
+    tmp = meta_path.with_suffix(".json.tmp")
+    payload = json.dumps(meta, ensure_ascii=False, indent=2)
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(meta_path)
+
+
+def _sanitise_custom_name(raw: str) -> str:
+    """Trim whitespace + strip control characters; cap length.
+
+    Empty result means "remove the custom name". The caller decides
+    whether to delete the field or reject the request.
+    """
+    cleaned = "".join(ch for ch in raw if ch == " " or ch.isprintable())
+    cleaned = cleaned.strip()
+    if len(cleaned) > MAX_CUSTOM_NAME_LENGTH:
+        cleaned = cleaned[:MAX_CUSTOM_NAME_LENGTH].rstrip()
+    return cleaned
+
+
 def _session_metadata(
     bot_name: str,
     session_dir: Path,
@@ -374,12 +441,14 @@ def _session_metadata(
     except OSError:
         mtime = 0.0
 
+    meta = _load_session_meta(session_dir)
     return {
         "id": session_dir.name,
         "bot": bot_name,
         "bot_display_name": bot_display_name or _bot_display_name(bot_name),
         "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
         "preview": preview,
+        "custom_name": meta.get("custom_name") or None,
     }
 
 
@@ -425,9 +494,14 @@ class ChatServer:
         router.add_post("/chat", self._handle_chat)
         router.add_post("/chat/cancel", self._handle_cancel)
         router.add_get("/chat/bots", self._handle_list_bots)
+        router.add_get("/chat/commands", self._handle_list_commands)
         router.add_get("/chat/sessions", self._handle_list_sessions)
         router.add_post("/chat/sessions", self._handle_create_session)
         router.add_delete("/chat/sessions/{bot}/{session_id}", self._handle_delete_session)
+        router.add_post(
+            "/chat/sessions/{bot}/{session_id}/rename",
+            self._handle_rename_session,
+        )
         router.add_get("/chat/sessions/{bot}/{session_id}/messages", self._handle_get_messages)
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
@@ -543,6 +617,7 @@ class ChatServer:
                 "bot_display_name": _bot_display_name(bot_name),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "preview": "",
+                "custom_name": None,
             }
         )
 
@@ -555,6 +630,43 @@ class ChatServer:
         with suppress(Exception):
             shutil.rmtree(session_dir)
         return web.json_response({"deleted": True})
+
+    async def _handle_rename_session(self, request: web.Request) -> web.Response:
+        """Set or clear a session's user-facing ``custom_name``.
+
+        Body: ``{"name": str}``. An empty / whitespace-only ``name``
+        clears the field so the UI falls back to the bot display name.
+        """
+        bot_name = request.match_info["bot"]
+        session_id = request.match_info["session_id"]
+        session_dir = _resolve_session_dir(bot_name, session_id)
+        if not session_dir.exists():
+            return web.json_response({"error": "session not found"}, status=404)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        raw_name = body.get("name")
+        if not isinstance(raw_name, str):
+            return web.json_response({"error": "name must be a string"}, status=400)
+
+        cleaned = _sanitise_custom_name(raw_name)
+        meta = _load_session_meta(session_dir)
+        if cleaned:
+            meta["custom_name"] = cleaned
+        else:
+            meta.pop("custom_name", None)
+        _save_session_meta(session_dir, meta)
+
+        return web.json_response(
+            {
+                "id": session_id,
+                "bot": bot_name,
+                "custom_name": meta.get("custom_name") or None,
+            }
+        )
 
     async def _handle_get_messages(self, request: web.Request) -> web.Response:
         bot_name = request.match_info["bot"]
@@ -622,6 +734,17 @@ class ChatServer:
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "workspace").mkdir(exist_ok=True)
 
+        # Slash commands bypass the LLM entirely.
+        if message.startswith("/") and not raw_attachments:
+            return await self._handle_slash_command(
+                request=request,
+                bot_name=bot_name,
+                bot_path=bot_path,
+                bot_config=bot_config,
+                session_id=session_id,
+                message=message,
+            )
+
         try:
             attachment_paths = self._resolve_attachments(session_dir, raw_attachments)
         except web.HTTPException as exc:
@@ -670,6 +793,212 @@ class ChatServer:
             with suppress(Exception):
                 await _sse_write(sse, {"type": "error", "message": str(error)})
         return sse
+
+    # ------------------------------------------------------------------
+    # Slash commands
+    # ------------------------------------------------------------------
+
+    async def _handle_list_commands(self, _request: web.Request) -> web.Response:
+        """Expose the slash command catalog for dashboard autocomplete."""
+
+        return web.json_response(
+            {
+                "commands": [
+                    {
+                        "name": spec.name,
+                        "description": spec.description,
+                        "usage": spec.usage,
+                    }
+                    for spec in commands.COMMAND_CATALOG
+                ]
+            }
+        )
+
+    async def _cancel_for_dashboard(self, target_bot: str, session_key: str) -> bool:
+        """Cancel primitive shared by ``cmd_cancel`` and ``/chat/cancel``.
+
+        Mirrors the Telegram adapter: backend.cancel → SDK session cancel
+        → subprocess cancel, returning ``True`` when any path succeeds.
+        """
+
+        backend = cached_backend(target_bot)
+        if backend is not None and await backend.cancel(session_key):
+            return True
+        if await cancel_sdk_session(session_key):
+            return True
+        if is_process_running(session_key) and cancel_process(session_key):
+            return True
+        return False
+
+    async def _handle_slash_command(
+        self,
+        *,
+        request: web.Request,
+        bot_name: str,
+        bot_path: Path,
+        bot_config: dict[str, Any],
+        session_id: str,
+        message: str,
+    ) -> web.StreamResponse:
+        """Dispatch ``/<name> <args...>`` to ``abyss.commands``.
+
+        The result is streamed back as a single SSE pair (``command_result``
+        + ``done``) so the dashboard UI handles slash replies uniformly
+        with regular streaming replies.
+        """
+
+        parts = message.split(maxsplit=1)
+        command_name = parts[0][1:].lower()  # strip leading '/'
+        args = parts[1].split() if len(parts) > 1 else []
+
+        sse = web.StreamResponse(
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            }
+        )
+        await sse.prepare(request)
+
+        ctx = commands.CommandContext(
+            bot_name=bot_name,
+            bot_path=bot_path,
+            bot_config=bot_config,
+            chat_id=session_id,
+            args=args,
+        )
+
+        try:
+            text, file_info = await self._run_dashboard_command(
+                command_name, ctx, bot_name=bot_name, session_id=session_id
+            )
+            payload: dict[str, Any] = {
+                "type": "command_result",
+                "command": command_name,
+                "text": text,
+            }
+            if file_info is not None:
+                payload["file"] = file_info
+            await _sse_write(sse, payload)
+            await _sse_write(sse, {"type": "done", "text": text})
+        except Exception as error:  # noqa: BLE001
+            logger.error(
+                "chat_server: slash failed bot=%s session=%s cmd=%s: %s",
+                bot_name,
+                session_id,
+                command_name,
+                error,
+            )
+            with suppress(Exception):
+                await _sse_write(sse, {"type": "error", "message": str(error)})
+        return sse
+
+    async def _run_dashboard_command(
+        self,
+        command_name: str,
+        ctx: commands.CommandContext,
+        *,
+        bot_name: str,
+        session_id: str,
+    ) -> tuple[str, dict[str, Any] | None]:
+        """Run a single slash command and return ``(text, file_info)``.
+
+        Returns ``("", file_info)`` when the command produced a file
+        (``/send``); the dashboard can then offer the file as a download
+        link via ``/chat/sessions/{bot}/{session_id}/file/{name}``.
+        Returns ``(text, None)`` for text-only commands.
+        Unknown commands raise ``LookupError`` so the caller surfaces an
+        error event.
+        """
+
+        # Read-only / trivial commands.
+        if command_name == "start":
+            result = await commands.cmd_start(ctx)
+        elif command_name == "help":
+            result = await commands.cmd_help(ctx)
+        elif command_name == "version":
+            result = await commands.cmd_version(ctx)
+        elif command_name == "status":
+            result = await commands.cmd_status(ctx)
+        elif command_name == "files":
+            result = await commands.cmd_files(ctx)
+        elif command_name == "memory":
+            result = await commands.cmd_memory(ctx)
+        elif command_name == "model":
+            result = await commands.cmd_model(ctx)
+        elif command_name == "streaming":
+            result = await commands.cmd_streaming(ctx)
+        elif command_name == "reset":
+            outcome = await commands.cmd_reset(ctx)
+            await self._close_pool_sessions(outcome.affected_bots, session_id)
+            result = outcome.result
+        elif command_name == "resetall":
+            result = await commands.cmd_resetall(ctx)
+            await self._close_pool_sessions([bot_name], session_id)
+        elif command_name == "cancel":
+            outcome = await commands.cmd_cancel(ctx, cancel_for=self._cancel_for_dashboard)
+            result = outcome.result
+        elif command_name == "send":
+            result = await commands.cmd_send(ctx)
+            if result.file_path is not None:
+                relative = result.file_path.relative_to(
+                    ctx.bot_path / "sessions" / session_id / "workspace"
+                )
+                return "", {
+                    "name": result.file_path.name,
+                    "path": str(relative),
+                    "url": (f"/chat/sessions/{bot_name}/{session_id}/file/{result.file_path.name}"),
+                }
+        elif command_name == "skills":
+            result = await commands.cmd_skills(ctx)
+        elif command_name == "heartbeat":
+            # ``/heartbeat run`` requires Telegram's send_message callback.
+            # Status / on / off work; ``run`` falls back to a clear hint.
+            if ctx.args and ctx.args[0].lower() == "run":
+                return (
+                    "⚠️ /heartbeat run requires the Telegram bot. Use the Telegram chat for now."
+                ), None
+            result = await commands.cmd_heartbeat(ctx)
+        elif command_name == "compact":
+            preview = await commands.cmd_compact_preview(ctx)
+            if not preview.targets:
+                return preview.text, None
+            run_result = await commands.cmd_compact_run(ctx)
+            return f"{preview.text}\n\n{run_result.text}", None
+        elif command_name == "cron":
+            # ``run`` (needs Telegram send_message) and ``edit`` (multi-step)
+            # are not available on the dashboard yet — fall back with a hint.
+            sub = ctx.args[0].lower() if ctx.args else ""
+            if sub in {"run", "edit"}:
+                return (
+                    f"⚠️ /cron {sub} requires the Telegram bot. Use the Telegram chat for now."
+                ), None
+            result = await commands.cmd_cron(ctx)
+        elif command_name in {"bind", "unbind"}:
+            return (
+                f"⚠️ /{command_name} is not yet available on the dashboard. "
+                "Use the Telegram bot for now."
+            ), None
+        else:
+            raise LookupError(f"unknown command: /{command_name}")
+
+        return result.text, None
+
+    async def _close_pool_sessions(self, bot_names: list[str], session_id: str) -> None:
+        """Close SDK pool sessions for the given bots after a reset.
+
+        Mirrors the Telegram adapter's post-reset cleanup so dashboard
+        users see a fresh Claude session next message.
+        """
+
+        from abyss.sdk_client import get_pool, is_sdk_available
+
+        if not is_sdk_available():
+            return
+        pool = get_pool()
+        for bot in bot_names:
+            await pool.close_session(f"{bot}:{session_id}")
 
     # ------------------------------------------------------------------
     # Attachments

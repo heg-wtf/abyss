@@ -1,0 +1,246 @@
+/**
+ * Source-level regression guards for the `/mobile` route skeleton.
+ *
+ * Vitest runs in node env without a DOM, so these checks are
+ * intentionally static — they assert the load-bearing snippets in the
+ * mobile entry points still match the Phase 2 contract:
+ *
+ *   - the mobile layout reserves safe-area-inset padding,
+ *   - the sidebar shorts out on `/mobile/*` routes,
+ *   - the index page redirects to the sessions list,
+ *   - the sessions page wires the Phase 2 placeholder screen.
+ */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+const ROOT = path.resolve(__dirname, "..", "..", "..");
+
+function read(relPath: string): string {
+  return readFileSync(path.join(ROOT, relPath), "utf8");
+}
+
+describe("/mobile route skeleton", () => {
+  it("layout grows to the dynamic viewport with safe-area padding", () => {
+    const source = read("app/mobile/layout.tsx");
+    // ``-m-6`` cancels the desktop main's ``p-6`` padding, ``h-dvh``
+    // hugs the iOS Safari dynamic viewport (handles the collapsing
+    // address bar). We intentionally avoid ``position: fixed`` here
+    // because iOS Safari pushes ``fixed`` containers off screen when
+    // the soft keyboard opens — the "blank page on mobile" symptom
+    // from the first real-device pass.
+    expect(source).toMatch(/-m-6/);
+    expect(source).toMatch(/h-dvh/);
+    expect(source).toMatch(/safe-area-inset-top/);
+    expect(source).toMatch(/safe-area-inset-bottom/);
+    expect(source).not.toMatch(/fixed inset-0/);
+  });
+
+  it("root path auto-redirects mobile user agents to /mobile/sessions", () => {
+    const source = read("middleware.ts");
+    expect(source).toMatch(/Mobi\|Android\|iPhone/);
+    expect(source).toMatch(/\/mobile\/sessions/);
+    // ``?desktop=1`` opts out so the heatmap stays accessible from
+    // the phone when needed.
+    expect(source).toMatch(/desktop.*===.*"1"/);
+  });
+
+  it("layout exports a mobile viewport config", () => {
+    const source = read("app/mobile/layout.tsx");
+    expect(source).toMatch(/export const viewport/);
+    expect(source).toMatch(/initialScale: 1/);
+    expect(source).toMatch(/viewportFit: "cover"/);
+  });
+
+  it("index page redirects to /mobile/sessions", () => {
+    const source = read("app/mobile/page.tsx");
+    expect(source).toMatch(/redirect\("\/mobile\/sessions"\)/);
+  });
+
+  it("sessions page fetches bots server-side and renders the screen", () => {
+    const source = read("app/mobile/sessions/page.tsx");
+    expect(source).toMatch(/listChatBots/);
+    expect(source).toMatch(/MobileSessionsScreen/);
+    expect(source).toMatch(/force-dynamic/);
+  });
+
+  it("sidebar short-circuits on /mobile to free the viewport", () => {
+    const source = read("components/sidebar.tsx");
+    expect(source).toMatch(/pathname\.startsWith\("\/mobile"\)/);
+    // The early return lives in the public wrapper so React's
+    // rules-of-hooks invariant is preserved.
+    expect(source).toMatch(/function SidebarImpl/);
+  });
+
+  it("mobile sessions screen wires bot picker, rename, and delete flows", () => {
+    const source = read("components/mobile/mobile-sessions-screen.tsx");
+    // Bot picker uses base-ui Menu (matches the desktop chat-session-list).
+    expect(source).toMatch(/Menu\.Root/);
+    // Client-side fetches MUST hit the Next.js proxy (``/api/chat/...``)
+    // and not the ``abyss-api`` helpers that point at the
+    // ``127.0.0.1:3848`` sidecar — on a phone, ``127.0.0.1`` is the
+    // phone, not the Mac, so direct calls silently fail.
+    expect(source).toMatch(/fetch\(\s*`\/api\/chat\/sessions\?bot=/);
+    expect(source).toMatch(/fetch\("\/api\/chat\/sessions"/);
+    expect(source).toMatch(/\/api\/chat\/sessions\/\$\{[^}]+bot[^}]*\}\/\$\{[^}]+id[^}]*\}/);
+    expect(source).toMatch(/\/rename/);
+    expect(source).not.toMatch(/listChatSessions\(/);
+    expect(source).not.toMatch(/renameChatSession\(/);
+    expect(source).not.toMatch(/deleteChatSession\(/);
+    expect(source).not.toMatch(/createChatSession\(/);
+    // Long-press contract: touchstart + touchend cancel.
+    expect(source).toMatch(/useLongPress/);
+    expect(source).toMatch(/onTouchStart/);
+    expect(source).toMatch(/onTouchEnd/);
+    // Custom name takes priority over bot display name.
+    expect(source).toMatch(/session\.custom_name/);
+  });
+
+  it("api helper exposes renameChatSession and proxy route exists", () => {
+    const api = read("lib/abyss-api.ts");
+    expect(api).toMatch(/renameChatSession/);
+    expect(api).toMatch(/custom_name/);
+    const proxy = read(
+      "app/api/chat/sessions/[bot]/[id]/rename/route.ts"
+    );
+    expect(proxy).toMatch(/export async function POST/);
+    expect(proxy).toMatch(/renameChatSession\(bot, id/);
+  });
+
+  it("chat screen renders header + input bar + workspace + slash sheets", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Header has back link to sessions list and workspace toggle.
+    expect(source).toMatch(/href="\/mobile\/sessions"/);
+    expect(source).toMatch(/aria-label="Workspace files"/);
+    // Input bar order: slash, attach, textarea, send/voice toggle.
+    expect(source).toMatch(/aria-label="Slash commands"/);
+    expect(source).toMatch(/aria-label="Attach file"/);
+    expect(source).toMatch(/aria-label="Send message"/);
+    expect(source).toMatch(/aria-label="Voice/);
+    // Workspace sheet reuses the existing WorkspaceTree component.
+    expect(source).toMatch(/WorkspaceTree/);
+    // Slash command sheet hits the catalog endpoint.
+    expect(source).toMatch(/\/api\/chat\/commands/);
+    // Streaming hook is reused from desktop so SSE handling stays in
+    // one place.
+    expect(source).toMatch(/useMultiSessionChatStream/);
+  });
+
+  it("chat page resolves session server-side with 404 fallback", () => {
+    const source = read("app/mobile/chat/[bot]/[sessionId]/page.tsx");
+    expect(source).toMatch(/listChatSessions/);
+    expect(source).toMatch(/notFound\(\)/);
+    expect(source).toMatch(/MobileChatScreen/);
+  });
+
+  it("slash commands proxy route exists", () => {
+    const source = read("app/api/chat/commands/route.ts");
+    expect(source).toMatch(/export async function GET/);
+    expect(source).toMatch(/listSlashCommands/);
+  });
+
+  it("stream hook handles command_result events", () => {
+    const source = read("components/chat/use-chat-stream.ts");
+    expect(source).toMatch(/event\.type === "command_result"/);
+  });
+
+  it("ChatEvent type includes command_result with optional file payload", () => {
+    const source = read("lib/abyss-api.ts");
+    expect(source).toMatch(/type: "command_result"/);
+    expect(source).toMatch(/file\?: \{ name: string; path: string; url: string \}/);
+  });
+
+  it("chat screen renders assistant replies through ReactMarkdown", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Markdown rendering shares the desktop `prose prose-sm`
+    // typography setup so headings / lists / links / code blocks
+    // render the same on both surfaces.
+    expect(source).toMatch(/import ReactMarkdown from "react-markdown"/);
+    expect(source).toMatch(/function MarkdownBody/);
+    expect(source).toMatch(/prose prose-sm/);
+    // User bubbles stay as plain pre-wrap text — only the assistant
+    // side parses markdown.
+    expect(source).toMatch(/isUser \? \(\s*<div className="whitespace-pre-wrap">/);
+  });
+
+  it("chat screen hides the textarea scrollbar across browser engines", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    expect(source).toMatch(/\[&::-webkit-scrollbar\]:hidden/);
+    expect(source).toMatch(/scrollbarWidth: "none"/);
+    expect(source).toMatch(/msOverflowStyle: "none"/);
+  });
+
+  it("chat screen jumps to the latest message on first paint", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Long transcripts should not smooth-scroll from the top down on
+    // entry. First paint uses ``instant`` so the user lands on the
+    // newest reply immediately; subsequent updates stay smooth.
+    expect(source).toMatch(/firstScrollRef/);
+    expect(source).toMatch(/behavior: "instant"/);
+    expect(source).toMatch(/useLayoutEffect/);
+  });
+
+  it("stream hook forwards command_result file payload to the caller", () => {
+    const source = read("components/chat/use-chat-stream.ts");
+    // The hook must thread ``event.file`` through to the caller —
+    // dropping it makes ``/send <filename>`` render as a blank
+    // assistant bubble (codex P1 review on PR #50).
+    expect(source).toMatch(/event\.file \?\? null/);
+    // SendResult is the new return shape; both surfaces consume it.
+    expect(source).toMatch(/SendResult/);
+    expect(source).toMatch(/commandFile/);
+  });
+
+  it("optimistic attachment URLs use the stored real_name, not the original filename", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // ``uploaded.path`` is ``uploads/<uuid>__<name>``; the file
+    // endpoint expects the ``<uuid>__<name>`` portion. Previous
+    // revisions used ``display_name`` and produced 404 links until
+    // the chat reloaded from history (codex P2 review on PR #50).
+    expect(source).toMatch(/startsWith\("uploads\/"\)/);
+    expect(source).toMatch(/realName/);
+    expect(source).not.toMatch(/url: attachmentUrl\([^,]+,\s*[^,]+,\s*p\.uploaded!\.display_name/);
+  });
+
+  it("mobile chat renders a download chip for /send command_file payloads", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    expect(source).toMatch(/message\.commandFile/);
+    expect(source).toMatch(/href=\{message\.commandFile\.url\}/);
+  });
+
+  it("desktop chat-message renders a download chip for commandFile prop", () => {
+    const source = read("components/chat/chat-message.tsx");
+    expect(source).toMatch(/CommandFileChip/);
+    expect(source).toMatch(/commandFile/);
+  });
+
+  it("handlers.py closes the file handle when replying with a document", () => {
+    const handlersPath = path.resolve(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "..",
+      "..",
+      "src",
+      "abyss",
+      "handlers.py"
+    );
+    const source = readFileSync(handlersPath, "utf8");
+    // ``reply_document`` used to receive ``open(...)`` inline with no
+    // matching close path — github-code-quality bot flagged this on
+    // PR #50. The fix wraps the handle in a ``with`` block.
+    expect(source).toMatch(/with open\(result\.file_path, "rb"\) as document:/);
+  });
+
+  it("workspace sheet defers its chrome to WorkspaceTree's own header", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // WorkspaceTree already renders a header with Workspace title +
+    // Finder + Refresh + Close buttons. Letting the Dialog render its
+    // own header / close button would surface two titles and two X
+    // buttons (the bug the user reported). We keep the title in
+    // sr-only form for a11y and disable the Dialog's built-in close.
+    expect(source).toMatch(/showCloseButton=\{false\}/);
+    expect(source).toMatch(/DialogTitle className="sr-only">Workspace/);
+  });
+});

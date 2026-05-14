@@ -3,10 +3,29 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseChatEvents } from "@/lib/abyss-api";
 
+export interface CommandFile {
+  name: string;
+  path: string;
+  url: string;
+}
+
 export interface SessionStream {
   text: string;
   streaming: boolean;
   error: string | null;
+  /**
+   * Slash commands like ``/send`` emit a ``command_result`` SSE event
+   * that carries a file payload alongside the text. The stream stores
+   * the latest payload so the chat view can render a download chip
+   * for the assistant reply. ``null`` after a regular streaming reply
+   * so the chip from a previous slash command does not bleed over.
+   */
+  commandFile?: CommandFile | null;
+}
+
+export interface SendResult {
+  text: string;
+  commandFile?: CommandFile | null;
 }
 
 export interface MultiSessionStreamHandle {
@@ -17,12 +36,17 @@ export interface MultiSessionStreamHandle {
     message: string,
     attachmentPaths?: string[],
     voiceMode?: boolean
-  ) => Promise<string>;
+  ) => Promise<SendResult>;
   cancel: (sessionId: string) => void;
   cancelAll: () => void;
 }
 
-const EMPTY_STREAM: SessionStream = { text: "", streaming: false, error: null };
+const EMPTY_STREAM: SessionStream = {
+  text: "",
+  streaming: false,
+  error: null,
+  commandFile: null,
+};
 
 export function getSessionStream(
   streams: Map<string, SessionStream>,
@@ -64,7 +88,12 @@ export function useMultiSessionChatStream(
       const controller = new AbortController();
       controllersRef.current.set(sessionId, controller);
 
-      patchStream(sessionId, { text: "", streaming: true, error: null });
+      patchStream(sessionId, {
+        text: "",
+        streaming: true,
+        error: null,
+        commandFile: null,
+      });
 
       try {
         const body: Record<string, unknown> = {
@@ -90,10 +119,24 @@ export function useMultiSessionChatStream(
         }
 
         let accumulated = "";
+        let commandFile: CommandFile | null = null;
         for await (const event of parseChatEvents(response.body)) {
           if (event.type === "chunk") {
             accumulated += event.text;
             patchStream(sessionId, { text: accumulated });
+            onChunk?.(sessionId, event.text);
+          } else if (event.type === "command_result") {
+            // Slash commands emit a single ``command_result`` event
+            // (no incremental chunks). Capture both the text and the
+            // optional ``file`` payload — ``/send <filename>`` ships
+            // download metadata that the chat view turns into a
+            // tappable chip on the assistant reply.
+            accumulated = event.text;
+            commandFile = event.file ?? null;
+            patchStream(sessionId, {
+              text: accumulated,
+              commandFile,
+            });
             onChunk?.(sessionId, event.text);
           } else if (event.type === "error") {
             patchStream(sessionId, { error: event.message });
@@ -102,15 +145,15 @@ export function useMultiSessionChatStream(
             patchStream(sessionId, { text: accumulated });
           }
         }
-        return accumulated;
+        return { text: accumulated, commandFile };
       } catch (caught) {
         if ((caught as { name?: string }).name === "AbortError") {
-          return "";
+          return { text: "" };
         }
         const message =
           caught instanceof Error ? caught.message : String(caught);
         patchStream(sessionId, { error: message });
-        return "";
+        return { text: "" };
       } finally {
         patchStream(sessionId, { streaming: false });
         if (controllersRef.current.get(sessionId) === controller) {

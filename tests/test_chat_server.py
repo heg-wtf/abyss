@@ -831,3 +831,402 @@ async def test_speak_streams_audio(client, server_instance, monkeypatch):
     assert "audio/mpeg" in resp.headers["Content-Type"]
     body = await resp.read()
     assert len(body) > 0
+
+
+# ---------------------------------------------------------------------------
+# Slash command routing (Phase 1b)
+# ---------------------------------------------------------------------------
+
+
+async def _parse_sse_events(sse_response) -> list[dict]:
+    """Collect SSE ``data: <json>`` events from a streamed response."""
+
+    raw = b""
+    async for chunk in sse_response.content.iter_any():
+        raw += chunk
+    events: list[dict] = []
+    for line in raw.split(b"\n"):
+        if line.startswith(b"data: "):
+            events.append(json.loads(line[len(b"data: ") :].decode("utf-8")))
+    return events
+
+
+@pytest.mark.asyncio
+async def test_list_commands_endpoint(client):
+    resp = await client.get("/chat/commands")
+    assert resp.status == 200
+    body = await resp.json()
+    names = [cmd["name"] for cmd in body["commands"]]
+    assert "help" in names
+    assert "status" in names
+    assert "cron" in names
+    # Each command has description + usage keys.
+    for cmd in body["commands"]:
+        assert "description" in cmd
+        assert "usage" in cmd
+
+
+@pytest.mark.asyncio
+async def test_slash_help_returns_command_list(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/help"},
+    )
+    events = await _parse_sse_events(sse)
+    result_event = next(e for e in events if e["type"] == "command_result")
+    assert result_event["command"] == "help"
+    assert "/start" in result_event["text"]
+    assert any(e["type"] == "done" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_slash_status_uses_dashboard_session(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/status"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert sid in result["text"]
+    assert "alpha" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_files_lists_workspace(client, abyss_home, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    workspace = abyss_home / "bots" / "alpha" / "sessions" / sid / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "report.md").write_text("hello")
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/files"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "report.md" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_unknown_returns_error(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/banana"},
+    )
+    events = await _parse_sse_events(sse)
+    assert any(e["type"] == "error" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_usage(client, patch_backend):
+    """``/cron`` with no args returns the usage / command list."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "/cron list" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_run_falls_back(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron run x"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Telegram" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_edit_falls_back(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron edit x"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Telegram" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_list_empty(client, patch_backend, monkeypatch):
+    monkeypatch.setattr("abyss.cron.list_cron_jobs", lambda b: [], raising=False)
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron list"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "No cron jobs" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_send_returns_file_metadata(client, abyss_home, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    workspace = abyss_home / "bots" / "alpha" / "sessions" / sid / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    target = workspace / "out.txt"
+    target.write_text("payload")
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/send out.txt"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "file" in result
+    assert result["file"]["name"] == "out.txt"
+    assert result["file"]["url"].endswith("/out.txt")
+
+
+@pytest.mark.asyncio
+async def test_slash_does_not_log_to_conversation(client, abyss_home, patch_backend):
+    """Slash command replies must not pollute the conversation log."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/help"},
+    )
+    # Drain.
+    async for _ in sse.content.iter_any():
+        pass
+
+    msgs = await client.get(f"/chat/sessions/alpha/{sid}/messages")
+    assert msgs.status == 200
+    body = await msgs.json()
+    # No user/assistant pair recorded for /help.
+    assert body["messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_regular_message_still_streams(client, abyss_home, patch_backend):
+    """Ensure the slash branch doesn't break ordinary chat flow."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "hello"},
+    )
+    events = await _parse_sse_events(sse)
+    assert any(e["type"] == "chunk" for e in events)
+    assert any(e["type"] == "done" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# Slash command routing — Phase 1c (skills / heartbeat / compact)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_slash_skills_lists_on_dashboard(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/skills list"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    # Either "No skills attached" or a list — either is success for this test.
+    assert "skill" in result["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_slash_heartbeat_status(client, patch_backend, monkeypatch):
+    monkeypatch.setattr(
+        "abyss.heartbeat.get_heartbeat_config",
+        lambda b: {
+            "enabled": False,
+            "interval_minutes": 30,
+            "active_hours": {"start": "07:00", "end": "23:00"},
+        },
+        raising=False,
+    )
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/heartbeat"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Heartbeat" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_heartbeat_run_falls_back(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/heartbeat run"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Telegram" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_compact_no_targets(client, patch_backend, monkeypatch):
+    monkeypatch.setattr(
+        "abyss.token_compact.collect_compact_targets",
+        lambda b: [],
+        raising=False,
+    )
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/compact"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "No compactable" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_bind_unbind_still_telegram_only(client, patch_backend):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    for cmd in ("/bind team", "/unbind"):
+        sse = await client.post(
+            "/chat",
+            json={"bot": "alpha", "session_id": sid, "message": cmd},
+        )
+        events = await _parse_sse_events(sse)
+        result = next(e for e in events if e["type"] == "command_result")
+        assert "Telegram" in result["text"]
+
+
+# ---------------------------------------------------------------------------
+# Session rename (Phase 3 — custom_name)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_rename_session_sets_and_persists(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    body = await create.json()
+    assert body["custom_name"] is None
+    sid = body["id"]
+
+    rename = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "경제질문"},
+    )
+    assert rename.status == 200
+    rename_body = await rename.json()
+    assert rename_body["custom_name"] == "경제질문"
+
+    # Subsequent list reflects the new name.
+    sessions = await client.get("/chat/sessions?bot=alpha")
+    payload = await sessions.json()
+    target = next(s for s in payload["sessions"] if s["id"] == sid)
+    assert target["custom_name"] == "경제질문"
+
+
+@pytest.mark.asyncio
+async def test_rename_session_clears_with_empty_name(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "first"},
+    )
+    cleared = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "   "},
+    )
+    assert (await cleared.json())["custom_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_rename_session_strips_control_chars(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    rename = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "  hello\x00world\n  "},
+    )
+    body = await rename.json()
+    assert body["custom_name"] == "helloworld"
+
+
+@pytest.mark.asyncio
+async def test_rename_session_caps_length(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    long_name = "x" * 200
+    body = await (
+        await client.post(
+            f"/chat/sessions/alpha/{sid}/rename",
+            json={"name": long_name},
+        )
+    ).json()
+    # Cap from chat_server.MAX_CUSTOM_NAME_LENGTH.
+    from abyss.chat_server import MAX_CUSTOM_NAME_LENGTH
+
+    assert len(body["custom_name"]) == MAX_CUSTOM_NAME_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_rename_session_not_found(client):
+    resp = await client.post(
+        "/chat/sessions/alpha/chat_web_deadbeef/rename",
+        json={"name": "x"},
+    )
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_rename_session_rejects_non_string(client):
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    resp = await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": 42},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_rename_metadata_survives_session_listing(client, abyss_home):
+    """Custom name persists in the session directory and is restored on
+    fresh server reads of /chat/sessions."""
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    await client.post(
+        f"/chat/sessions/alpha/{sid}/rename",
+        json={"name": "starred"},
+    )
+    # Confirm the file exists on disk where we expect.
+    meta_file = abyss_home / "bots" / "alpha" / "sessions" / sid / ".session_meta.json"
+    assert meta_file.exists()
+    import json as _json
+
+    assert _json.loads(meta_file.read_text())["custom_name"] == "starred"

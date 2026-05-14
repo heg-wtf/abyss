@@ -8,7 +8,15 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
+  /* Pretendard variable (Korean + Latin) is wired through
+     ``--font-pretendard`` by ``next/font/local`` in
+     ``src/app/layout.tsx``. The fallback chain reaches for a
+     Hangul-friendly system font so the first paint (before the
+     woff2 finishes loading) still renders Korean cleanly. */
+  --font-sans:
+    var(--font-pretendard), -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-geist-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

@@ -23,6 +23,12 @@ export interface ChatSession {
   bot_display_name?: string;
   updated_at: string;
   preview: string;
+  /**
+   * Optional user-chosen label (e.g. "경제질문"). When absent the UI
+   * falls back to ``bot_display_name``. Stored in
+   * ``<session_dir>/.session_meta.json`` on the backend.
+   */
+  custom_name?: string | null;
 }
 
 export interface ChatAttachmentRef {
@@ -61,7 +67,13 @@ export const MAX_UPLOADS_PER_MESSAGE = 5;
 export type ChatEvent =
   | { type: "chunk"; text: string }
   | { type: "done"; text: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | {
+      type: "command_result";
+      command: string;
+      text: string;
+      file?: { name: string; path: string; url: string };
+    };
 
 /**
  * Thrown when the sidecar replies with a non-2xx status. Lets callers
@@ -136,6 +148,33 @@ export async function deleteChatSession(
   await jsonFetch(`/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
   });
+}
+
+export async function renameChatSession(
+  bot: string,
+  sessionId: string,
+  name: string
+): Promise<{ id: string; bot: string; custom_name: string | null }> {
+  return jsonFetch<{ id: string; bot: string; custom_name: string | null }>(
+    `/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}/rename`,
+    {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }
+  );
+}
+
+export interface SlashCommandSpec {
+  name: string;
+  description: string;
+  usage: string;
+}
+
+export async function listSlashCommands(): Promise<SlashCommandSpec[]> {
+  const data = await jsonFetch<{ commands: SlashCommandSpec[] }>(
+    "/chat/commands"
+  );
+  return data.commands;
 }
 
 export async function getChatMessages(
