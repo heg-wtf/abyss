@@ -9,9 +9,7 @@ reached from the phone via a Tailscale-hosted dashboard.
 > **v2026.05.14** — Telegram was retired. The mobile PWA + dashboard
 > chat (built into `abysscope`) are now the only user-facing surfaces.
 > Group collaboration (orchestrator + member) is gone with it and will
-> return on top of the PWA in a later release. See
-> [`docs/plan-drop-telegram-2026-05-14.md`](docs/plan-drop-telegram-2026-05-14.md)
-> for the full migration plan.
+> return on top of the PWA in a later release.
 
 ## Table of Contents
 
@@ -392,38 +390,35 @@ Configuration and session data are stored in `~/.abyss/`. Override the path with
 ~/.abyss/
 ├── config.yaml               # Global config (timezone, language, bot list, settings)
 ├── GLOBAL_MEMORY.md          # Global memory (shared across all bots, read-only)
+├── vapid-keys.json           # Web Push VAPID keypair (auto-generated on first PWA push)
+├── abyss.pid                 # Bot manager PID (daemon mode)
+├── abysscope.pid             # Dashboard PID + port (daemon mode)
 ├── bots/
 │   └── <bot-name>/
 │       ├── bot.yaml              # display_name, personality, role, goal, model, streaming, skills, heartbeat, backend
-│       ├── CLAUDE.md
-│       ├── MEMORY.md             # Bot long-term memory (shared across all sessions)
-│       ├── cron.yaml             # Cron job config (schedule, timezone, optional)
-│       ├── cron_sessions/        # Cron job working directories
-│       ├── tool_metrics/         # Daily jsonl of tool calls (PostToolUse hook)
+│       ├── CLAUDE.md             # Generated system prompt (do not edit manually)
+│       ├── MEMORY.md             # Bot long-term memory (read/written by Claude)
+│       ├── avatar.jpg            # Optional bot avatar (PWA + dashboard)
 │       ├── conversation.db       # SQLite FTS5 index (auto-built from markdown)
-│       ├── heartbeat_sessions/   # Heartbeat working directory
-│       │   ├── CLAUDE.md
-│       │   ├── HEARTBEAT.md      # Checklist (user-editable)
-│       │   └── workspace/
+│       ├── cron.yaml             # Cron job config (optional)
+│       ├── cron_sessions/        # Per-job working directories
+│       ├── heartbeat_sessions/   # Heartbeat working directory (HEARTBEAT.md + workspace/)
+│       ├── tool_metrics/         # Daily jsonl of tool calls (PostToolUse hook)
 │       └── sessions/
 │           └── chat_<id>/
 │               ├── CLAUDE.md
 │               ├── conversation-YYMMDD.md  # Daily conversation log (UTC date)
 │               ├── .claude_session_id      # Claude Code session ID (for --resume)
 │               └── workspace/
-├── groups/
-│   └── <group-name>/
-│       ├── group.yaml            # Group config (orchestrator, members)
-│       ├── conversation/         # Shared conversation logs (YYMMDD.md)
-│       ├── conversation.db       # SQLite FTS5 index (auto-built from markdown)
-│       └── workspace/            # Shared workspace (persistent across resets)
 ├── skills/
 │   └── <skill-name>/
 │       ├── SKILL.md          # Skill instructions (required)
 │       ├── skill.yaml        # Skill config (tool-based skills: type, status, required_commands, install_hints)
 │       └── mcp.json          # MCP server config (MCP skills only)
-└── logs/
+└── logs/                     # Daily rotating logs
 ```
+
+> Group surface (`groups/<name>/`) was removed in v2026.05.14 and is pending a redesign — see [ROADMAP.md](docs/ROADMAP.md). Existing directories under `~/.abyss/groups/` are inert.
 
 ## Testing
 

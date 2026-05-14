@@ -13,7 +13,7 @@
 - **PWA 위에서 다중-봇 협업 다시 설계**. 기존 group surface (orchestrator + member, `telegram_chat_id` binding, `compose_group_context`) 는 통째로 제거됐다. 후속 모델 후보:
   - Dashboard chat 의 다중 봇 방 — 채팅 한 세션에 여러 봇 참여, `@mention` 으로 라우팅
   - cron / heartbeat 같은 자동화 채널을 묶는 "팀" 단위 표시
-  - `docs/plan-drop-telegram-2026-05-14.md` §2 의 "group은 추후 재설계" 항목 후속
+  - v2026.05.14 릴리즈 노트의 "group은 추후 재설계" 결정 후속
 - **모바일 음성 모드 완성**. ElevenLabs Scribe v2 STT + TTS 가 wire 되어 있지만 HTTPS 미적용으로 폰에서 검증 어려움. HTTPS 후 voice round-trip 실제 사용 확인 + UX 폴리시.
 - **Routines 자동 새로고침**. 현재 routine detail 페이지는 수동 ⟳ 버튼만 있다. cron 이 새로 실행되면 SSE / poll 로 자동 갱신.
 
@@ -31,4 +31,4 @@
 
 ---
 
-*이 문서는 "지금 어디 쯤" 의 신호. 실제 진행 상황은 [`docs/plan-*.md`](.) + GitHub Issues / PR 을 참고.*
+*이 문서는 "지금 어디 쯤" 의 신호. 실제 진행 상황은 GitHub Issues / PR + 릴리즈 노트를 참고.*
