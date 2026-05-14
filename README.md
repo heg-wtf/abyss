@@ -11,9 +11,7 @@ reached from the phone via a Tailscale-hosted dashboard.
 > Group collaboration (orchestrator + member) is gone with it and will
 > return on top of the PWA in a later release. See
 > [`docs/plan-drop-telegram-2026-05-14.md`](docs/plan-drop-telegram-2026-05-14.md)
-> for the full migration plan. Sections below that still describe
-> Telegram / group flows are kept for historical context until each
-> doc is rewritten.
+> for the full migration plan.
 
 ## Table of Contents
 
@@ -24,8 +22,7 @@ reached from the phone via a Tailscale-hosted dashboard.
 - [Skills](#skills)
 - [LLM Backends](#llm-backends)
 - [Memory & Recall](#memory--recall)
-- [Group Collaboration](#group-collaboration)
-- [Telegram Commands](#telegram-commands)
+- [Slash Commands](#slash-commands)
 - [File Handling](#file-handling)
 - [Tech Stack](#tech-stack)
 - [CLI Commands](#cli-commands)
@@ -37,7 +34,7 @@ reached from the phone via a Tailscale-hosted dashboard.
 
 ## Design Principles
 
-- **Local First**: No server required. Long Polling. No SSL or public IP needed.
+- **Local First**: No server required. Runs locally on Mac, reached over Tailscale. No SSL or public IP needed.
 - **File Based**: No database. Session = directory. Conversation = markdown.
 - **Claude Code Delegation**: No direct LLM API calls. Runs `claude -p` as a subprocess.
 - **CLI First**: Everything from onboarding to bot management is done in the terminal.
@@ -80,7 +77,7 @@ uv run abyss doctor             # uv
 abyss init
 
 # Bot management
-abyss bot add                  # Create a bot (Telegram token required)
+abyss bot add                  # Create a bot
 abyss bot list
 abyss bot remove <name>
 
@@ -168,47 +165,12 @@ abyss layers three memory surfaces on top of the per-session markdown logs:
 
 Conversation search is on by default whenever the bundled SQLite supports FTS5 (effectively always on macOS / Linux). Each bot has its own `~/.abyss/bots/<name>/conversation.db`; each group has `~/.abyss/groups/<name>/conversation.db`. `abyss doctor` reports FTS5 availability.
 
-## Group Collaboration
+## Slash Commands
 
-abyss supports **multi-bot collaboration** via Telegram groups. One orchestrator bot manages missions, delegating tasks to member bots via @mention.
-
-### Setup
-
-```bash
-# 1. Create a group (orchestrator + members must be registered bots)
-abyss group create dev_team --orchestrator dev_lead --members coder,tester
-
-# 2. Add all bots to a Telegram group chat
-# 3. BotFather setup (role-based):
-#    Orchestrator: BotFather → Edit Bot → Group Privacy → DISABLE
-#    Members:      BotFather MiniApp → Bot Settings → Bot-to-Bot Communication Mode → ENABLE
-#                  (Group Privacy can stay ON — members only need @mentions)
-# 4. In the Telegram group, run:
-/bind dev_team
-
-# 5. Send a mission message in the group
-```
-
-### How It Works
-
-- **Orchestrator**: Receives user messages, breaks missions into tasks, delegates via @mention
-- **Members**: Execute delegated tasks, report results back via @mention to orchestrator
-- **Shared conversation**: All messages logged to date-based conversation files
-- **Shared workspace**: Persistent file workspace across all group members
-- `/reset` in group: Orchestrator resets all bots' sessions + clears shared conversation (workspace preserved)
-- `/cancel` in group: Orchestrator cancels all running processes
-
-```bash
-abyss group list                # List all groups
-abyss group show dev_team       # Show group details
-abyss group delete dev_team     # Delete a group
-```
-
-## Telegram Commands
+Slash commands are typed directly in the mobile PWA or dashboard chat.
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Bot introduction |
 | `/reset` | Clear conversation (keep workspace) |
 | `/resetall` | Delete entire session |
 | `/files` | List workspace files |
@@ -234,17 +196,15 @@ abyss group delete dev_team     # Delete a group
 | `/heartbeat off` | Disable heartbeat |
 | `/heartbeat run` | Run heartbeat now |
 | `/compact` | Compact MD files to save tokens |
-| `/cancel` | Stop running process (group: cancel all bots) |
-| `/bind <group>` | Bind group to this chat |
-| `/unbind` | Unbind group from this chat |
+| `/cancel` | Stop running process |
 | `/version` | Version info |
 | `/help` | Show commands |
 
 ## File Handling
 
-Send photos or documents to the bot and they are automatically saved to the workspace and forwarded to Claude Code.
+Send photos or documents via the mobile PWA or dashboard chat and they are automatically saved to the workspace and forwarded to Claude Code.
 If a caption is included, it is used as the prompt.
-Use the `/send` command to retrieve workspace files back via Telegram.
+Use the `/send` command to retrieve workspace files.
 
 ---
 
@@ -337,12 +297,6 @@ abyss logs clean               # Delete logs older than 7 days
 abyss logs clean -d 30         # Keep last 30 days
 abyss logs clean --dry-run     # Preview without deleting
 
-# Group management
-abyss group create <name> -o <orchestrator> -m <members>  # Create group
-abyss group list               # List all groups
-abyss group show <name>        # Show group details
-abyss group delete <name>      # Delete a group
-
 # Backup
 abyss backup                   # Backup ~/.abyss/ to AES-256 encrypted zip
 ```
@@ -356,14 +310,14 @@ abyss/
 ├── src/abyss/
 │   ├── cli.py              # Typer CLI entry point (ASCII art banner)
 │   ├── config.py           # Configuration load/save, timezone/language management
-│   ├── onboarding.py       # Setup wizard (init: timezone/language, bot add: Telegram + bot)
+│   ├── onboarding.py       # Setup wizard (init: timezone/language, bot add)
 │   ├── claude_runner.py    # Claude Code runner (SDK pool + subprocess fallback)
 │   ├── sdk_client.py       # Python Agent SDK client pool (persistent sessions)
 │   ├── session.py          # Session directory management
-│   ├── handlers.py         # Telegram handler factory (group-aware)
+│   ├── handlers.py         # Chat handler factory (slash commands, streaming, session continuity)
 │   ├── group.py            # Group CRUD, shared conversation, workspace
 │   ├── bot_manager.py      # Multi-bot lifecycle (regenerate CLAUDE.md on start)
-│   ├── chat_core.py        # Backend-agnostic chat orchestration (Telegram + dashboard)
+│   ├── chat_core.py        # Backend-agnostic chat orchestration (PWA + dashboard)
 │   ├── chat_server.py      # Internal aiohttp HTTP/SSE server for dashboard chat
 │   ├── dashboard_ui.py     # Rich checklist UI for `abyss dashboard` lifecycle
 │   ├── tool_metrics.py     # Per-bot tool call metrics (jsonl + p50/p95/p99)
@@ -420,7 +374,7 @@ cd abysscope && npx next build && npx next start --port 3847
 | Settings | Timezone/language Select dropdowns, Home directory with Finder open, global memory editor |
 | Logs | Date picker, text filter, delete (single/bulk/by-age), daemon log truncate |
 | Conversations | Per-chat conversation viewer with date navigation, individual file delete |
-| Chat | In-browser chat with any bot — same SDK session pool as Telegram, SSE token streaming, image + PDF uploads |
+| Chat | In-browser chat with any bot — SDK session pool, SSE token streaming, image + PDF uploads |
 | Voice Chat | Mic button opens voice sidebar with animated Orb — ElevenLabs Scribe v2 STT → bot reply → ElevenLabs TTS playback, auto-restart loop, theme-aware Orb colors |
 | Tool Metrics | Per-bot tool call latency (p50/p95/p99) and counts from Claude Code `PostToolUse` hooks |
 
@@ -440,7 +394,7 @@ Configuration and session data are stored in `~/.abyss/`. Override the path with
 ├── GLOBAL_MEMORY.md          # Global memory (shared across all bots, read-only)
 ├── bots/
 │   └── <bot-name>/
-│       ├── bot.yaml              # telegram_token, display_name, personality, role, goal, model, streaming, skills, heartbeat
+│       ├── bot.yaml              # display_name, personality, role, goal, model, streaming, skills, heartbeat, backend
 │       ├── CLAUDE.md
 │       ├── MEMORY.md             # Bot long-term memory (shared across all sessions)
 │       ├── cron.yaml             # Cron job config (schedule, timezone, optional)
@@ -459,7 +413,7 @@ Configuration and session data are stored in `~/.abyss/`. Override the path with
 │               └── workspace/
 ├── groups/
 │   └── <group-name>/
-│       ├── group.yaml            # Group config (orchestrator, members, chat_id)
+│       ├── group.yaml            # Group config (orchestrator, members)
 │       ├── conversation/         # Shared conversation logs (YYMMDD.md)
 │       ├── conversation.db       # SQLite FTS5 index (auto-built from markdown)
 │       └── workspace/            # Shared workspace (persistent across resets)

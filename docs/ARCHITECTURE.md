@@ -14,15 +14,14 @@
 
 ```mermaid
 graph LR
-    TG[Telegram] <-->|Long Polling| PTB[python-telegram-bot]
-    PTB <--> H[handlers.py]
-    H <--> CR[claude_runner.py]
-    H <--> S[session.py]
-    H <--> G[group.py]
+    PWA[Mobile PWA] <-->|HTTP/SSE| CS[chat_server.py]
+    DASH[Dashboard] <-->|HTTP/SSE| CS
+    CS <--> CC[chat_core.py]
+    CC <--> CR[claude_runner.py]
+    CC <--> S[session.py]
     CR <--> SK[skill.py]
     S <--> BOTS[~/.abyss/bots/]
     SK <--> SKILLS[~/.abyss/skills/]
-    G <--> GROUPS[~/.abyss/groups/]
 ```
 
 ### Claude Code Execution Paths
@@ -76,14 +75,11 @@ Sessions are managed via directory structure without a database.
 Each bot's configuration is stored in `~/.abyss/bots/<name>/bot.yaml`.
 
 ```yaml
-telegram_token: "123456:ABCDEF"    # Telegram Bot API token
-telegram_username: "@my_bot"       # Bot username (from Telegram API)
-telegram_botname: "My Bot"         # Bot display name (from Telegram API)
 display_name: "My Assistant"       # User-facing friendly name
+telegram_botname: "My Bot"         # Legacy shim — fallback when display_name is empty
 personality: "Friendly helper"     # Personality description (used in CLAUDE.md)
 role: "General assistant"          # What the bot does (used in CLAUDE.md)
 goal: "Help with daily tasks"     # Why the bot exists (used in CLAUDE.md, optional)
-allowed_users: []                  # Telegram user IDs (empty = allow all)
 claude_args: []                    # Extra CLI args for claude -p
 model: sonnet                      # Claude model (sonnet/opus/haiku, runtime-added)
 streaming: false                   # Streaming response mode
@@ -107,11 +103,10 @@ backend:                           # Optional — defaults to claude_code
 
 ### 5. Multi-Bot Architecture
 
-Multiple Telegram bots run simultaneously in a single process.
+Multiple bots run simultaneously in a single process, each serving independent PWA sessions.
 
-- Independent `Application` instance per bot
-- Concurrent polling via `asyncio`
-- Per-bot independent configuration (token, personality, role, permissions, model)
+- Per-bot independent configuration (personality, role, model, skills)
+- Concurrent execution via `asyncio`
 - Individual bot errors are isolated from other bots
 
 ### 6. Per-Session Concurrency Control
@@ -134,7 +129,7 @@ Running Claude Code subprocesses are tracked per session.
 Per-bot Claude model configuration with runtime changes.
 
 - Stored in `bot.yaml`'s `model` field (default: sonnet)
-- Runtime change via Telegram `/model` command (immediately saved to bot.yaml)
+- Runtime change via `/model` slash command (immediately saved to bot.yaml)
 - Also changeable via CLI `abyss bot model <name> <model>`
 - Valid models: sonnet (4.5), opus (4.6), haiku (3.5) — `/model` shows version alongside name
 
@@ -144,7 +139,7 @@ Extends bot capabilities by linking tools/knowledge. Skills are classified by or
 
 - **Built-in skills** (`builtin`): Pre-packaged with abyss, installable via `abyss skills install <name>`
 - **Custom skills** (`custom`): User-created via `abyss skills add`
-- **Imported skills** (`custom`): Downloaded from GitHub via `abyss skills import <github-url>` or `/skills import <github-url>` in Telegram
+- **Imported skills** (`custom`): Downloaded from GitHub via `abyss skills import <github-url>` or `/skills import <github-url>`
 
 Internally, skills have different tool configurations:
 
@@ -159,7 +154,7 @@ Internally, skills have different tool configurations:
 
 ### 10. Cron Schedule Automation
 
-Automatically runs Claude Code at scheduled times and sends results via Telegram.
+Automatically runs Claude Code at scheduled times and appends results to conversation log + Web Push.
 
 - Job list defined in `cron.yaml` (schedule or at)
 - **Recurring jobs**: Standard cron expressions (`0 9 * * *` = daily at 9 AM)
@@ -168,26 +163,26 @@ Automatically runs Claude Code at scheduled times and sends results via Telegram
 - `croniter` library for cron expression validation and matching
 - Scheduler loop: checks current time against job schedules every 30 seconds
 - Duplicate prevention: records last run time in UTC, prevents re-execution within same minute
-- Result delivery: sends Telegram DM to all `allowed_users` in `bot.yaml`. Falls back to session chat IDs (`collect_session_chat_ids()`) when `allowed_users` is empty
+- Result delivery: appends to `conversation-YYMMDD.md` and delivers via Web Push. Falls back to scanning session chat IDs (`collect_session_chat_ids()`) to determine recipients
 - Isolated working directory: Claude Code runs in `cron_sessions/{job_name}/`
 - One-shot jobs: auto-deleted after execution when `delete_after_run=true`, auto-disabled when `delete_after_run=false`
 - Inherits bot's skills/model settings, overridable at job level
-- **Natural language creation**: `/cron add <description>` in Telegram parses any language (Korean, English, Japanese, etc.) into cron jobs via Claude haiku one-shot (`parse_natural_language_schedule()`)
+- **Natural language creation**: `/cron add <description>` parses any language (Korean, English, Japanese, etc.) into cron jobs via Claude haiku one-shot (`parse_natural_language_schedule()`)
 - **Timezone**: `resolve_default_timezone()` reads from `config.yaml` timezone (single source of truth, set during `abyss init`)
 - **Unique naming**: `generate_unique_job_name()` appends `-2`, `-3` suffix on conflict
-- **Message editing**: `edit_cron_job_message()` updates only the message field (name/schedule immutable). CLI: `abyss cron edit <bot> <job>` opens `$EDITOR`. Telegram: `/cron edit <name>` shows current message with `ForceReply`, user replies with new content. `pending_cron_edits` dict in handler tracks in-flight edits by chat_id
-- **Full Telegram CRUD**: `/cron list|add|edit|run|remove|enable|disable`
+- **Message editing**: `edit_cron_job_message()` updates only the message field (name/schedule immutable). CLI: `abyss cron edit <bot> <job>` opens `$EDITOR`. Slash command: `/cron edit <name>` in the chat UI. `pending_cron_edits` dict in handler tracks in-flight edits by chat_id
+- **Slash command CRUD**: `/cron list|add|edit|run|remove|enable|disable`
 
 ### 11. Heartbeat (Periodic Situation Awareness)
 
-Proactive agent feature that periodically wakes Claude Code to run HEARTBEAT.md checklist and only sends Telegram messages when there's something to report.
+Proactive agent feature that periodically wakes Claude Code to run HEARTBEAT.md checklist and only notifies when there's something to report.
 
 - Configured in `bot.yaml`'s `heartbeat` section (one per bot)
 - **interval_minutes**: Execution interval (default 30 minutes)
 - **active_hours**: Active time range (HH:MM, uses config.yaml timezone, midnight-crossing supported)
 - `HEARTBEAT.md`: User-editable checklist template
 - **HEARTBEAT_OK detection**: When response contains `HEARTBEAT_OK` marker, only logs without notification
-- Sends Telegram DM to all `allowed_users` when HEARTBEAT_OK is absent. Falls back to session chat IDs when `allowed_users` is empty
+- When HEARTBEAT_OK is absent: appends result to `conversation-YYMMDD.md` and delivers via Web Push
 - Uses all skills linked to the bot (no separate skill list for heartbeat)
 - Scheduler loop re-reads `bot.yaml` every cycle for runtime config changes
 - Isolated working directory: Claude Code runs in `heartbeat_sessions/`
@@ -203,8 +198,8 @@ Frequently used skills are bundled as templates inside the package, installable 
 - `skill.yaml`'s `install_hints` field provides installation instructions for missing tools
 - Built-in skills cover universal tooling only — domain/region-specific skills are expected to be authored or imported by users via `abyss skills import <github-url>`. Bundled set: iMessage (`imsg` CLI), Apple Reminders (`reminders-cli`), Image Processing (`slimg` CLI), Supabase (MCP type, DB/Storage/Edge Functions with no-deletion guardrails), Gmail (`gogcli`), Google Calendar (`gogcli`), Twitter/X (MCP type, tweet posting/search via `@enescinar/twitter-mcp`), Jira (MCP type, issue management via `mcp-atlassian`), Translate (`translatecli`, Gemini-powered text/transcript translation), QMD (MCP type, markdown knowledge search via HTTP daemon, auto-injected system-wide), plus internal helpers (`code_review`, `conversation_search`)
 - `abyss skills` command shows all skills with origin type (builtin/custom), including uninstalled builtins
-- Telegram `/skills` handler also shows origin type (builtin/custom) and uninstalled builtins
-- **GitHub import**: `import_skill_from_github(url, name)` downloads SKILL.md (required) + skill.yaml + mcp.json (optional) from a GitHub repo. `parse_github_url()` parses owner/repo/branch/subdir. Tries `main` branch first, falls back to `master`. Compatible with [skills.sh](https://skills.sh) skill packages. CLI: `abyss skills import <url> [--skill <name>]`. Telegram: `/skills import <url> [name]` — imports and auto-attaches to the bot in one step.
+- Slash `/skills` shows origin type (builtin/custom) and uninstalled builtins in the chat UI
+- **GitHub import**: `import_skill_from_github(url, name)` downloads SKILL.md (required) + skill.yaml + mcp.json (optional) from a GitHub repo. `parse_github_url()` parses owner/repo/branch/subdir. Tries `main` branch first, falls back to `master`. Compatible with [skills.sh](https://skills.sh) skill packages. CLI: `abyss skills import <url> [--skill <name>]`. Slash: `/skills import <url> [name]` — imports and auto-attaches to the bot in one step.
 
 ### 13. QMD Auto-Injection (System-Wide Knowledge Search)
 
@@ -223,7 +218,7 @@ QMD (local markdown search engine) is automatically available to all bots when t
 `conversation_search` is a built-in MCP tool that gives Claude full-text recall over the user's past messages. Markdown logs (`conversation-YYMMDD.md` for bots, `YYMMDD.md` for groups) remain the source of truth — the FTS5 SQLite database is a parallel cache that can be rebuilt at any time with `abyss reindex`.
 
 - **Storage**: `~/.abyss/bots/<name>/conversation.db` per bot, `~/.abyss/groups/<name>/conversation.db` per group. Single virtual `messages` table tokenized as `unicode61 + remove_diacritics 2`. Schema versioned.
-- **Append on log**: `session.log_conversation()` and `group.log_to_shared_conversation()` mirror each markdown write into the index. Failures log a warning and never raise — markdown is canonical.
+- **Append on log**: `session.log_conversation()` mirrors each markdown write into the index. Failures log a warning and never raise — markdown is canonical.
 - **MCP server**: `abyss.mcp_servers.conversation_search` is a stdio JSON-RPC server. One tool: `search_conversations(query, since=, until=, chat_id=, role=, limit=)`. Reads its DB path from `ABYSS_CONVERSATION_DB`.
 - **Auto-injection**: `compose_claude_md()` appends the built-in `conversation_search/SKILL.md` whenever `is_fts5_available()` is True. `_prepare_skill_config()` writes per-session `.mcp.json` with the bot's DB path. The bot directory is resolved by `_resolve_bot_dir_from_working_directory()` walking up the working directory's parents until it finds an entry whose parent is named `bots`, so DM (`bots/<name>/sessions/chat_*`), cron (`bots/<name>/cron_sessions/<job>`) and heartbeat (`bots/<name>/heartbeat_sessions/`) flows all hit the same per-bot DB.
 - **Reindex semantics**: `reindex_session_dir` and `reindex_group_dir` always wipe the FTS5 table — even when the source markdown directory is missing — so deleting source content actually purges the index.
@@ -270,14 +265,14 @@ abyss routes every model call through `abyss.llm.LLMBackend`. New backends drop 
 
 ### 13.7. Dashboard Chat (Internal HTTP/SSE Server)
 
-Abysscope can talk to bots in the browser via the same SDK pool that serves Telegram. To keep the dashboard purely a Next.js client, abyss runs an internal aiohttp server (`chat_server.py`) inside the `bot_manager` process.
+Abysscope can talk to bots in the browser via the same SDK pool used by the PWA. To keep the dashboard purely a Next.js client, abyss runs an internal aiohttp server (`chat_server.py`) inside the `bot_manager` process.
 
 - **Lifecycle** — `bot_manager` constructs `get_server()` (singleton) before polling starts and stops it on shutdown. Bound to `127.0.0.1:CHAT_SERVER_PORT` and protected by an Origin allowlist + CORS middleware so only the local dashboard can call it
 - **Routes** — `/health`, `/bots`, `/sessions` (list/create/delete), `/messages` (parsed conversation log), `/chat` (SSE token stream), `/upload` (multipart with MIME sniffing), `/files/{id}` (inline serve), `/cancel`
 - **Concurrency** — per-session asyncio locks for chat (sequential turns) and a separate per-session upload lock. Path traversal is blocked by validating bot/session names and `_is_path_under` checks
-- **Session reuse** — `chat_core.process_chat_message` reuses the SDK pool client keyed by `bot:chat_id`, so a dashboard message and a Telegram message on the same chat ID share one persistent Claude session. Bootstrap fallback runs the same `_run_with_resume_fallback` used by Telegram
-- **Attachments** — uploads land in `sessions/chat_<id>/uploads/<8hex>__<safe>.<ext>` and are referenced from the user turn the same way Telegram file handlers compose them, so the conversation log is identical regardless of source
-- **Display names** — `/chat/bots` and `/chat/sessions` both apply the fallback chain `display_name → telegram_botname → bot_name` (`_bot_display_name` in `chat_server.py`), matching the dashboard sidebar so a bot whose `display_name` is empty (e.g. `''`) still appears as its Korean Telegram name in the chat picker, session list, and message header instead of falling all the way back to the bot ID
+- **Session reuse** — `chat_core.process_chat_message` reuses the SDK pool client keyed by `bot:chat_id`, so the mobile PWA and dashboard share the same persistent Claude session when using the same chat ID. Bootstrap fallback runs the same `_run_with_resume_fallback` path
+- **Attachments** — uploads land in `sessions/chat_<id>/uploads/<8hex>__<safe>.<ext>` and are referenced from the user turn in the same format as file handlers, so the conversation log is identical regardless of source
+- **Display names** — `/chat/bots` and `/chat/sessions` both apply the fallback chain `display_name → telegram_botname (legacy shim) → bot_name` (`_bot_display_name` in `chat_server.py`), matching the dashboard sidebar so a bot whose `display_name` is empty still shows a human-readable name in the chat picker, session list, and message header
 - **UX** — the dashboard chat has a single entry point: the left sidebar shows a `Chats` panel with a `New` button. `New` opens a base-ui `Menu` listing every bot; clicking one immediately creates a `chat_web_<uuid>` session and selects it. The right-panel header carries no controls — only the active session's bot avatar, display name, and session ID. The previous `BotSelector` + `Start chat` button in the right panel was removed to eliminate the two-step flow
 
 ### 13.8. Voice Mode (STT/TTS)
@@ -326,26 +321,24 @@ Shared read-only memory accessible by all bots, managed via CLI only.
 - **Bootstrap injection**: `_prepare_session_context()` and `_call_with_resume_fallback()` inject global memory before bot memory (global memory -> bot memory -> conversation history -> message)
 - **Cron/Heartbeat injection**: `execute_cron_job()` and `execute_heartbeat()` inject global memory + bot memory into prompt before execution
 - **CLI management**: `abyss global-memory show|edit|clear`. Editing or clearing regenerates all bots' CLAUDE.md and propagates to sessions
-- Not editable via Telegram (no file path exposed, no Telegram command)
+- Not editable via slash command (no file path exposed, CLI only)
 - CRUD functions in `session.py`: `global_memory_file_path()`, `load_global_memory()`, `save_global_memory()`, `clear_global_memory()`
 
 ### 17. Streaming Response
 
-Delivers Claude Code output to Telegram in real-time. User-toggleable on/off.
+Delivers Claude Code output to the PWA / dashboard in real-time. User-toggleable on/off.
 
 - Controlled by `streaming` field in `bot.yaml` (default: `DEFAULT_STREAMING = False`)
-- Runtime toggle via Telegram `/streaming on|off` or CLI `abyss bot streaming <name> on|off`
+- Runtime toggle via `/streaming on|off` slash command or CLI `abyss bot streaming <name> on|off`
 - **Streaming mode** (`_send_streaming_response`):
   - `run_claude_streaming()`: Runs with `--output-format stream-json --verbose --include-partial-messages`
   - Extracts `text_delta` from stream-json `content_block_delta` events for per-token streaming
-  - `on_text_chunk` callback delivers text fragments to handler
-  - Real-time Telegram message editing. Cursor marker (`▌`) shows progress
-  - Throttling (0.5s) to avoid Telegram API rate limits
-  - On completion, replaces with Markdown-to-HTML converted final text
+  - `on_text_chunk` callback forwards chunks to SSE stream
+  - Cursor marker (`▌`) shows progress; 0.5s throttle on edit operations
+  - On completion, replaces draft with final markdown-rendered text
   - Fallback: Uses accumulated streaming text or `assistant` turn text if no `result` event
 - **Non-streaming mode** (`_send_non_streaming_response`):
-  - `run_claude()`: Sends typing action every 4 seconds -> Markdown-to-HTML conversion on completion -> batch send
-  - Same pattern as cron and heartbeat (Phase 3 approach)
+  - `run_claude()`: Batch send on completion — same pattern as cron and heartbeat
 
 ### 18. Token Compact
 
@@ -371,18 +364,10 @@ Full backup of `~/.abyss/` directory to an AES-256 encrypted zip file.
 
 ### 20. Group Collaboration (Orchestrator Pattern)
 
-Multi-bot collaboration via Telegram groups using an orchestrator-member pattern.
-
-- **One orchestrator per group**: Receives user messages, decomposes into tasks, delegates via @mention
-- **Members**: Only respond to @mention from bots, execute tasks, report back via @mention to orchestrator
-- **Authorization bypass**: Bot senders skip `allowed_users` check in group mode so bot-to-bot delegation works
-- **Shared conversation log**: All messages (user, bot inputs, Claude responses) logged to date-based files (`groups/<name>/conversation/YYMMDD.md`)
-- **Shared workspace**: Persistent file workspace across all group members, preserved on `/reset`
-- **CLAUDE.md injection**: `compose_group_claude_md()` injects team roster + rules for orchestrator, role context + shared conversation history for members
-- **Data model**: `groups/<name>/group.yaml` stores name, orchestrator, members list, telegram_chat_id, bot_to_bot_mode
-- **BotFather setup**: Orchestrator needs Group Privacy OFF. Member bots need Bot-to-Bot Communication Mode ON (BotFather MiniApp → Bot Settings). Members can keep Group Privacy ON — they only receive @mentions. `abyss doctor` warns when bot_to_bot_mode is not set.
-- **CLI**: `abyss group create/list/show/delete/status`
-- **Telegram**: `/bind <group>`, `/unbind` to associate chat with group config
+> **Removed in v2026.05.14.** Group collaboration shipped on top of Telegram and was retired with it.
+> The data model (`group.yaml`, shared conversation log, shared workspace) and CLI commands
+> (`abyss group create/list/show/delete`) are preserved for a future PWA-based re-implementation.
+> `group.py` and `session.group_session_directory()` remain in the codebase as stubs.
 
 ## Module Dependencies
 
@@ -390,7 +375,6 @@ Multi-bot collaboration via Telegram groups using an orchestrator-member pattern
 graph TD
     CLI[cli.py] --> OB[onboarding.py]
     CLI --> BM[bot_manager.py]
-    CLI --> BR[bridge.py]
     CLI --> CRON[cron.py]
     CLI --> HB[heartbeat.py]
     CLI --> BAK[backup.py]
@@ -399,30 +383,19 @@ graph TD
     CLI --> GR[group.py]
 
     OB --> CFG[config.py]
-    OB --> BR
 
     BM --> CFG
-    BM --> BR
     BM --> SK
     BM --> CRON
     BM --> HB
-    BM --> HA[handlers.py]
+    BM --> CS[chat_server.py]
 
-    HA --> CR[claude_runner.py]
-    HA --> CRON
-    HA --> HB
-    HA --> SK
-    HA --> BS[builtin_skills]
-    HA --> TC
-    HA --> SE[session.py]
-    HA --> GR
-    HA --> CFG
-    HA --> UT[utils.py]
+    CS --> CC[chat_core.py]
+    CC --> CR[claude_runner.py]
+    CC --> SE[session.py]
 
     CR --> SK
-    CR --> BR
-
-    BR --> CFG
+    CR --> CFG
 
     CRON --> CFG
     CRON --> CR
@@ -434,7 +407,7 @@ graph TD
 
     TC --> CFG
     TC --> SK
-    TC --> BS
+    TC --> BS[builtin_skills]
     TC --> CR
 
     SK --> CFG
@@ -447,7 +420,7 @@ graph TD
 
     style CLI fill:#36c,color:#fff
     style BM fill:#36c,color:#fff
-    style HA fill:#f90,color:#fff
+    style CS fill:#f90,color:#fff
     style CR fill:#f90,color:#fff
     style GR fill:#2d6,color:#fff
 ```
@@ -462,18 +435,16 @@ graph TD
     PLIST --> LOAD["launchctl load"]
 
     FG --> REGEN["regenerate CLAUDE.md per bot"]
-    REGEN --> BRIDGE["start_bridge()"]
-    BRIDGE --> QMD["_start_qmd_daemon()"]
-    QMD --> POLL["start_polling() per bot"]
-    POLL --> CRON["cron/heartbeat schedulers"]
+    REGEN --> QMD["_start_qmd_daemon()"]
+    QMD --> SRV["chat_server.start()"]
+    SRV --> CRON["cron/heartbeat schedulers"]
     CRON --> WAIT["await stop_event"]
 
     WAIT -->|SIGINT/SIGTERM| SHUT["Graceful Shutdown"]
     SHUT --> K1["cancel_all_processes()"]
     K1 --> K2["cancel cron/heartbeat tasks"]
-    K2 --> K3["application.stop() per bot"]
+    K2 --> K3["chat_server.stop()"]
     K3 --> K4["_stop_qmd_daemon()"]
-    K4 --> K5["stop_bridge()"]
 ```
 
 - **PID file**: Records current process ID in `~/.abyss/abyss.pid`
@@ -485,22 +456,18 @@ graph TD
 
 ```mermaid
 graph TD
-    RCV[Receive Message] --> PERM[Permission Check]
-    PERM --> LOCK[Session Lock / Queuing]
+    RCV[Receive Message via SSE] --> LOCK[Session Lock / Queuing]
     LOCK --> SESS[ensure_session]
     SESS --> CTX["_prepare_session_context()"]
     CTX --> FALLBACK["_call_with_resume_fallback()"]
 
     FALLBACK --> STREAM{streaming?}
     STREAM -->|On| SS["run_claude_streaming()"]
-    SS --> EDIT[Per-token message edit]
-    EDIT --> HTML1[Markdown → HTML]
-    HTML1 --> FINAL[Final message replace/split]
+    SS --> EDIT[Per-token SSE chunk]
+    EDIT --> FINAL[Final message send]
 
-    STREAM -->|Off| TYPE[Typing action every 4s]
-    TYPE --> RC["run_claude()"]
-    RC --> HTML2[Markdown → HTML]
-    HTML2 --> BATCH[Batch send]
+    STREAM -->|Off| RC["run_claude()"]
+    RC --> BATCH[Batch send]
 
     FALLBACK -->|Resume failure| CLEAR[clear_session_id]
     CLEAR --> RETRY[Retry with bootstrap]
@@ -528,7 +495,7 @@ graph TD
     MATCH -->|No| LOOP
     EXEC --> INJECT[Inject global memory + bot memory]
     INJECT --> RUN["run_claude()"]
-    RUN --> SEND[Send results to allowed_users]
+    RUN --> SEND[Append to conversation log + Web Push]
     SEND --> LOOP
 ```
 
@@ -561,27 +528,12 @@ graph TD
     INJECT --> RUN["run_claude()"]
     RUN --> OK{HEARTBEAT_OK?}
     OK -->|Yes| LOG[Log only]
-    OK -->|No| SEND[Send to allowed_users]
+    OK -->|No| SEND[Append to conversation log + Web Push]
     LOG --> LOOP
     SEND --> LOOP
 ```
 
 ### Group Message Routing
 
-```mermaid
-graph TD
-    RCV[Receive Message] --> BIND{"find_group_by_chat_id()"}
-    BIND -->|Not bound| AUTH1[check_authorization]
-    AUTH1 --> DM["_process_message() (DM mode)"]
-
-    BIND -->|Bound| BOT{sender_is_bot?}
-    BOT -->|Yes| SKIP[Skip authorization]
-    BOT -->|No| AUTH2[check_authorization]
-    AUTH2 --> LOG
-    SKIP --> LOG[log_to_shared_conversation]
-    LOG --> SHOULD{"_should_handle_group_message()"}
-    SHOULD -->|No| IGNORE[Return]
-    SHOULD -->|Yes| PROC["_process_message()"]
-    PROC --> RESP[Claude response]
-    RESP --> LOGR[log_to_shared_conversation response]
-```
+> **Removed in v2026.05.14.** The orchestrator/member routing diagram belonged to the Telegram group
+> surface which has been retired. Group re-implementation on top of the PWA is planned for a future release.

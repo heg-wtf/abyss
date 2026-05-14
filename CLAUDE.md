@@ -16,8 +16,7 @@ reached from the phone over Tailscale.
 - Python >= 3.11, uv package manager
 - Typer (CLI), Rich (output), PyYAML (config), croniter (cron), httpx (HTTP for OpenRouter)
 - LLM backends: Claude Code CLI (`claude -p`) + Python Agent SDK (default), OpenAI-compatible (`openai_compat`) for MiniMax / OpenRouter / any OpenAI-compat endpoint (opt-in per bot)
-- Delivery: in-process `chat_server` (HTTP/SSE on 127.0.0.1:3848) +
-  Web Push via `pywebpush`. Telegram polling is gone.
+- Delivery: in-process `chat_server` (aiohttp HTTP/SSE on 127.0.0.1:3848) + Web Push via `pywebpush`
 
 ## Dev Commands
 
@@ -33,7 +32,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 
 - No abbreviations. Use full words: `session_directory` not `sess_dir`, `bot_config` not `bc`
 - Type hints with `from __future__ import annotations`
-- async/await for Telegram handlers and Claude runner
+- async/await for chat handlers and Claude runner
 - `ABYSS_HOME` env var overrides `~/.abyss/` in tests
 - Always use `pathlib.Path` and absolute paths. Use `config.py` helpers (`bot_directory()`, `abyss_home()`)
 - Line length limit: 100 characters (ruff)
@@ -41,7 +40,6 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 ## Test Rules
 
 - Every module has `tests/test_*.py`
-- Mock all Telegram API calls
 - Filesystem isolation: `tmp_path` + `monkeypatch.setenv("ABYSS_HOME", ...)`
 - Async tests: `@pytest.mark.asyncio`
 - `tests/evaluation/`: Real Claude API calls, excluded from CI (`--ignore=tests/evaluation`)
@@ -63,10 +61,10 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `claude_runner.py` | `claude -p` subprocess (async), model/skill/MCP injection, `DEFAULT_ALLOWED_TOOLS` (WebFetch/WebSearch/Bash/Read/Write/Edit/Glob/Grep/Agent always allowed), streaming, `--resume` session continuity, SDK-aware wrappers |
 | `sdk_client.py` | Python Agent SDK client (`claude-agent-sdk`), `SDKClientPool` (persistent `ClaudeSDKClient` per session, avoids process re-spawn), `get_pool()` / `close_pool()` singleton, legacy `sdk_query()` / `sdk_query_streaming()` |
 | `session.py` | Session directories, conversation logs (`conversation-YYMMDD.md`), Claude session ID (`--resume`), memory CRUD (bot + global) |
-| `handlers.py` | Telegram handler factory: messages, files, slash commands, streaming, session continuity, group-aware routing |
-| `group.py` | Group CRUD (create/delete/list/bind/unbind), shared conversation log, shared workspace, role detection |
-| `bot_manager.py` | Multi-bot polling, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, internal `ChatServer` lifecycle, dashboard status (port fallback), graceful shutdown |
-| `chat_core.py` | Backend-agnostic chat orchestration shared by Telegram handlers and the dashboard chat. `prepare_session_context` + `process_chat_message` (SDK pool first, subprocess + bootstrap fallback) |
+| `handlers.py` | Chat handler factory: messages, files, slash commands, streaming, session continuity |
+| `group.py` | Group CRUD (create/delete/list), shared conversation log, shared workspace, role detection |
+| `bot_manager.py` | Multi-bot lifecycle, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, internal `ChatServer` lifecycle, dashboard status (port fallback), graceful shutdown |
+| `chat_core.py` | Backend-agnostic chat orchestration shared by PWA handlers and the dashboard chat. `prepare_session_context` + `process_chat_message` (SDK pool first, subprocess + bootstrap fallback) |
 | `chat_server.py` | Internal HTTP/SSE server (aiohttp) for the abysscope dashboard chat. Routes: `/bots`, `/sessions`, `/messages`, `/chat` (SSE), `/upload`, `/files/{id}`, `/transcribe` (ElevenLabs Scribe v2 STT proxy), `/speak` (ElevenLabs TTS streaming proxy), `/scribe-token` (ElevenLabs WebSocket auth token). Origin allowlist + CORS middleware, MIME sniffing, per-session asyncio locks. Shared `aiohttp.ClientSession` created in `start()`, closed in `stop()` |
 | `dashboard_ui.py` | Rich-powered checklist UI (`BuildProgress`, `BuildStep`, `StepStatus`) for `abyss dashboard start/restart` lifecycle, plus `tail()` log helper |
 | `tool_metrics.py` | Per-bot tool execution metrics — append jsonl events under `bots/<name>/tool_metrics/`, aggregate per-tool latency p50/p95/p99, daily rotation with retention |
@@ -75,7 +73,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `heartbeat.py` | Periodic situation awareness, active hours check, HEARTBEAT_OK detection |
 | `token_compact.py` | Compress MEMORY.md/SKILL.md/HEARTBEAT.md via `claude -p` one-shot |
 | `backup.py` | AES-256 encrypted zip of `~/.abyss/` |
-| `utils.py` | Message splitting, Markdown-to-HTML conversion, logging, IME-compatible CLI input |
+| `utils.py` | Message splitting, logging, IME-compatible CLI input |
 | `conversation_index.py` | SQLite FTS5 index over conversation markdown logs. Per-bot DB at `bots/<name>/conversation.db`, per-group at `groups/<name>/conversation.db`. Markdown stays the source of truth |
 | `mcp_servers/conversation_search.py` | stdio MCP server exposing `search_conversations` tool over the FTS5 index. Spawned automatically per Claude call when FTS5 is available |
 | `hooks/log_tool_metrics.py` | Claude Code `PostToolUse` / `PostToolUseFailure` hook — reads JSON payload from stdin, resolves bot name from cwd, appends event via `tool_metrics.append_event` |
@@ -106,7 +104,6 @@ Two skills are special and not exposed as user-installable:
 4. QMD skill instructions (auto-injected when `qmd` CLI is available)
 5. Memory instructions (file path to MEMORY.md for Claude to read/write)
 6. Rules (response language from `config.yaml`, no tables, file save location)
-7. Group context (orchestrator: team roster + rules; member: role + shared conversation history)
 
 This is the only way to inject system instructions into `claude -p`, which auto-reads `CLAUDE.md` from its working directory.
 
@@ -124,14 +121,13 @@ This is the only way to inject system instructions into `claude -p`, which auto-
 
 For each bot on `abyss start`:
 1. Regenerate CLAUDE.md (picks up config/skill changes)
-2. Check SDK availability, start QMD daemon, then polling
+2. Check SDK availability, start QMD daemon, then start `ChatServer`
 
 ### Streaming
 
 - `bot.yaml` `streaming` field (default: `True`)
-- On: `sendMessageDraft` (Bot API 9.3) with cursor marker, 0.5s throttle
-- Off: typing action every 4s, batch send on completion
-- Fallback: `sendMessageDraft` failure -> `editMessageText`
+- On: per-token SSE stream from SDK pool, 0.5s throttle on dashboard edits
+- Off: batch send on completion
 
 ### Timezone and Language
 
@@ -139,27 +135,6 @@ For each bot on `abyss start`:
 - `get_timezone()` and `get_language()` are the only accessors (validate, fallback to UTC / Korean)
 - Cron jobs: per-job timezone -> config timezone -> UTC
 - Heartbeat active hours: uses config timezone
-
-### Group Collaboration
-
-Multi-bot collaboration via Telegram groups using an orchestrator pattern:
-- One orchestrator per group manages missions, delegates to members via @mention
-- Members execute tasks and report back via @mention to orchestrator
-- `group.py`: Group CRUD, `find_group_by_chat_id()`, `bind_group()`, `log_to_shared_conversation()`, shared workspace
-- `handlers.py`: Group-aware message routing (orchestrator receives user msgs + member @mentions, members receive orchestrator @mentions)
-- `skill.py`: `compose_group_claude_md()` injects team roster for orchestrator, role context for members
-- `session.py`: `group_session_directory()` for per-chat group sessions
-- `/reset` in group: orchestrator resets all bots' sessions + clears shared conversation, preserves workspace
-- `/cancel` in group: orchestrator cancels all bots' running processes
-- `/bind <group>` and `/unbind`: associate Telegram chat with a group config
-- BotFather setup is role-based: orchestrator needs Group Privacy OFF; member bots need Bot-to-Bot Communication Mode ON in BotFather MiniApp (Group Privacy can stay ON — members only receive @mentions from the orchestrator)
-
-### Telegram Message Rules
-
-- Markdown -> HTML via `markdown_to_telegram_html()` before sending
-- Falls back to plain text if HTML fails
-- Auto-splits at 4096 chars via `split_message()`
-- **No markdown tables** -- Telegram cannot render them. Use emoji + text lists instead
 
 ### LLM Backend Selection
 
@@ -179,7 +154,7 @@ Dedup: handlers log the user message before `backend.run`, so `_build_messages` 
 
 Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `groups/<name>/conversation.db`. Markdown remains the source of truth — the index is a rebuildable cache.
 
-- Append on `session.log_conversation` and `group.log_to_shared_conversation` (best-effort, swallowed failures)
+- Append on `session.log_conversation` (best-effort, swallowed failures)
 - Auto-injected as `mcp__conversation_search__search_conversations` when the bundled SQLite supports FTS5
 - Bot dir resolution: `_resolve_bot_dir_from_working_directory` walks up parents until it finds a directory whose parent is named `bots`, so DM / cron / heartbeat working dirs all resolve to the same per-bot DB
 - `abyss reindex --bot|--group|--all` wipes and rebuilds from markdown (also wipes when source dir is missing — no stale rows)
@@ -192,7 +167,7 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 ├── config.yaml               # timezone, language, bot list, settings
 ├── GLOBAL_MEMORY.md          # Shared read-only memory (CLI-managed)
 ├── bots/<name>/
-│   ├── bot.yaml              # token, display_name, personality, role, goal, model, streaming, skills, heartbeat, backend
+│   ├── bot.yaml              # display_name, personality, role, goal, model, streaming, skills, heartbeat, backend
 │   ├── CLAUDE.md             # Generated system prompt (do not edit manually)
 │   ├── MEMORY.md             # Bot long-term memory (read/written by Claude Code)
 │   ├── conversation.db       # SQLite FTS5 index (auto-built; rebuild via `abyss reindex --bot <name>`)
@@ -201,7 +176,7 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 │   ├── heartbeat_sessions/   # Heartbeat working directory (HEARTBEAT.md, workspace/)
 │   └── sessions/chat_<id>/   # Per-chat session (CLAUDE.md, conversation-YYMMDD.md, workspace/)
 ├── groups/<name>/
-│   ├── group.yaml            # Group config (name, orchestrator, members, telegram_chat_id)
+│   ├── group.yaml            # Group config (name, orchestrator, members)
 │   ├── conversation/         # Shared conversation logs (YYMMDD.md, date-based)
 │   ├── conversation.db       # Group FTS5 index (auto-built; rebuild via `abyss reindex --group <name>`)
 │   └── workspace/            # Shared workspace (persistent across resets)
@@ -254,7 +229,7 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 - Session management: per-session delete in bot detail, per-conversation-file delete in conversation viewer
 - Memory editor: markdown rendering in view mode (react-markdown + @tailwindcss/typography), raw edit mode
 - Sidebar: collapsible Bots/Skills sections (localStorage-persisted), theme toggle with emoji icon
-- Dashboard chat: in-browser chat UI talks to internal `ChatServer` (aiohttp, started by `bot_manager`). SSE token streaming via `/chat`, image + PDF uploads via `/upload`, served back via `/files/{id}`. Uses the same SDK pool / session continuity as Telegram via `chat_core`. Single entry point — sidebar `New` opens a base-ui `Menu` listing all bots; clicking one creates the session for that bot. The right-panel header shows the active session's bot avatar + display name + session ID. `display_name` falls back through `display_name → telegram_botname → bot_name`, applied in both `/chat/bots` and `/chat/sessions` responses so the picker, session list, and message header stay consistent with the sidebar
+- Dashboard chat: in-browser chat UI talks to internal `ChatServer` (aiohttp, started by `bot_manager`). SSE token streaming via `/chat`, image + PDF uploads via `/upload`, served back via `/files/{id}`. Uses the SDK pool / session continuity via `chat_core`. Single entry point — sidebar `New` opens a base-ui `Menu` listing all bots; clicking one creates the session for that bot. The right-panel header shows the active session's bot avatar + display name + session ID. `display_name` falls back through `display_name → telegram_botname (legacy shim) → bot_name`, applied in both `/chat/bots` and `/chat/sessions` responses so the picker, session list, and message header stay consistent with the sidebar
 - Voice mode: mic button in chat header opens a right sidebar with an animated Orb (ElevenLabs Orb component). `useVoiceMode` hook manages the STT→LLM→TTS cycle. ElevenLabs Scribe v2 WebSocket STT via `/api/chat/scribe-token` → `use-voice-mode.ts`. Transcribed text sent to `/api/chat` with `voice_mode: true`; Python `_handle_chat` appends a Korean spoken-style instruction to the message. TTS reply streamed from `/api/chat/speak` (ElevenLabs TTS proxy) and played via Web Audio API. Orb `colors` prop is theme-aware (`useTheme`): dark → white tones, light → black tones. Auto-restart loop: recording → processing → speaking → recording. Messenger-style timestamps shown on chat messages (`toLocaleTimeString("ko-KR")`)
 - `abyss dashboard start/restart` shows a Rich `BuildProgress` checklist (install deps → build Next.js → boot server) instead of streaming raw `next build` output
 
@@ -271,6 +246,6 @@ Both hooks resolve `bot_name` by walking parents of `cwd` until they find a dire
 
 Read these docs when working on related areas. They contain critical implementation details not duplicated here.
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** -- System architecture, module dependency graph, Mermaid flow diagrams (message processing, cron, heartbeat, group routing, shutdown), bot.yaml schema, all 20 design decisions with rationale
-- **[docs/TECHNICAL-NOTES.md](docs/TECHNICAL-NOTES.md)** -- Deep implementation details per feature: Claude Code execution modes, Python Agent SDK integration, streaming event parsing, skill MCP config merging, cron scheduler behavior, session continuity (bootstrap/resume/fallback), memory save/load mechanism, QMD auto-injection, group collaboration (orchestrator pattern, auth bypass, shared conversation), IME input handling, emoji width fixes
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** -- System architecture, module dependency graph, Mermaid flow diagrams (message processing, cron, heartbeat, shutdown), bot.yaml schema, all design decisions with rationale
+- **[docs/TECHNICAL-NOTES.md](docs/TECHNICAL-NOTES.md)** -- Deep implementation details per feature: Claude Code execution modes, Python Agent SDK integration, streaming event parsing, skill MCP config merging, cron scheduler behavior, session continuity (bootstrap/resume/fallback), memory save/load mechanism, QMD auto-injection, IME input handling, emoji width fixes
 - **[docs/SECURITY.md](docs/SECURITY.md)** -- Security audit: 35 findings (path traversal, token storage, rate limiting, env var injection, workspace limits). Check before adding file handling, user input, or subprocess code

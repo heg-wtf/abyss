@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>
-      abyss — Personal AI Assistant powered by Telegram + Claude Code
+      abyss — Personal AI Assistant powered by PWA + Claude Code
     </title>
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <meta
       name="description"
-      content="abyss is an open-source personal AI assistant that runs locally on your Mac. Multi-bot Telegram system with Claude Code, multi-provider LLM support, skill plugins, conversation search, cron automation, and a web dashboard."
+      content="abyss is an open-source personal AI assistant that runs locally on your Mac. Mobile PWA via Tailscale, Claude Code, multi-provider LLM, skills, conversation search, cron, and a web dashboard."
     />
     <meta
       name="keywords"
-      content="abyss, claude code, telegram bot, AI assistant, open source, local first, multi-bot, skill system, conversation search, minimax, openrouter, multi-provider llm, automation, Mac"
+      content="abyss, claude code, mobile PWA, AI assistant, open source, local first, multi-bot, skill system, conversation search, cron, web push, minimax, openrouter, multi-provider llm, automation, Mac"
     />
     <meta name="author" content="HEG" />
     <meta name="robots" content="index, follow" />
@@ -23,11 +23,11 @@
     <!-- Open Graph -->
     <meta
       property="og:title"
-      content="abyss — Personal AI Assistant powered by Telegram + Claude Code"
+      content="abyss — Personal AI Assistant powered by PWA + Claude Code"
     />
     <meta
       property="og:description"
-      content="Open-source, local-first AI assistant. Multi-bot Telegram system with Claude Code or any OpenAI-compatible provider, skills, conversation search, cron, and a web dashboard."
+      content="Open-source, local-first AI assistant. Mobile PWA + web dashboard. Claude Code or any OpenAI-compatible provider, skills, conversation search, cron, and web push notifications."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://abyss.heg.wtf" />
@@ -37,7 +37,7 @@
     <meta name="twitter:title" content="abyss — Personal AI Assistant" />
     <meta
       name="twitter:description"
-      content="Open-source Telegram AI assistant. Claude Code or any OpenAI-compatible provider. Runs locally on Mac."
+      content="Open-source local-first AI assistant. Mobile PWA + web dashboard. Claude Code or any OpenAI-compatible provider. Runs locally on Mac."
     />
 
     <link rel="canonical" href="https://abyss.heg.wtf" />
@@ -278,7 +278,7 @@
         padding: 1.25rem 1.5rem;
         font-size: 0.85rem;
       }
-      .diag-telegram {
+      .diag-pwa {
         background: rgba(88, 166, 255, 0.06);
         border: 1px solid rgba(88, 166, 255, 0.2);
         min-width: 140px;
@@ -308,7 +308,7 @@
         color: var(--text-secondary);
         margin-bottom: 0.75rem;
       }
-      .diag-telegram .diag-label {
+      .diag-pwa .diag-label {
         color: var(--accent);
       }
       .diag-abyss .diag-label {
@@ -355,7 +355,7 @@
         .diag-arrow {
           transform: rotate(90deg);
         }
-        .diag-telegram {
+        .diag-pwa {
           min-width: unset;
           width: 100%;
         }
@@ -576,12 +576,12 @@
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "abyss",
-        "description": "Personal AI assistant powered by Telegram + Claude Code. Multi-bot, local-first, file-based system.",
+        "description": "Personal AI assistant powered by PWA + Claude Code. Mobile PWA via Tailscale, multi-provider LLM, skills, cron, conversation search, local-first.",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS",
         "url": "https://abyss.heg.wtf",
         "downloadUrl": "https://github.com/heg-wtf/abyss",
-        "softwareVersion": "2026.05.13",
+        "softwareVersion": "2026.05.14",
         "author": {
           "@type": "Organization",
           "name": "HEG",
@@ -598,7 +598,7 @@
         <div class="header-left">
           <img src="logo.png" alt="abyss" />
           <span>abyss</span>
-          <span class="version-badge">v2026.05.13</span>
+          <span class="version-badge">v2026.05.14</span>
         </div>
         <div class="header-links">
           <a href="#features">Features</a>
@@ -629,8 +629,8 @@
           Open Source &middot; MIT License
         </div>
         <h1>
-          Your personal AI,<br />right in
-          <span class="highlight">Telegram</span>
+          Your personal AI,<br />right in your
+          <span class="highlight">PWA</span>
         </h1>
         <p>
           abyss is a local-first, multi-bot AI assistant<br />powered by Claude
@@ -666,11 +666,12 @@
 
         <div class="diagram-visual">
           <div class="diag-row">
-            <div class="diag-box diag-telegram">
-              <div class="diag-label">Telegram</div>
+            <div class="diag-box diag-pwa">
+              <div class="diag-label">Mobile PWA</div>
               <div class="diag-item">💬 Chat</div>
               <div class="diag-item">📎 Files</div>
-              <div class="diag-item">📷 Photos</div>
+              <div class="diag-item">🔔 Web Push</div>
+              <div class="diag-item">📋 Routines</div>
             </div>
             <div class="diag-arrow">⟷</div>
             <div class="diag-abyss-group">
@@ -681,7 +682,6 @@
                 <div class="diag-item">🧩 Skill System</div>
                 <div class="diag-item">⏰ Cron Automation</div>
                 <div class="diag-item">💓 Heartbeat</div>
-                <div class="diag-item">👥 Group Collaboration</div>
                 <div class="diag-inner">
                   <span class="c-purple">Claude Code (SDK Pool)</span><br />
                   <span class="c-orange">Persistent Sessions</span><br />
@@ -708,8 +708,8 @@
             <div class="icon">🏠</div>
             <h3>Local First</h3>
             <p>
-              No server, no SSL, no public IP needed. Long Polling over
-              Telegram. Your data stays on your Mac.
+              No server, no cloud lock-in. Access via mobile PWA over Tailscale.
+              Your data stays on your Mac.
             </p>
           </div>
           <div class="feature-card">
@@ -740,8 +740,8 @@
             <div class="icon">👥</div>
             <h3>Group Collaboration</h3>
             <p>
-              Multiple bots collaborate in Telegram groups with shared
-              conversation context and workspace.
+              Multi-bot orchestration with shared workspace — coming back on
+              top of the mobile PWA.
             </p>
           </div>
           <div class="feature-card">
@@ -886,6 +886,21 @@
         <h2>What's New</h2>
         <div class="changelog">
           <div class="changelog-item">
+            <span class="changelog-ver">v2026.05.14</span>
+            <span class="changelog-desc"
+              ><strong>Mobile PWA as primary surface</strong> — Bot messaging and
+              group collaboration removed. The mobile PWA (
+              <code style="font-family: 'JetBrains Mono', monospace;">/mobile</code>
+              on the abysscope dashboard) is now the primary user-facing
+              interface, accessible over Tailscale. Cron and heartbeat results
+              land in the <strong>Routines</strong> tab and are delivered via
+              <strong>Web Push</strong> notifications. Dashboard chat
+              (abysscope) continues to work for desktop. Multi-bot group
+              collaboration will return on top of the PWA in a future
+              release.</span
+            >
+          </div>
+          <div class="changelog-item">
             <span class="changelog-ver">v2026.05.13</span>
             <span class="changelog-desc"
               ><strong>Built-in skills slimmed</strong> — bundled set now
@@ -910,17 +925,7 @@
           <div class="changelog-item">
             <span class="changelog-ver">v2026.05.08</span>
             <span class="changelog-desc"
-              ><strong>Bot-to-Bot Communication Mode</strong> — group member
-              bots no longer need Group Privacy OFF. Enable
-              <strong>Bot-to-Bot Communication Mode</strong> in BotFather
-              MiniApp per member bot; only the orchestrator requires Privacy
-              OFF.
-              <code style="font-family: 'JetBrains Mono', monospace;">group.yaml</code>
-              gains a <code style="font-family: 'JetBrains Mono', monospace;">bot_to_bot_mode</code>
-              field;
-              <code style="font-family: 'JetBrains Mono', monospace;">abyss doctor</code>
-              warns when bound groups have not set it.
-              <strong>Streaming: typing indicator</strong> — shows
+              ><strong>Streaming: typing indicator</strong> — shows
               <em>typing…</em> immediately on message receipt, cancelled when
               the first draft chunk arrives (covers Claude cold-start gap).
               <strong>Tool metrics rotation fix</strong> — <code style="font-family: 'JetBrains Mono', monospace;">_rotate()</code>
@@ -952,7 +957,7 @@
               <code style="font-family: 'JetBrains Mono', monospace;"
                 >chat_web_*</code
               >
-              under the bot's workspace, fully separate from Telegram.
+              under the bot's workspace.
               <strong>Image + PDF attachments</strong> via paperclip / drag &
               drop / clipboard paste — files land in
               <code style="font-family: 'JetBrains Mono', monospace;"
@@ -1061,7 +1066,7 @@
             <span class="changelog-desc"
               ><strong>Cron Edit</strong> — Edit cron job messages via CLI
               (<code>abyss cron edit</code> with <code>$EDITOR</code>) or
-              Telegram (<code>/cron edit</code> with ForceReply). Expanded cron
+              mobile + dashboard (<code>/cron edit</code>). Expanded cron
               list preview to 80 chars.</span
             >
           </div>
@@ -1070,7 +1075,7 @@
             <span class="changelog-desc"
               ><strong>GitHub Skill Import</strong> — Import skills directly
               from GitHub repos via CLI (<code>abyss skills import</code>) or
-              Telegram (<code>/skills import</code>). Compatible with skills.sh
+              via abysscope dashboard / mobile chat. Compatible with skills.sh
               packages.</span
             >
           </div>

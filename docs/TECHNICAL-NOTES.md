@@ -19,10 +19,10 @@ In tests, isolation is achieved via `monkeypatch.setenv("ABYSS_HOME", str(tmp_pa
 
 All paths use absolute paths. The `bot_directory(name)` function in `config.py` returns the absolute path `abyss_home() / "bots" / name`, and other modules access bot directories through this function. Absolute paths are also stored in bot entries in `config.yaml`. Avoid relative paths and use `pathlib.Path` for path composition.
 
-## Telegram Message Limit
+## Message Splitting
 
-Telegram messages have a maximum of 4096 characters. `utils.split_message()` splits long responses for delivery.
-It attempts to split at line break boundaries, and truncates at the limit when no suitable line break is found.
+`utils.split_message()` splits long responses at 4096-character boundaries before forwarding to the chat surface.
+It attempts to split at line break boundaries and truncates at the limit when no suitable line break is found.
 
 ## Claude Code Execution
 
@@ -219,8 +219,8 @@ Key detail: `logging.basicConfig()` is called with `force=True` to ensure it rep
 - Valid models: `VALID_MODELS = ["sonnet", "opus", "haiku"]`, default: `DEFAULT_MODEL = "sonnet"`
 - Model version mapping: `MODEL_VERSIONS = {"sonnet": "4.5", "opus": "4.6", "haiku": "3.5"}`
 - `model_display_name()`: Appends version to model name (e.g., `opus 4.6`)
-- `/model` command displays current model and list with version info
-- Stored in `bot.yaml`'s `model` field. Runtime changeable via Telegram `/model` command.
+- `/model` slash command displays current model and list with version info
+- Stored in `bot.yaml`'s `model` field. Runtime changeable via `/model` slash command.
 - Runtime changes reflected via `nonlocal current_model` in handler closure.
 - Model changes are immediately saved to bot.yaml via `save_bot_config()`.
 - Also changeable via CLI `abyss bot model <name> [model]`.
@@ -233,7 +233,6 @@ Key detail: `logging.basicConfig()` is called with `force=True` to ensure it rep
 - Subprocess cancel calls `cancel_process()` which invokes `process.kill()` (SIGKILL)
 - When process is killed: `returncode == -9` -> raises `asyncio.CancelledError`
 - Handler catches `CancelledError` and sends "Execution was cancelled" message
-- In group mode: orchestrator tries SDK interrupt + subprocess cancel for all member bots
 
 ## Graceful Shutdown
 
@@ -242,10 +241,10 @@ Shutdown sequence in `bot_manager.py`:
 1. `close_pool()`: Closes all persistent SDK clients (`__aexit__()` on each), clears pool singleton
 2. `cancel_all_processes()`: Iterates `_running_processes` and kills all running subprocesses (`returncode is None`), then clears the registry
 3. Cancel cron/heartbeat tasks
-4. Stop Telegram applications
+4. Stop `ChatServer`
 5. Stop QMD daemon, remove PID file
 
-Pool must be closed before killing subprocesses. Without this, `application.stop()` waits for running handler coroutines to complete, which blocks until the Claude subprocess finishes (up to `command_timeout`, default 300 seconds). By closing pool and killing subprocesses first, the handlers complete immediately and shutdown proceeds without delay.
+Pool must be closed before killing subprocesses so that in-flight handler coroutines complete immediately (rather than waiting up to `command_timeout`, default 300 seconds).
 
 ## Session Lock and Message Queuing
 
@@ -255,9 +254,9 @@ Lock key format: `{bot_name}:{chat_id}`.
 
 ## /send Command
 
-Command to send workspace files via Telegram.
+Slash command to deliver workspace files to the chat.
 - `/send` (no args): Shows list of available files
-- `/send <filename>`: Sends the file via `reply_document()`
+- `/send <filename>`: Sends the file inline
 - Returns "File not found" message if file doesn't exist
 
 ## launchd Daemon
@@ -269,65 +268,33 @@ Command to send workspace files via Telegram.
 ## Bot Error Isolation
 
 In `bot_manager.py`, individual bot configuration errors or startup failures don't affect other bots.
-- Config load/token errors: Skips the bot and proceeds to the next
-- Polling start failure: Only that bot is skipped, others run normally
-- `started_applications` list tracks actually started bots for cleanup on shutdown
-
-## Telegram API Mocking in Tests
-
-`telegram.Bot` is imported inside functions, so it's mocked via `patch("telegram.Bot")`.
-`AsyncMock` is used to mock async methods like `get_me()`.
-
-## allowed_users
-
-When `allowed_users` in `bot.yaml` is an empty list, all users are allowed for incoming messages.
-To restrict access, add Telegram user IDs (integers) to the list.
-
-For proactive messages (cron results, heartbeat notifications), `allowed_users` is needed as the target. When empty, `collect_session_chat_ids()` in `session.py` scans `sessions/chat_<id>/` directories as a fallback — sending results to users who have previously chatted with the bot.
+- Config load errors: Skips the bot and proceeds to the next
+- `ChatServer` startup failure for one bot: Others run normally
+- `started_bots` list tracks actually started bots for cleanup on shutdown
 
 ## Daemon Auto-Restart on Bot Creation
 
-When a new bot is created via `abyss init` or `abyss bot add` while the daemon is already running, the daemon is automatically restarted to pick up the new bot. This ensures the new bot's Telegram polling and command menu are registered immediately.
+When a new bot is created via `abyss init` or `abyss bot add` while the daemon is already running, the daemon is automatically restarted to pick up the new bot and regenerate its CLAUDE.md.
 
 - `_is_daemon_running()` in `onboarding.py` checks if the launchd plist file exists
 - `_restart_daemon()` calls `stop_bots()` then `start_bots(daemon=True)`
 - If the daemon is not running, a message is shown: "Start the bot: abyss start"
 - If restart fails, a manual restart command is displayed as fallback
 
-## Telegram Command Menu
-
-The `BOT_COMMANDS` list is registered with Telegram via the `set_my_commands()` API.
-Called after `start_polling()` completes on bot start (`bot_manager.py`). Command registration failure is caught and logged as a warning — it does not prevent the bot from running.
-After registration, typing `/` displays the command autocomplete menu.
-Adding/changing commands only requires a bot restart.
-
-## Telegram Formatting Rules
+## Chat Formatting Rules
 
 The Rules section in `compose_claude_md()` includes a "No Markdown tables" rule.
-Telegram doesn't render Markdown tables, so `| Header | Content |` format appears as raw text.
-Instead, an "emoji + text list" format is enforced (e.g., `🌡 Low -2°C / High 7°C`).
-
-## Markdown to Telegram HTML Conversion
-
-Claude's Markdown responses are converted to Telegram HTML before sending (`utils.markdown_to_telegram_html()`).
-
-- `[text](url)` -> `<a href="url">text</a>` (links extracted before HTML escaping to preserve URLs)
-- `**bold**` -> `<b>bold</b>`
-- `*italic*` -> `<i>italic</i>`
-- `` `code` `` -> `<code>code</code>`
-- ` ```code blocks``` ` -> `<pre>code blocks</pre>`
-- `## heading` -> `<b>heading</b>` (Telegram has no heading support, so bold is used)
-- Falls back to plain text if HTML send fails
+The mobile PWA renders markdown, but table layout is fragile on narrow screens.
+An "emoji + text list" format is preferred (e.g., `🌡 Low -2°C / High 7°C`).
 
 ## Streaming On/Off Toggle
 
 - `bot.yaml`'s `streaming` field: `true` (default) or `false`
 - Default constant: `DEFAULT_STREAMING = True` in `config.py`
 - Runtime changes reflected via `nonlocal streaming_enabled` in handler closure.
-- Runtime toggle via Telegram `/streaming on|off`, immediately saved via `save_bot_config()`.
-- Also changeable via CLI `abyss bot streaming <name> [on|off]`.
-- `message_handler` and `file_handler` call `_send_streaming_response()` or `_send_non_streaming_response()` based on `streaming_enabled`.
-- Non-streaming mode: typing action every 4 seconds + `run_claude()` + Markdown->HTML conversion + split send (restored Phase 3 pattern).
+- Runtime toggle via `/streaming on|off` slash command or CLI `abyss bot streaming <name> [on|off]`, immediately saved via `save_bot_config()`.
+- Chat handlers call `_send_streaming_response()` or `_send_non_streaming_response()` based on `streaming_enabled`.
+- Non-streaming mode: typing action every 4 seconds + `run_claude()` + split send (restored Phase 3 pattern).
 
 ## Streaming Response
 
@@ -346,26 +313,21 @@ Three event types are processed:
 
 The `result` event text is used first; if absent, accumulated streaming text is used.
 
-### Telegram Streaming Strategy
+### SSE Streaming Strategy
 
-Primary path uses `sendMessageDraft` (Bot API 9.5+, all bots, `python-telegram-bot>=22.6`):
+Primary path streams tokens to the PWA/dashboard via Server-Sent Events on `/api/chat` (the `ChatServer` endpoint):
 
-- `send_message_draft(chat_id, draft_id=1, text=html+▌, parse_mode=HTML)` at 0.5s (`STREAM_THROTTLE_SECONDS`) intervals
-- Attempts HTML-formatted draft first (`markdown_to_telegram_html(display)`); falls back to plain text on error
-- Requires at least 10 characters (`STREAM_MIN_CHARS_BEFORE_SEND`) before first draft
-- Cursor marker `▌` (`STREAMING_CURSOR`) appended to show progress
-- Draft cleared with `send_message_draft(text="")` before final message send
+- Chunks forwarded at 0.5s (`STREAM_THROTTLE_SECONDS`) intervals
+- Requires at least 10 characters (`STREAM_MIN_CHARS_BEFORE_SEND`) before first SSE event
+- Cursor marker `▌` (`STREAMING_CURSOR`) appended to show in-progress state in the UI
+- Final `[DONE]` SSE event signals completion
 
-Fallback path (if `sendMessageDraft` unavailable or fails):
-
-- First `reply_text()` after 10 chars, subsequent `edit_message_text()` at 0.5s intervals
-- Streaming preview stops at 4096 characters (`stream_stopped = True`)
-- On completion: single chunk → HTML-formatted edit; multiple chunks → delete preview + split send
+Fallback (if SSE connection drops mid-stream): accumulated text is returned as a single response body on reconnect.
 
 ### Typing Action
 
-For non-streaming paths (cron, heartbeat) and streaming-off conversation messages, the typing action approach is used.
-`send_action("typing")` sent every 4 seconds via `asyncio.create_task` for background execution.
+For non-streaming paths (cron, heartbeat) and streaming-off conversation messages, a loading indicator is shown.
+A pulse/spinner update is sent every 4 seconds via `asyncio.create_task` for background execution.
 
 ## File Receiving
 
@@ -381,7 +343,7 @@ Skills are classified by origin:
 - **Built-in** (`builtin`): Pre-packaged with abyss in `src/abyss/builtin_skills/`. Installable via `abyss skills install <name>`.
 - **Custom** (`custom`): User-created via `abyss skills add`. Can be markdown-only or tool-based.
 
-Internally, `skill.yaml` has a `type` field (cli/mcp/browser/None) for tool configuration, but the display (CLI `abyss skills` and Telegram `/skills`) shows origin-based classification (builtin/custom).
+Internally, `skill.yaml` has a `type` field (cli/mcp/browser/None) for tool configuration, but the display (CLI `abyss skills` and `/skills` slash command) shows origin-based classification (builtin/custom).
 
 ### CLAUDE.md Composition
 
@@ -423,7 +385,7 @@ and injects into the subprocess `env` parameter.
 `ensure_session()` maintains existing behavior (copies bot CLAUDE.md only when session CLAUDE.md doesn't exist).
 On skill attach/detach, `update_session_claude_md()` explicitly overwrites CLAUDE.md in all existing sessions.
 
-### Telegram /skills Handler
+### /skills Handler
 
 The `/skills` command queries installed skill list via `list_skills()`,
 and displays link status for each skill via `bots_using_skill()`.
@@ -469,9 +431,8 @@ jobs:
 
 ### Result Delivery
 
-- Sends to all `allowed_users` via `application.bot.send_message()`
-- In DMs, user_id == chat_id, so no separate chat ID management needed
-- **Session chat ID fallback**: When `allowed_users` is empty, `collect_session_chat_ids()` scans `sessions/chat_<id>/` directories to find users who have previously chatted with the bot. Skips sending only when both `allowed_users` and session chat IDs are empty
+- Appends result to the conversation log (`conversation-YYMMDD.md`) and delivers via Web Push
+- **Session chat ID fallback**: `collect_session_chat_ids()` scans `sessions/chat_<id>/` directories to find users who have previously chatted with the bot. Used to scope Web Push delivery
 - Prepends `[cron: job_name]` header to messages
 
 ### Working Directory Isolation
@@ -491,11 +452,11 @@ jobs:
 
 - Only the `message` field is editable. Name and schedule require remove + add.
 - **CLI**: `abyss cron edit <bot> <job>` opens `$EDITOR` (via `click.edit()`) pre-filled with current message. Save and close to apply; empty or unchanged content cancels.
-- **Telegram**: `/cron edit <name>` sends current message with `ForceReply` markup. User's next message becomes the new content.
-- **ForceReply state**: `pending_cron_edits: dict[int, str]` (chat_id -> job_name) in handler closure. `message_handler` checks this dict before normal message processing — if a pending edit exists for the chat, it processes the reply as a cron edit and returns early.
+- **Slash command**: `/cron edit <name>` sends current message for in-place editing. User's next message becomes the new content.
+- **Pending edit state**: `pending_cron_edits: dict[int, str]` (chat_id -> job_name) in handler closure. `message_handler` checks this dict before normal message processing — if a pending edit exists for the chat, it processes the reply as a cron edit and returns early.
 - `edit_cron_job_message()` in `cron.py` follows the same pattern as `enable_cron_job`/`disable_cron_job`: load config, find job by name, update field, save.
 
-### Telegram /skills Handler (Unified)
+### /skills Handler (Unified)
 
 The `/skills` handler manages skill listing, attach, and detach (previous `/skill` handler merged into `/skills`).
 The `attached_skills` variable in the handler closure tracks currently linked skills.
@@ -709,12 +670,12 @@ Midnight-crossing supported: When `start > end`, treated as overnight range (e.g
 ### Dynamic Config in Scheduler
 
 `run_heartbeat_scheduler()` re-reads bot.yaml via `load_bot_config()` every cycle.
-Runtime enable/disable via Telegram `/heartbeat on`/`off` takes effect from the next cycle.
+Runtime enable/disable via `/heartbeat on`/`off` slash command takes effect from the next cycle.
 
 ### HEARTBEAT.md Creation Timing
 
 On bot creation (`onboarding.py`), only the `heartbeat` config is added to bot.yaml; HEARTBEAT.md is not created.
-HEARTBEAT.md is auto-generated from default template when `abyss heartbeat enable` or Telegram `/heartbeat on` is executed and the file doesn't exist.
+HEARTBEAT.md is auto-generated from default template when `abyss heartbeat enable` or `/heartbeat on` is executed and the file doesn't exist.
 
 ### Working Directory
 
@@ -724,7 +685,7 @@ Same isolation pattern as cron_sessions/.
 
 ### Result Delivery
 
-Sends to all `allowed_users` in bot.yaml. Falls back to session chat IDs via `collect_session_chat_ids()` when `allowed_users` is empty (same fallback as cron).
+Appends result to the conversation log (`conversation-YYMMDD.md`) and delivers via Web Push. Falls back to session chat IDs via `collect_session_chat_ids()` for push targeting (same fallback as cron).
 Prepends `[heartbeat: bot_name]` header to messages.
 
 ## Supabase MCP Skill (No-Deletion Guardrails)
@@ -846,7 +807,7 @@ Each call runs in a fresh `tempfile.TemporaryDirectory()` — no session state, 
 
 ### Post-Save Propagation
 
-After saving compacted files, both CLI and Telegram handlers call `regenerate_bot_claude_md()` + `update_session_claude_md()` to propagate SKILL.md changes into bot and session CLAUDE.md files.
+After saving compacted files, both CLI and chat handlers call `regenerate_bot_claude_md()` + `update_session_claude_md()` to propagate SKILL.md changes into bot and session CLAUDE.md files.
 
 ## Encrypted Backup
 
@@ -928,55 +889,7 @@ Note: `test_claude_runner.py`'s `mock_claude_path` fixture uses `side_effect` (n
 
 ## Group Collaboration
 
-### Orchestrator Pattern
-
-Each group has one orchestrator and zero or more members. The orchestrator receives user messages and bot reports; members only respond to @mentions from bots.
-
-### Message Routing (`_should_handle_group_message`)
-
-Role-based filtering in `handlers.py`:
-
-- **Orchestrator**: Handles user messages (`not is_bot`) and member bot @mentions (bot message mentioning orchestrator's username). Requires Group Privacy OFF in BotFather.
-- **Member**: Only handles messages that @mention the member's username (from any sender — human or bot). With Telegram's **Bot-to-Bot Communication Mode** enabled in BotFather MiniApp, members receive orchestrator @mentions without Group Privacy OFF. Members can also receive peer @mentions from other members this way, enabling direct member-to-member delegation.
-- **Self-message**: All bots ignore their own messages (sender user_id == bot.id)
-
-### Authorization Bypass for Bots
-
-When `allowed_users` is configured, bot-to-bot @mention delegation would fail because bot user IDs aren't in the allowlist. Solution: in `message_handler`, group binding is checked **before** authorization. If the sender is a bot (`is_bot == True`) in a bound group, authorization is skipped entirely. Human users are still checked against `allowed_users`.
-
-### Shared Conversation Log
-
-All group messages are logged to `groups/<name>/conversation/YYMMDD.md` (UTC date):
-
-- **User input**: Logged in `message_handler` before `_should_handle_group_message`
-- **Claude response**: Logged in `_process_message` after `log_conversation`, via `find_group_by_chat_id` check
-- **Deduplication**: Each bot process that receives the same group update writes the incoming message. Since each bot only writes its own Claude response (not other bots'), response logs are not duplicated.
-- **Format**: `[HH:MM:SS] sender: content` where sender is "user" or "@bot_name"
-
-### Shared Workspace
-
-`groups/<name>/workspace/` is a flat directory shared by all group members. Bots write outputs here for inter-bot collaboration. The workspace is **preserved** on `/reset` (only conversation and sessions are cleared).
-
-### CLAUDE.md Group Context Injection
-
-`compose_group_claude_md()` in `skill.py` generates role-specific CLAUDE.md:
-
-- **Orchestrator**: Team roster (member names, usernames, roles), delegation rules (use @mention), synthesis instructions
-- **Member**: Own role context, shared conversation history (recent messages for context continuity)
-
-The group CLAUDE.md is written to each bot's session directory via `ensure_session()` when `find_group_by_chat_id()` returns a group config.
-
-### Session Reset in Groups
-
-`/reset` from orchestrator:
-1. Clears all bots' sessions (orchestrator + members) for this chat
-2. Clears shared conversation log
-3. Preserves shared workspace
-4. Members' `/reset` is ignored (only orchestrator can reset)
-
-### Session CLAUDE.md After Unbind
-
-When `/unbind` removes a group binding, existing session CLAUDE.md files retain stale group context. This is resolved on next message: `ensure_session()` regenerates CLAUDE.md from the current bot's `CLAUDE.md` (which no longer contains group context after the binding is removed).
+> **Removed in v2026.05.14.** Group collaboration shipped on top of Telegram (orchestrator/member pattern, shared conversation log, shared workspace, `compose_group_claude_md()`) and was retired with Telegram. The data model (`groups/<name>/group.yaml`, `conversation/`, `workspace/`) is preserved on disk as stubs for future PWA re-implementation.
 
 ## IME-Compatible CLI Input
 
