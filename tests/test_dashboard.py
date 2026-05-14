@@ -388,13 +388,20 @@ def test_dashboard_subcommand_no_longer_exists():
 
 def test_start_signature_drops_daemon_flag():
     """``abyss start`` exposes ``--foreground``/``--port`` instead of ``--daemon``."""
+    import re
+
     from typer.testing import CliRunner
 
     from abyss.cli import app
 
+    # Strip ANSI escapes — Typer + Rich split the dashes from the flag
+    # name with color codes when running on CI, so a plain substring
+    # check on the raw stdout misses ``--foreground``.
+    ansi = re.compile(r"\x1b\[[0-9;]*m")
     runner = CliRunner()
     result = runner.invoke(app, ["start", "--help"])
     assert result.exit_code == 0
-    assert "--daemon" not in result.stdout
-    assert "--foreground" in result.stdout
-    assert "--port" in result.stdout
+    stripped = ansi.sub("", result.stdout)
+    assert "--daemon" not in stripped
+    assert "--foreground" in stripped
+    assert "--port" in stripped

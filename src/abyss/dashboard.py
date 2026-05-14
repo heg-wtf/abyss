@@ -98,8 +98,11 @@ def stop_running() -> int | None:
     except (ProcessLookupError, PermissionError):
         try:
             os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
-            pass
+        except (ProcessLookupError, PermissionError) as fallback_error:
+            # Both killpg and kill failed — the process is already gone or
+            # owned by another user. Either way nothing left to do; log for
+            # diagnosability and proceed with PID-file cleanup.
+            logger.debug("stop_running could not signal PID %s: %s", pid, fallback_error)
     pid_file().unlink(missing_ok=True)
     return pid
 
@@ -264,8 +267,15 @@ def stop_handle(handle: DashboardHandle, *, timeout: float = 5.0) -> None:
     except (ProcessLookupError, PermissionError):
         try:
             process.terminate()
-        except (ProcessLookupError, PermissionError):
-            pass
+        except (ProcessLookupError, PermissionError) as terminate_error:
+            # SIGTERM via pgid and process.terminate both failed — the
+            # subprocess is already gone or unkillable from this user. Let
+            # the wait() below time out so the SIGKILL escalation runs.
+            logger.debug(
+                "stop_handle could not SIGTERM PID %s: %s",
+                process.pid,
+                terminate_error,
+            )
 
     try:
         process.wait(timeout=timeout)
