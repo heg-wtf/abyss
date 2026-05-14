@@ -650,9 +650,7 @@ class ChatServer:
 
         raw_name = body.get("name")
         if not isinstance(raw_name, str):
-            return web.json_response(
-                {"error": "name must be a string"}, status=400
-            )
+            return web.json_response({"error": "name must be a string"}, status=400)
 
         cleaned = _sanitise_custom_name(raw_name)
         meta = _load_session_meta(session_dir)
