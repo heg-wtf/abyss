@@ -1321,7 +1321,8 @@ async def test_chat_reply_triggers_push(client, abyss_home, patch_backend):
     """A completed chat reply pings ``web_push.send_push`` so subscribed
     devices receive a notification when the user is not actively
     looking at the dashboard."""
-    from unittest.mock import AsyncMock, patch as patch_fn
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch as patch_fn
 
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
@@ -1348,7 +1349,8 @@ async def test_slash_reply_does_not_trigger_push(client, abyss_home, patch_backe
     """Slash commands never invoke the LLM, so they should not page
     the user either — the response is synchronous to the same tab
     that fired it."""
-    from unittest.mock import AsyncMock, patch as patch_fn
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch as patch_fn
 
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
