@@ -1571,14 +1571,20 @@ def cron_run(
     bot: str = typer.Argument(help="Bot name"),
     job: str = typer.Argument(help="Job name"),
 ) -> None:
-    """Run a cron job immediately (for testing)."""
+    """Run a cron job immediately (for testing).
+
+    Calls ``execute_cron_job`` — the same function the scheduler
+    invokes — so the run logs to ``conversation-*.md``, updates the
+    FTS5 index, and fires a Web Push notification (when a PWA
+    subscription exists). The Routines tab will pick up the result
+    the next time it refreshes.
+    """
     import asyncio
 
     from rich.console import Console
 
-    from abyss.claude_runner import run_claude
-    from abyss.config import DEFAULT_MODEL, load_bot_config
-    from abyss.cron import cron_session_directory, get_cron_job
+    from abyss.config import load_bot_config
+    from abyss.cron import execute_cron_job, get_cron_job
 
     console = Console()
 
@@ -1592,32 +1598,16 @@ def cron_run(
         console.print(f"[red]Job '{job}' not found in bot '{bot}'.[/red]")
         raise typer.Exit(1)
 
-    message = cron_job.get("message", "")
-    model = cron_job.get("model") or bot_config.get("model", DEFAULT_MODEL)
-    job_skills = cron_job.get("skills") or bot_config.get("skills", [])
-    command_timeout = bot_config.get("command_timeout", 300)
-    working_directory = str(cron_session_directory(bot, job))
-
-    console.print(f"[cyan]Running job '{job}'...[/cyan]")
-    console.print(f"  Message: {message}")
-    console.print(f"  Model: {model}")
-
-    async def _run() -> str:
-        return await run_claude(
-            working_directory=working_directory,
-            message=message,
-            timeout=command_timeout,
-            session_key=f"cron:{bot}:{job}",
-            model=model,
-            skill_names=job_skills if job_skills else None,
-        )
-
+    console.print(f"[cyan]Running cron '{job}' for bot '{bot}'...[/cyan]")
     try:
-        response = asyncio.run(_run())
-        console.print(f"\n[green]Result:[/green]\n{response}")
+        asyncio.run(execute_cron_job(bot_name=bot, job=cron_job, bot_config=bot_config))
     except Exception as error:
         console.print(f"[red]Error: {error}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from error
+    console.print(
+        "\n[green]Done.[/green] Check the mobile Routines tab or the "
+        f"``conversation-*.md`` file under ``cron_sessions/{job}/`` for the reply."
+    )
 
 
 # --- Memory subcommands ---
@@ -1863,18 +1853,19 @@ def heartbeat_disable(bot: str = typer.Argument(help="Bot name")) -> None:
 
 @heartbeat_app.command("run")
 def heartbeat_run(bot: str = typer.Argument(help="Bot name")) -> None:
-    """Run heartbeat immediately (for testing)."""
+    """Run heartbeat immediately (for testing).
+
+    Calls ``execute_heartbeat`` — the same function the scheduler
+    invokes — so a run that produces real signal (no ``HEARTBEAT_OK``
+    marker) hits ``conversation-*.md`` + Web Push the same way a
+    scheduled heartbeat does.
+    """
     import asyncio
 
     from rich.console import Console
 
-    from abyss.claude_runner import run_claude
-    from abyss.config import DEFAULT_MODEL, load_bot_config
-    from abyss.heartbeat import (
-        HEARTBEAT_OK_MARKER,
-        heartbeat_session_directory,
-        load_heartbeat_markdown,
-    )
+    from abyss.config import load_bot_config
+    from abyss.heartbeat import execute_heartbeat, load_heartbeat_markdown
 
     console = Console()
 
@@ -1883,43 +1874,22 @@ def heartbeat_run(bot: str = typer.Argument(help="Bot name")) -> None:
         console.print(f"[red]Bot '{bot}' not found.[/red]")
         raise typer.Exit(1)
 
-    heartbeat_content = load_heartbeat_markdown(bot)
-    if not heartbeat_content:
+    if not load_heartbeat_markdown(bot):
         console.print(
             f"[yellow]No HEARTBEAT.md found. Run 'abyss heartbeat enable {bot}' first.[/yellow]"
         )
         raise typer.Exit(1)
 
-    model = bot_config.get("model", DEFAULT_MODEL)
-    attached_skills = bot_config.get("skills", [])
-    command_timeout = bot_config.get("command_timeout", 300)
-    working_directory = str(heartbeat_session_directory(bot))
-
-    message = f"다음 체크리스트를 확인하고 결과를 알려주세요.\n\n{heartbeat_content}"
-
     console.print(f"[cyan]Running heartbeat for '{bot}'...[/cyan]")
-    console.print(f"  Model: {model}")
-
-    async def _run() -> str:
-        return await run_claude(
-            working_directory=working_directory,
-            message=message,
-            timeout=command_timeout,
-            session_key=f"heartbeat:{bot}",
-            model=model,
-            skill_names=attached_skills if attached_skills else None,
-        )
-
     try:
-        response = asyncio.run(_run())
-        if HEARTBEAT_OK_MARKER in response:
-            console.print("\n[green]Result: HEARTBEAT_OK (no notification needed)[/green]")
-        else:
-            console.print("\n[yellow]Result: notification would be sent[/yellow]")
-        console.print(f"\n{response}")
+        asyncio.run(execute_heartbeat(bot_name=bot, bot_config=bot_config))
     except Exception as error:
         console.print(f"[red]Error: {error}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from error
+    console.print(
+        "\n[green]Done.[/green] Result lands in the mobile Routines tab "
+        "and the bot's ``heartbeat_sessions/conversation-*.md`` file."
+    )
 
 
 @heartbeat_app.command("edit")
