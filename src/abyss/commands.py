@@ -15,9 +15,10 @@ without leaking that state back into the pure command.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from abyss.config import (
     DEFAULT_MODEL,
@@ -40,22 +41,23 @@ from abyss.session import (
 logger = logging.getLogger(__name__)
 
 
-ParseMode = str  # "Markdown" | "HTML" | "None"
+ParseMode = Literal["Markdown", "HTML"]
 
 
 @dataclass
 class CommandResult:
     """Outcome of running a slash command.
 
-    Adapters convert this to a platform-specific reply (Telegram
-    message, dashboard SSE event, etc.).
+    The chat server adapter consumes this and emits a
+    ``command_result`` SSE event with ``text`` + the optional
+    ``file_path`` for ``/send``-style downloads.
     """
 
     text: str = ""
     parse_mode: ParseMode | None = "Markdown"
     file_path: Path | None = None  # Set by /send so the adapter uploads it.
     success: bool = True
-    silent: bool = False  # True means "do not send any reply" — kept for adapter parity.
+    silent: bool = False  # True means "do not send any reply".
 
 
 @dataclass
@@ -63,9 +65,9 @@ class CommandContext:
     """Inputs for a slash command.
 
     ``chat_id`` is the per-conversation key. The dashboard chat
-    server passes its session id (``str``). The ``int`` variant
-    used to exist for Telegram chats; it's no longer hit but is
-    kept in the type so call sites that still annotate it compile.
+    server passes its session id (``str``). The ``int`` variant is
+    retained on the type so future channels using numeric IDs can
+    plug in without touching every signature.
     """
 
     bot_name: str
@@ -176,10 +178,8 @@ async def cmd_memory(ctx: CommandContext) -> CommandResult:
         memory_content = load_bot_memory(ctx.bot_path)
         if not memory_content:
             return CommandResult(text="\U0001f9e0 No memories saved yet.", parse_mode=None)
-        # Adapter is responsible for HTML conversion + chunking when needed.
-        # ``parse_mode="HTML"`` mirrors the original Telegram path so the
-        # adapter can call ``markdown_to_telegram_html`` + ``split_message``
-        # before sending.
+        # ``parse_mode="HTML"`` so the chat surface escapes markdown
+        # control characters in raw MEMORY.md content (`*`, `_`, etc.).
         return CommandResult(text=memory_content, parse_mode="HTML")
 
     subcommand = ctx.args[0].lower()
@@ -197,9 +197,8 @@ async def cmd_resetall(ctx: CommandContext) -> CommandResult:
     """Delete the entire session directory.
 
     The adapter must close the SDK pool session for the same
-    ``bot_name:chat_id`` key after this returns, since pool lifecycle
-    is platform-specific (Telegram and dashboard may keep different
-    handles).
+    ``bot_name:chat_id`` key after this returns — pool lifecycle is
+    owned by the chat server, not by this function.
     """
 
     reset_all_session(ctx.bot_path, ctx.chat_id)
@@ -369,7 +368,7 @@ class CancelOutcome:
 async def cmd_cancel(
     ctx: CommandContext,
     *,
-    cancel_for: "callable",  # type: ignore[type-arg]
+    cancel_for: Callable[[str, str], Awaitable[bool]],
 ) -> CancelOutcome:
     """Stop the running Claude/SDK task for this session.
 
@@ -591,10 +590,9 @@ async def cmd_heartbeat_status(ctx: CommandContext) -> CommandResult:
 async def cmd_heartbeat(ctx: CommandContext) -> CommandResult:
     """Dispatch ``/heartbeat`` non-``run`` subcommands.
 
-    ``/heartbeat run`` requires a Telegram ``send_message`` callback to
-    deliver the heartbeat message, so the Telegram adapter keeps that
-    branch. Dashboards can call ``cmd_heartbeat`` for status/on/off
-    and surface a "not yet on dashboard" hint for ``run``.
+    ``/heartbeat run`` (manual trigger) is not wired into the PWA
+    chat yet; the chat server surfaces a "not yet wired" hint
+    instead of routing through this function.
     """
 
     from abyss.heartbeat import disable_heartbeat, enable_heartbeat
@@ -690,8 +688,8 @@ async def cmd_compact_run(ctx: CommandContext) -> CommandResult:
 
 # ---------------------------------------------------------------------------
 # Cron — list / add / remove / enable / disable / edit
-# (``run`` requires a platform-specific send_message callback and stays
-#  in the Telegram adapter.)
+# (``run`` is not yet wired into the PWA chat; the chat server returns
+#  a "not yet wired" hint instead of dispatching here.)
 # ---------------------------------------------------------------------------
 
 
@@ -857,9 +855,8 @@ async def cmd_cron(ctx: CommandContext) -> CommandResult:
 
 @dataclass
 class CronEditPrompt:
-    """Marker emitted by ``cmd_cron_edit_start`` so the adapter can ask
-    the user for the new message (Telegram uses ForceReply; dashboard
-    can render a follow-up input)."""
+    """Marker emitted by ``cmd_cron_edit_start`` so the adapter can
+    render a follow-up input for the new cron message."""
 
     job_name: str
     current_message: str
@@ -903,7 +900,7 @@ async def cmd_cron_edit_apply(
 
 
 # ---------------------------------------------------------------------------
-# Command metadata for adapters (dashboard autocomplete, Telegram BotCommand)
+# Command metadata for adapters (PWA / dashboard slash autocomplete)
 # ---------------------------------------------------------------------------
 
 
