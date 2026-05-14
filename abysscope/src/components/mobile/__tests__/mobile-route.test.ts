@@ -255,11 +255,10 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/href=\{message\.commandFile\.url\}/);
   });
 
-  it("desktop chat-message renders a download chip for commandFile prop", () => {
-    const source = read("components/chat/chat-message.tsx");
-    expect(source).toMatch(/CommandFileChip/);
-    expect(source).toMatch(/commandFile/);
-  });
+  // The desktop chat-message component was deleted along with the
+  // ``/chat`` route — mobile is the sole chat surface now, and the
+  // command-file chip lives in ``mobile-chat-screen.tsx`` (asserted
+  // earlier in this suite).
 
   it("service worker handles push and notificationclick", () => {
     const swPath = path.resolve(

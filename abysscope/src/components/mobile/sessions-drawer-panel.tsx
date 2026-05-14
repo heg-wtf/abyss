@@ -461,22 +461,30 @@ function DrawerFooter() {
   const { theme, setTheme } = useTheme();
   const mounted = useHydrated();
   const isDark = theme === "dark";
+  // ``NEXT_PUBLIC_ABYSS_VERSION`` is injected at build time (see the
+  // desktop sidebar for the canonical reference). Fall back to
+  // ``dev`` when running outside the packaged wheel so a local
+  // checkout doesn't pretend to be a released version.
+  const version = process.env.NEXT_PUBLIC_ABYSS_VERSION || "dev";
 
   return (
-    <div className="flex shrink-0 items-center justify-end gap-2 border-t bg-background/80 px-3 py-2 backdrop-blur">
-      <PushToggle />
-      {mounted ? (
-        <button
-          type="button"
-          aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="flex size-9 items-center justify-center rounded-md border bg-background text-foreground transition-colors hover:bg-muted"
-        >
-          {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-        </button>
-      ) : (
-        <div className="size-9" aria-hidden />
-      )}
+    <div className="flex shrink-0 items-center justify-between gap-2 border-t bg-background/80 px-3 py-2 backdrop-blur">
+      <span className="font-mono text-xs text-muted-foreground">{version}</span>
+      <div className="flex items-center gap-2">
+        <PushToggle />
+        {mounted ? (
+          <button
+            type="button"
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={() => setTheme(isDark ? "light" : "dark")}
+            className="flex size-9 items-center justify-center rounded-md border bg-background text-foreground transition-colors hover:bg-muted"
+          >
+            {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </button>
+        ) : (
+          <div className="size-9" aria-hidden />
+        )}
+      </div>
     </div>
   );
 }
