@@ -144,6 +144,12 @@ ALLOWED_ORIGINS = {
 
 _BOT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 _SESSION_ID_PATTERN = re.compile(rf"^{re.escape(WEB_SESSION_PREFIX)}[a-f0-9]{{6,32}}$")
+# Cron job names land on disk as folder names under
+# ``cron_sessions/``. The cron loader sanitises them, but we still
+# guard the API path so a stray symlink or hand-edited folder cannot
+# escape into another part of ``~/.abyss``.
+_ROUTINE_JOB_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_ROUTINE_KIND_PATTERN = re.compile(r"^(cron|heartbeat)$")
 _ATTACHMENT_NAME_PATTERN = re.compile(
     r"^[a-zA-Z0-9_-]{1,16}__[\w가-힣\-]{1,80}\.(png|jpg|jpeg|webp|gif|pdf)$"
 )
@@ -433,6 +439,86 @@ def _sanitise_custom_name(raw: str) -> str:
     return cleaned
 
 
+def _routine_metadata(
+    *,
+    bot_name: str,
+    bot_display_name: str,
+    kind: str,
+    job_name: str,
+    session_dir: Path,
+) -> dict[str, Any]:
+    """Build the JSON entry for a single routine (cron job / heartbeat).
+
+    The shape intentionally overlaps with ``_session_metadata`` so the
+    mobile Routines tab can use the same row component as Chats — the
+    only extra fields are ``kind`` (``"cron"`` / ``"heartbeat"``) and
+    ``job_name`` for the detail-page URL.
+    """
+    files = sorted(session_dir.glob("conversation-*.md"))
+    preview = ""
+    if files:
+        try:
+            content = files[-1].read_text()
+            sections = list(_SECTION_PATTERN.finditer(content))
+            if sections:
+                # Assistant reply is what the user wants to see in the
+                # list preview — for cron / heartbeat that's the
+                # actual run output.
+                last_assistant = next(
+                    (m for m in reversed(sections) if m.group(1) == "assistant"),
+                    sections[-1],
+                )
+                preview = last_assistant.group(3).strip().replace("\n", " ")[:SESSION_PREVIEW_CHARS]
+        except OSError:
+            pass
+
+    # ``mtime`` of the session dir tracks the last run regardless of
+    # whether a conversation file was written (e.g. older cron runs
+    # that pre-date the markdown logging). For heartbeat we prefer the
+    # newest conversation file's mtime because the directory itself
+    # may have been created at install time.
+    try:
+        if files:
+            mtime = max(f.stat().st_mtime for f in files)
+        else:
+            mtime = session_dir.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+
+    return {
+        "bot": bot_name,
+        "bot_display_name": bot_display_name,
+        "kind": kind,
+        "job_name": job_name,
+        "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+        "preview": preview,
+    }
+
+
+def _resolve_routine_dir(bot_name: str, kind: str, job_name: str) -> Path | None:
+    """Resolve a ``(bot, kind, job)`` triple to a routine session dir.
+
+    Returns ``None`` if any input fails validation, the bot is unknown,
+    or the routine kind is not one we serve. Defensive against path
+    traversal: every segment is regex-validated before joining.
+    """
+    if not _BOT_NAME_PATTERN.match(bot_name):
+        return None
+    if not _ROUTINE_KIND_PATTERN.match(kind):
+        return None
+    if not _ROUTINE_JOB_PATTERN.match(job_name):
+        return None
+    bot_path = bot_directory(bot_name)
+    if not bot_path.exists():
+        return None
+    if kind == "cron":
+        return bot_path / "cron_sessions" / job_name
+    # ``heartbeat`` has a single, per-bot directory regardless of the
+    # ``job_name`` slug — we still validated the slug above so a
+    # mistyped URL doesn't escape the bot's directory.
+    return bot_path / "heartbeat_sessions"
+
+
 def _session_metadata(
     bot_name: str,
     session_dir: Path,
@@ -522,6 +608,11 @@ class ChatServer:
             self._handle_rename_session,
         )
         router.add_get("/chat/sessions/{bot}/{session_id}/messages", self._handle_get_messages)
+        router.add_get("/chat/routines", self._handle_list_routines)
+        router.add_get(
+            "/chat/routines/{bot}/{kind}/{job}/messages",
+            self._handle_get_routine_messages,
+        )
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
         router.add_post("/chat/transcribe", self._handle_transcribe)
@@ -769,6 +860,73 @@ class ChatServer:
         if not session_dir.exists():
             return web.json_response({"messages": []})
         messages = _parse_conversation_messages(session_dir, bot_name, session_id)
+        return web.json_response({"messages": messages})
+
+    async def _handle_list_routines(self, _request: web.Request) -> web.Response:
+        """List every cron job + heartbeat session across all bots.
+
+        Each entry mirrors the ``_session_metadata`` shape used by the
+        chat sessions endpoint so the mobile Routines tab can render
+        rows with the same component as the Chats tab.
+        """
+        config = load_config() or {}
+        out: list[dict[str, Any]] = []
+        for entry in config.get("bots") or []:
+            bot_name = entry.get("name")
+            if not bot_name:
+                continue
+            try:
+                _validate_bot_name(bot_name)
+            except web.HTTPError:
+                continue
+            bot_path = bot_directory(bot_name)
+            if not bot_path.exists():
+                continue
+            display = _bot_display_name(bot_name)
+
+            cron_root = bot_path / "cron_sessions"
+            if cron_root.is_dir():
+                for job_dir in sorted(cron_root.iterdir()):
+                    if not job_dir.is_dir():
+                        continue
+                    if not _ROUTINE_JOB_PATTERN.match(job_dir.name):
+                        continue
+                    out.append(
+                        _routine_metadata(
+                            bot_name=bot_name,
+                            bot_display_name=display,
+                            kind="cron",
+                            job_name=job_dir.name,
+                            session_dir=job_dir,
+                        )
+                    )
+
+            heartbeat_dir = bot_path / "heartbeat_sessions"
+            if heartbeat_dir.is_dir() and any(heartbeat_dir.iterdir()):
+                out.append(
+                    _routine_metadata(
+                        bot_name=bot_name,
+                        bot_display_name=display,
+                        kind="heartbeat",
+                        job_name="heartbeat",
+                        session_dir=heartbeat_dir,
+                    )
+                )
+
+        out.sort(key=lambda r: r["updated_at"], reverse=True)
+        return web.json_response({"routines": out})
+
+    async def _handle_get_routine_messages(self, request: web.Request) -> web.Response:
+        bot_name = request.match_info["bot"]
+        kind = request.match_info["kind"]
+        job_name = request.match_info["job"]
+        session_dir = _resolve_routine_dir(bot_name, kind, job_name)
+        if session_dir is None or not session_dir.exists():
+            return web.json_response({"messages": []})
+        # Routines never carry uploads, so the attachment-aware bot /
+        # session strings used by ``_parse_conversation_messages``
+        # don't matter — pass empty placeholders.
+        messages = _parse_conversation_messages(session_dir, "", "")
         return web.json_response({"messages": messages})
 
     async def _handle_cancel(self, request: web.Request) -> web.Response:
