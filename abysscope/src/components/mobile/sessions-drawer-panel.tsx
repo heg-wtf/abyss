@@ -2,20 +2,17 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
-import { useTheme } from "next-themes";
 import {
   Clock,
   HeartPulse,
   MessageSquarePlus,
-  Moon,
   MoreVertical,
   Pencil,
-  Sun,
   Trash2,
 } from "lucide-react";
 import { PushToggle } from "@/components/mobile/push-toggle";
+import { SettingsButton } from "@/components/settings-button";
 import { BotAvatar } from "@/components/bot-avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -451,25 +448,14 @@ function RoutineKindIcon({ kind }: { kind: RoutineSummary["kind"] }) {
   return <Icon className="size-3.5 shrink-0 text-muted-foreground" />;
 }
 
-function useHydrated() {
-  return useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
-}
-
 /**
  * Pinned bottom strip inside the sessions drawer.
  *
- * Hosts the dark-mode toggle. ``next-themes`` only knows the resolved
- * theme after hydration, so the body skips SSR via ``useHydrated``
- * to avoid a one-frame icon flicker.
+ * Hosts the Web Push toggle and the settings entry point. The settings
+ * dialog now owns the theme picker so this footer no longer needs the
+ * hydration dance — the dialog component does it internally.
  */
 function DrawerFooter() {
-  const { theme, setTheme } = useTheme();
-  const mounted = useHydrated();
-  const isDark = theme === "dark";
   // ``NEXT_PUBLIC_ABYSS_VERSION`` is injected at build time (see the
   // desktop sidebar for the canonical reference). Fall back to
   // ``dev`` when running outside the packaged wheel so a local
@@ -481,18 +467,7 @@ function DrawerFooter() {
       <span className="font-mono text-xs text-muted-foreground">{version}</span>
       <div className="flex items-center gap-2">
         <PushToggle />
-        {mounted ? (
-          <button
-            type="button"
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            onClick={() => setTheme(isDark ? "light" : "dark")}
-            className="flex size-9 items-center justify-center rounded-md border bg-background text-foreground transition-colors hover:bg-muted"
-          >
-            {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-          </button>
-        ) : (
-          <div className="size-9" aria-hidden />
-        )}
+        <SettingsButton />
       </div>
     </div>
   );
