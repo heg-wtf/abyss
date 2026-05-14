@@ -90,6 +90,13 @@ function SidebarImpl() {
             active={pathname === "/"}
           />
           <CollapsedLink
+            href="/mobile"
+            label="Chats"
+            icon="💬"
+            active={false}
+            newTab
+          />
+          <CollapsedLink
             href="/bots"
             label="Bots"
             icon="🤖"
@@ -151,6 +158,21 @@ function SidebarImpl() {
           <span>🏠</span>
           <span>Dashboard</span>
         </Link>
+
+        <a
+          href="/mobile"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open mobile chat in a new tab"
+          className={cn(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+        >
+          <span>💬</span>
+          <span>Chats</span>
+          <span className="ml-auto text-[10px] text-muted-foreground">↗</span>
+        </a>
 
         <div>
           <button
@@ -290,20 +312,45 @@ interface CollapsedLinkProps {
   label: string;
   icon: string;
   active: boolean;
+  /** Open in a new tab via ``target="_blank"``. Used for the Chats entry
+   * that points to the mobile PWA — convenient to leave a chat session
+   * open side-by-side with the dashboard. */
+  newTab?: boolean;
 }
 
-function CollapsedLink({ href, label, icon, active }: CollapsedLinkProps) {
+function CollapsedLink({
+  href,
+  label,
+  icon,
+  active,
+  newTab = false,
+}: CollapsedLinkProps) {
+  const className = cn(
+    "flex h-9 items-center justify-center rounded-md text-base transition-colors",
+    active
+      ? "bg-accent text-accent-foreground"
+      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+  );
+  if (newTab) {
+    return (
+      <a
+        href={href}
+        title={label}
+        aria-label={label}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={className}
+      >
+        <span>{icon}</span>
+      </a>
+    );
+  }
   return (
     <Link
       href={href}
       title={label}
       aria-label={label}
-      className={cn(
-        "flex h-9 items-center justify-center rounded-md text-base transition-colors",
-        active
-          ? "bg-accent text-accent-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-      )}
+      className={className}
     >
       <span>{icon}</span>
     </Link>
