@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import { Download, FileText, User } from "lucide-react";
 import { BotAvatar } from "@/components/bot-avatar";
 import { cn } from "@/lib/utils";
@@ -83,7 +85,9 @@ export function ChatMessage({
         )}
         <div className="prose prose-sm dark:prose-invert min-w-0 max-w-none break-words [overflow-wrap:anywhere]">
           {role === "assistant" ? (
-            <ReactMarkdown>{content || (streaming ? "…" : "")}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkBreaks, remarkGfm]}>
+              {content || (streaming ? "…" : "")}
+            </ReactMarkdown>
           ) : content ? (
             <div className="whitespace-pre-wrap">{content}</div>
           ) : null}

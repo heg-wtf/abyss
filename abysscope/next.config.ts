@@ -1,5 +1,12 @@
 import type { NextConfig } from "next";
-import path from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// ``__dirname`` is undefined in ESM-compiled TS configs, so resolving
+// the workspace root through it leaked an "abysscope/abysscope" build
+// path on the last attempt. Derive the directory from
+// ``import.meta.url`` instead — that always points at the file.
+const here = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   devIndicators: false,
@@ -8,7 +15,7 @@ const nextConfig: NextConfig = {
   // Without this the production build silently collapses to a
   // ``pages``-only output that ignores everything under ``app/``.
   turbopack: {
-    root: path.resolve(__dirname),
+    root: resolve(here),
   },
 };
 

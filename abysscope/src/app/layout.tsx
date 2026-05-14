@@ -5,6 +5,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import { WebPushProvider } from "@/components/web-push-provider";
+import { PwaFreshness } from "@/components/pwa-freshness";
 
 /**
  * Pretendard variable — Korean + Latin in one file (~2 MB woff2).
@@ -72,6 +73,13 @@ export default function RootLayout({
             not just the one that happens to render the bell toggle.
           */}
           <WebPushProvider>
+            {/*
+              ``PwaFreshness`` forces a network reload when the iOS
+              standalone shell restores us from BFCache (or wakes up
+              after being hidden for too long). Without this, the
+              user sees yesterday's UI until they pull-to-refresh.
+            */}
+            <PwaFreshness />
             <div className="flex h-screen">
               <Sidebar />
               <main className="flex-1 overflow-auto p-6">{children}</main>

@@ -55,14 +55,27 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/viewportFit: "cover"/);
   });
 
-  it("/mobile is the chat list (no redirect hop)", () => {
+  it("/mobile resolves to the most recent chat or a bootstrap fallback", () => {
     const source = read("app/mobile/page.tsx");
+    // Full sessions screen is gone — drawer is the only session
+    // switcher. ``/mobile`` either redirects into the latest chat or
+    // shows a bootstrap fallback when no chat exists yet.
     expect(source).toMatch(/listChatBots/);
-    expect(source).toMatch(/MobileSessionsScreen/);
+    expect(source).toMatch(/listChatSessions/);
+    expect(source).toMatch(/redirect\(/);
+    expect(source).toMatch(/MobileBootstrapScreen/);
     expect(source).toMatch(/force-dynamic/);
-    // The earlier redirect to ``/mobile/sessions`` is gone — direct
-    // render instead.
-    expect(source).not.toMatch(/redirect\(/);
+    expect(source).not.toMatch(/MobileSessionsScreen/);
+  });
+
+  it("bootstrap screen handles the no-chat / no-bot / offline cases", () => {
+    const source = read("components/mobile/mobile-bootstrap-screen.tsx");
+    expect(source).toMatch(/apiOnline/);
+    expect(source).toMatch(/bots\.length === 0/);
+    // Inline session creation uses the Next.js proxy so the phone
+    // hits the Mac instead of its own loopback.
+    expect(source).toMatch(/"\/api\/chat\/sessions"/);
+    expect(source).toMatch(/router\.replace\(/);
   });
 
   it("/mobile/sessions stays as a backward-compat redirect", () => {
@@ -78,28 +91,25 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/function SidebarImpl/);
   });
 
-  it("mobile sessions screen wires bot picker, rename, and delete flows", () => {
-    const source = read("components/mobile/mobile-sessions-screen.tsx");
-    // Bot picker uses base-ui Menu (matches the desktop chat-session-list).
-    expect(source).toMatch(/Menu\.Root/);
+  it("drawer session list owns rename / delete / inline-create flows", () => {
+    const source = read("components/mobile/sessions-drawer-panel.tsx");
     // Client-side fetches MUST hit the Next.js proxy (``/api/chat/...``)
     // and not the ``abyss-api`` helpers that point at the
     // ``127.0.0.1:3848`` sidecar — on a phone, ``127.0.0.1`` is the
     // phone, not the Mac, so direct calls silently fail.
     expect(source).toMatch(/fetch\(\s*`\/api\/chat\/sessions\?bot=/);
     expect(source).toMatch(/fetch\("\/api\/chat\/sessions"/);
-    expect(source).toMatch(/\/api\/chat\/sessions\/\$\{[^}]+bot[^}]*\}\/\$\{[^}]+id[^}]*\}/);
     expect(source).toMatch(/\/rename/);
     expect(source).not.toMatch(/listChatSessions\(/);
     expect(source).not.toMatch(/renameChatSession\(/);
     expect(source).not.toMatch(/deleteChatSession\(/);
     expect(source).not.toMatch(/createChatSession\(/);
-    // Long-press contract: touchstart + touchend cancel.
-    expect(source).toMatch(/useLongPress/);
-    expect(source).toMatch(/onTouchStart/);
-    expect(source).toMatch(/onTouchEnd/);
-    // Custom name takes priority over bot display name.
-    expect(source).toMatch(/session\.custom_name/);
+    // Custom name takes priority over bot display name (drawer uses
+    // ``sess`` as the loop var, sub-dialogs use ``session``).
+    expect(source).toMatch(/(?:sess|session)\.custom_name/);
+    // Per-row actions: ⋮ button + right-click both open the menu.
+    expect(source).toMatch(/onContextMenu/);
+    expect(source).toMatch(/MoreVertical/);
   });
 
   it("api helper exposes renameChatSession and proxy route exists", () => {
@@ -115,14 +125,22 @@ describe("/mobile route skeleton", () => {
 
   it("chat screen renders header + input bar + workspace + slash sheets", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
-    // Header has back link to sessions list and workspace toggle.
-    expect(source).toMatch(/href="\/mobile"/);
+    // Hamburger opens the sessions slide-drawer rather than
+    // navigating away from the chat — the user explicitly asked
+    // for the "drawer pushes the chat" pattern.
+    expect(source).toMatch(/aria-label="Open sessions"/);
+    expect(source).toMatch(/setSessionsOpen\(true\)/);
     expect(source).toMatch(/aria-label="Workspace files"/);
     // Input bar order: slash, attach, textarea, send/voice toggle.
     expect(source).toMatch(/aria-label="Slash commands"/);
     expect(source).toMatch(/aria-label="Attach file"/);
     expect(source).toMatch(/aria-label="Send message"/);
-    expect(source).toMatch(/aria-label="Voice/);
+    // Voice button has two states (recording / idle), so we just
+    // pin the start-recording label.
+    expect(source).toMatch(/Start voice dictation/);
+    // Workspace + sessions slide in from the side instead of
+    // stacking a centred Dialog.
+    expect(source).toMatch(/<SlideDrawer/);
     // Workspace sheet reuses the existing WorkspaceTree component.
     expect(source).toMatch(/WorkspaceTree/);
     // Slash command sheet hits the catalog endpoint.
@@ -269,15 +287,19 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/setInterval/);
   });
 
-  it("mobile sessions header exposes the push toggle", () => {
-    const source = read("components/mobile/mobile-sessions-screen.tsx");
-    expect(source).toMatch(/PushToggle/);
-    // The toggle pulls state from the shared provider — calling
-    // ``useWebPush`` directly here would mount a second instance and
-    // re-register notification-click + visibility listeners.
-    expect(source).toMatch(/useWebPushContext/);
-    expect(source).not.toMatch(/= useWebPush\(/);
-    expect(source).toMatch(/Add to Home Screen/);
+  it("push toggle lives in its own module and is mounted in the drawer footer", () => {
+    const toggle = read("components/mobile/push-toggle.tsx");
+    expect(toggle).toMatch(/export function PushToggle/);
+    // Reads from the shared provider — calling ``useWebPush``
+    // directly here would mount a second instance and re-register
+    // notification-click + visibility listeners.
+    expect(toggle).toMatch(/useWebPushContext/);
+    expect(toggle).not.toMatch(/= useWebPush\(/);
+    expect(toggle).toMatch(/Add to Home Screen/);
+
+    const drawer = read("components/mobile/sessions-drawer-panel.tsx");
+    expect(drawer).toMatch(/import \{ PushToggle \}/);
+    expect(drawer).toMatch(/<PushToggle \/>/);
   });
 
   it("root layout mounts WebPushProvider once for every page", () => {
@@ -330,14 +352,39 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/with open\(result\.file_path, "rb"\) as document:/);
   });
 
-  it("workspace sheet defers its chrome to WorkspaceTree's own header", () => {
+  it("workspace and sessions slide in from the side instead of a centred modal", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
-    // WorkspaceTree already renders a header with Workspace title +
-    // Finder + Refresh + Close buttons. Letting the Dialog render its
-    // own header / close button would surface two titles and two X
-    // buttons (the bug the user reported). We keep the title in
-    // sr-only form for a11y and disable the Dialog's built-in close.
-    expect(source).toMatch(/showCloseButton=\{false\}/);
-    expect(source).toMatch(/DialogTitle className="sr-only">Workspace/);
+    // Workspace + sessions both go through the shared SlideDrawer
+    // primitive. The Dialog-based workspace (with its showCloseButton
+    // and sr-only DialogTitle dance to avoid a duplicated header)
+    // is gone — the slide drawer lets WorkspaceTree own the chrome
+    // naturally, and the user gets the "push the chat aside" feel
+    // they asked for.
+    expect(source).toMatch(/side="right"/);
+    expect(source).toMatch(/side="left"/);
+    // The user is no longer routed off to ``/mobile`` for sessions;
+    // hamburger now just opens the drawer.
+    expect(source).not.toMatch(/href="\/mobile"/);
+  });
+
+  it("SlideDrawer is a generic left/right side drawer with backdrop", () => {
+    const source = read("components/mobile/slide-drawer.tsx");
+    expect(source).toMatch(/side: "left" \| "right"/);
+    expect(source).toMatch(/Escape/);
+    expect(source).toMatch(/translate-x-0/);
+    expect(source).toMatch(/-translate-x-full/);
+  });
+
+  it("chat screen wires voice dictation and swipe navigation", () => {
+    const source = read("components/mobile/mobile-chat-screen.tsx");
+    // Mic button used to be a disabled stub. It now drives a real
+    // dictation pipeline backed by ElevenLabs Scribe through the
+    // shared ``useVoiceMode`` hook.
+    expect(source).toMatch(/useVoiceMode/);
+    expect(source).toMatch(/onTranscript:/);
+    // Horizontal swipes on the message area page between sibling
+    // sessions of the same bot.
+    expect(source).toMatch(/onMessagesTouchStart/);
+    expect(source).toMatch(/goToSibling/);
   });
 });

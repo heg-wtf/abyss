@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Folder,
@@ -25,6 +27,8 @@ import {
 // flows below; the workspace sheet drops it because WorkspaceTree
 // provides its own header.
 import { WorkspaceTree } from "@/components/chat/workspace-tree";
+import { SessionsDrawerPanel } from "@/components/mobile/sessions-drawer-panel";
+import { SlideDrawer } from "@/components/mobile/slide-drawer";
 import {
   ALLOWED_UPLOAD_MIME_TYPES,
   MAX_UPLOADS_PER_MESSAGE,
@@ -40,6 +44,7 @@ import {
   getSessionStream,
   useMultiSessionChatStream,
 } from "@/components/chat/use-chat-stream";
+import { useVoiceMode } from "@/components/chat/use-voice-mode";
 
 interface Props {
   bots: BotSummary[];
@@ -108,7 +113,9 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     null
   );
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
+  const [sessionsOpen, setSessionsOpen] = React.useState(false);
   const [slashOpen, setSlashOpen] = React.useState(false);
+  const router = useRouter();
   const [slashCommands, setSlashCommands] = React.useState<
     SlashCommandSpec[] | null
   >(null);
@@ -119,6 +126,69 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
 
   const stream = useMultiSessionChatStream();
   const activeStream = getSessionStream(stream.streams, session.id);
+
+  // Voice dictation — taps the mic, transcribes via ElevenLabs
+  // Scribe (the same backend the desktop chat already uses), drops
+  // the result into the textarea so the user can review + tap send.
+  // We deliberately do not auto-send: voice transcripts are easy to
+  // misfire and the desktop pattern of "speak → bot replies via TTS"
+  // belongs to a follow-up that wires the orb UI back in.
+  const voice = useVoiceMode({
+    onTranscript: (text) => {
+      setDraft((current) => (current ? `${current} ${text}` : text));
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
+  });
+
+  // Swipe gesture: drag left = next chat, drag right = previous.
+  // The chat page loads the active bot's sessions on demand so the
+  // swipe targets stay in sync with the sessions drawer.
+  const [siblingSessions, setSiblingSessions] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/chat/sessions?bot=${encodeURIComponent(session.bot)}`)
+      .then((r) => (r.ok ? r.json() : { sessions: [] }))
+      .then((data: { sessions: Array<{ id: string }> }) => {
+        if (cancelled) return;
+        setSiblingSessions(data.sessions.map((s) => s.id));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [session.bot, session.id]);
+
+  const goToSibling = React.useCallback(
+    (offset: -1 | 1) => {
+      if (siblingSessions.length < 2) return;
+      const index = siblingSessions.indexOf(session.id);
+      if (index === -1) return;
+      const next = siblingSessions[index + offset];
+      if (!next) return;
+      router.push(`/mobile/chat/${session.bot}/${next}`);
+    },
+    [siblingSessions, session.id, session.bot, router],
+  );
+
+  const swipeStartRef = React.useRef<{ x: number; y: number } | null>(null);
+  const onMessagesTouchStart = (event: React.TouchEvent<HTMLElement>) => {
+    const touch = event.touches[0];
+    swipeStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+  const onMessagesTouchEnd = (event: React.TouchEvent<HTMLElement>) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start) return;
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    // Horizontal-dominant + meaningful distance only. Threshold of
+    // 80px keeps an accidental finger-drag from triggering a chat
+    // switch when the user is just scrolling.
+    if (Math.abs(dx) < 80) return;
+    if (Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    goToSibling(dx > 0 ? -1 : 1);
+  };
 
   // Auto-scroll to bottom. On first paint (entering a chat with an
   // existing transcript) jump instantly so the user lands on the most
@@ -326,13 +396,14 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     <div className="flex h-full min-w-0 flex-col overflow-x-hidden">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
-        <Link
-          href="/mobile"
-          aria-label="Back to sessions"
+        <button
+          type="button"
+          onClick={() => setSessionsOpen(true)}
+          aria-label="Open sessions"
           className="rounded-md p-2 hover:bg-muted"
         >
           <MenuIcon className="size-5" />
-        </Link>
+        </button>
         <BotAvatar
           botName={session.bot}
           displayName={botSummary.display_name}
@@ -356,8 +427,13 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         </button>
       </header>
 
-      {/* Messages */}
-      <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      {/* Messages. Touch handlers turn a horizontal-dominant drag
+          of ≥80 px into a chat switch — left→next, right→previous. */}
+      <main
+        className="min-h-0 flex-1 overflow-y-auto px-3 py-4"
+        onTouchStart={onMessagesTouchStart}
+        onTouchEnd={onMessagesTouchEnd}
+      >
         {messages.length === 0 && !activeStream.streaming && (
           <p className="mt-8 text-center text-sm text-muted-foreground">
             Send a message to start the conversation.
@@ -370,6 +446,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           {activeStream.streaming && (
             <li className="flex min-w-0 justify-start">
               <div className="min-w-0 max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3 py-2 text-sm">
+                <StreamProgress streaming={activeStream.streaming} />
                 {activeStream.text ? (
                   <MarkdownBody content={activeStream.text} />
                 ) : (
@@ -463,10 +540,32 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           ) : (
             <button
               type="button"
-              aria-label="Voice (coming soon)"
-              disabled
-              className="rounded-full p-2 text-muted-foreground"
-              title="Voice mode lands in a later phase"
+              aria-label={
+                voice.voiceState === "recording"
+                  ? "Stop recording"
+                  : "Start voice dictation"
+              }
+              onClick={() => {
+                if (voice.voiceState === "recording") {
+                  voice.stop();
+                } else if (voice.voiceState === "idle") {
+                  voice.start();
+                }
+              }}
+              disabled={
+                voice.voiceState === "processing" ||
+                voice.voiceState === "speaking"
+              }
+              className={`rounded-full p-2 transition-colors ${
+                voice.voiceState === "recording"
+                  ? "bg-destructive text-destructive-foreground"
+                  : "text-muted-foreground hover:bg-muted"
+              } disabled:opacity-50`}
+              title={
+                voice.voiceState === "recording"
+                  ? "녹음 중 — 탭해서 종료"
+                  : "음성 입력"
+              }
             >
               <Mic className="size-5" />
             </button>
@@ -474,33 +573,53 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         </div>
       </footer>
 
-      {/* Workspace sheet. ``WorkspaceTree`` already renders its own
-          header (title + Finder / Refresh / Close), so we strip the
-          Dialog's default chrome — no DialogHeader, no built-in close
-          X — to avoid a duplicated "Workspace" title and a second close
-          button next to WorkspaceTree's own. ``DialogTitle`` stays in
-          sr-only form so screen readers still announce the sheet. */}
-      <Dialog
-        open={workspaceOpen}
-        onOpenChange={(open) => setWorkspaceOpen(open)}
+      {/* Sessions slide-in (hamburger → left). Pushes the chat aside
+          so the user can pick another chat without losing the
+          current one's place. Tapping the backdrop or a session row
+          closes the drawer; if a different chat is selected we
+          navigate there. */}
+      <SlideDrawer
+        side="left"
+        open={sessionsOpen}
+        onClose={() => setSessionsOpen(false)}
+        backdropLabel="Close sessions"
       >
-        <DialogContent
-          className="h-[90vh] max-w-md overflow-hidden p-0"
-          showCloseButton={false}
-        >
-          <DialogTitle className="sr-only">Workspace</DialogTitle>
-          <DialogDescription className="sr-only">
-            Files for {session.bot} session {session.id}
-          </DialogDescription>
-          <div className="h-full overflow-hidden">
-            <WorkspaceTree
-              bot={session.bot}
-              sessionId={session.id}
-              onClose={() => setWorkspaceOpen(false)}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+        <SessionsDrawerPanel
+          activeBot={session.bot}
+          activeSessionId={session.id}
+          onSelect={(target) => {
+            setSessionsOpen(false);
+            if (target.bot !== session.bot || target.id !== session.id) {
+              router.push(`/mobile/chat/${target.bot}/${target.id}`);
+            }
+          }}
+          onCreate={(botName, newSessionId) => {
+            setSessionsOpen(false);
+            router.push(`/mobile/chat/${botName}/${newSessionId}`);
+          }}
+        />
+      </SlideDrawer>
+
+      {/* Workspace slide-in. Pushes the chat aside (transform-based)
+          instead of stacking a centred modal — the user explicitly
+          asked for the "drawer pushes the chat" pattern.
+          ``WorkspaceTree`` already renders its own header + Finder /
+          Refresh / Close, so the drawer chrome stays minimal. */}
+      <SlideDrawer
+        side="right"
+        open={workspaceOpen}
+        onClose={() => setWorkspaceOpen(false)}
+        backdropLabel="Close workspace"
+        className="w-[90vw] max-w-md"
+      >
+        <div className="flex-1 overflow-hidden">
+          <WorkspaceTree
+            bot={session.bot}
+            sessionId={session.id}
+            onClose={() => setWorkspaceOpen(false)}
+          />
+        </div>
+      </SlideDrawer>
 
       {/* Slash command sheet */}
       <Dialog
@@ -539,6 +658,40 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
 // ---------------------------------------------------------------------------
 // Pieces
 // ---------------------------------------------------------------------------
+
+/**
+ * Elapsed-time badge for an in-flight reply, à la Claude Desktop.
+ *
+ * Renders a tiny sparkle + "Ns" pill at the top of the streaming
+ * bubble. The seconds counter updates once a second via a single
+ * ``setInterval`` that resets whenever the bubble unmounts (which
+ * happens on stream completion).
+ */
+function StreamProgress({ streaming }: { streaming: boolean }) {
+  const [elapsed, setElapsed] = React.useState(0);
+  React.useEffect(() => {
+    if (!streaming) {
+      setElapsed(0);
+      return;
+    }
+    const startedAt = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [streaming]);
+
+  if (!streaming) return null;
+  return (
+    <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <span aria-hidden className="inline-block animate-pulse">
+        ✱
+      </span>
+      <span className="tabular-nums">{elapsed}s</span>
+    </div>
+  );
+}
 
 function MessageBubble({ message }: { message: ConversationMessage }) {
   const isUser = message.role === "user";
@@ -610,7 +763,15 @@ function MarkdownBody({ content }: { content: string }) {
   // whole page. Tables get the same treatment.
   return (
     <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words [overflow-wrap:anywhere] prose-pre:my-2 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-background/40 prose-pre:p-2 prose-code:break-words prose-img:max-w-full prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
-      <ReactMarkdown>{content || ""}</ReactMarkdown>
+      {/* ``remarkBreaks`` turns single ``\n`` into ``<br>`` — without
+          it CommonMark collapses single newlines to a space, which
+          made schedule bullets and short status replies render as
+          one giant run-on paragraph on the phone. ``remarkGfm`` adds
+          tables / strikethrough / autolinks so assistant replies
+          render the same as on GitHub. */}
+      <ReactMarkdown remarkPlugins={[remarkBreaks, remarkGfm]}>
+        {content || ""}
+      </ReactMarkdown>
     </div>
   );
 }
