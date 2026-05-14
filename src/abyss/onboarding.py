@@ -259,7 +259,7 @@ def _restart_daemon() -> None:
         start_bots(daemon=True)
     except Exception as error:
         console.print(f"[red]Failed to restart daemon: {error}[/red]")
-        console.print("  Restart manually: [bold]abyss stop && abyss start --daemon[/bold]")
+        console.print("  Restart manually: [bold]abyss stop && abyss start[/bold]")
 
 
 def prompt_backend_choice() -> dict | None:

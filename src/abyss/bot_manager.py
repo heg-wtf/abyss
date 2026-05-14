@@ -1,12 +1,15 @@
 """Bot lifecycle manager for abyss.
 
 Telegram polling is gone — the mobile PWA + dashboard chat are now
-the only user-facing surfaces. ``abyss start`` boots the dashboard
-chat server (HTTP/SSE on 127.0.0.1:3848), the per-bot cron and
-heartbeat schedulers, and the QMD HTTP daemon (when available). No
-``Application``, no ``run_polling``, no Telegram token. Conversation
-markdown files + the FTS5 index continue to live under each bot's
-session directory.
+the only user-facing surfaces. ``abyss start`` boots:
+
+- The dashboard chat server (in-process aiohttp on 127.0.0.1:3848).
+- The abysscope Next.js dashboard as a child subprocess (port 3847).
+- Per-bot cron and heartbeat schedulers.
+- The QMD HTTP daemon (when available).
+
+The abysscope subprocess used to live behind ``abyss dashboard start``
+which was retired in v2026.05.15 in favor of this single lifecycle.
 """
 
 from __future__ import annotations
@@ -43,13 +46,17 @@ def _plist_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
 
 
-async def _run_bots(bot_names: list[str] | None = None) -> None:
+async def _run_bots(
+    bot_names: list[str] | None = None,
+    dashboard_port: int = 3847,
+) -> None:
     """Boot the dashboard surface + per-bot schedulers.
 
     "Running" a bot now means: regenerate its CLAUDE.md, prime the
     FTS5 index, and (if configured) attach cron / heartbeat
     schedulers. The dashboard chat server is started once and serves
-    every bot.
+    every bot; the abysscope frontend is built and spawned as a child
+    subprocess (port ``dashboard_port``).
     """
     config = load_config()
     if not config or not config.get("bots"):
@@ -75,50 +82,8 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
             console.print("[red]No matching bots found.[/red]")
             return
 
+    bot_count = len(bots_to_run)
     prepared_bots: list[tuple[str, dict]] = []
-
-    for bot_entry in bots_to_run:
-        name = bot_entry["name"]
-        try:
-            bot_config = load_bot_config(name)
-            if not bot_config:
-                console.print(f"[yellow]Skipping {name}: bot.yaml not found.[/yellow]")
-                continue
-
-            from abyss.skill import regenerate_bot_claude_md
-
-            regenerate_bot_claude_md(name)
-
-            bot_path = bot_directory(name)
-            _ensure_conversation_index(name, bot_path)
-            prepared_bots.append((name, bot_config))
-            logger.info("Prepared bot: %s", name)
-        except Exception as error:
-            console.print(f"[red]Error preparing {name}: {error}[/red]")
-            logger.error("Failed to prepare bot %s: %s", name, error)
-
-    if not prepared_bots:
-        console.print("[red]No valid bots to start.[/red]")
-        return
-
-    from abyss.sdk_client import is_sdk_available
-
-    if is_sdk_available():
-        console.print("  [green]SDK[/green] Python Agent SDK (session continuity)")
-    else:
-        console.print("  [yellow]SDK[/yellow] Not available, using subprocess fallback")
-
-    if shutil.which("qmd"):
-        qmd_started = await _start_qmd_daemon()
-        if qmd_started:
-            console.print("  [green]QMD[/green] HTTP daemon (port 8181)")
-            _ensure_qmd_conversations_collection()
-        else:
-            console.print("  [yellow]QMD[/yellow] Daemon failed to start")
-
-    console.print(f"Starting {len(prepared_bots)} bot(s)...")
-    for name, _ in prepared_bots:
-        console.print(f"  [green]OK[/green] {name}")
 
     pid_file = _pid_file()
     pid_file.parent.mkdir(parents=True, exist_ok=True)
@@ -137,44 +102,181 @@ async def _run_bots(bot_names: list[str] | None = None) -> None:
     cron_tasks: list[asyncio.Task] = []
     heartbeat_tasks: list[asyncio.Task] = []
     chat_server = None
+    dashboard_handle = None
+
     try:
-        from abyss.cron import list_cron_jobs, run_cron_scheduler
+        from abyss import dashboard as dashboard_module
+        from abyss.dashboard_ui import (
+            BuildProgress,
+            BuildStep,
+            StepStatus,
+            open_build_log,
+        )
+        from abyss.sdk_client import is_sdk_available
 
-        for name, bot_config in prepared_bots:
-            jobs = list_cron_jobs(name)
-            if jobs:
-                task = asyncio.create_task(run_cron_scheduler(name, bot_config, stop_event))
-                cron_tasks.append(task)
-                console.print(f"  [green]CRON[/green] {name} ({len(jobs)} job(s))")
+        boot_steps = [
+            BuildStep("Prepare bots"),
+            BuildStep("SDK availability"),
+            BuildStep("QMD daemon"),
+            BuildStep("API server"),
+            *dashboard_module.build_steps(),
+            BuildStep("Cron schedulers"),
+            BuildStep("Heartbeat schedulers"),
+        ]
+        progress = BuildProgress(
+            title=f"Booting abyss ({bot_count} bot{'s' if bot_count != 1 else ''})",
+            steps=boot_steps,
+            console=console,
+        )
+        log_path = open_build_log(abyss_home())
 
-        from abyss.heartbeat import run_heartbeat_scheduler
+        with progress.live():
+            with progress.step("Prepare bots") as step:
+                from abyss.skill import regenerate_bot_claude_md
 
-        for name, bot_config in prepared_bots:
-            heartbeat_config = bot_config.get("heartbeat", {})
-            if heartbeat_config.get("enabled"):
-                task = asyncio.create_task(run_heartbeat_scheduler(name, bot_config, stop_event))
-                heartbeat_tasks.append(task)
-                interval = heartbeat_config.get("interval_minutes", 30)
-                console.print(f"  [green]HEARTBEAT[/green] {name} (every {interval}m)")
+                ok_names: list[str] = []
+                for bot_entry in bots_to_run:
+                    name = bot_entry["name"]
+                    try:
+                        bot_config = load_bot_config(name)
+                        if not bot_config:
+                            logger.warning("Skipping %s: bot.yaml not found", name)
+                            continue
+                        regenerate_bot_claude_md(name)
+                        bot_path = bot_directory(name)
+                        _ensure_conversation_index(name, bot_path)
+                        prepared_bots.append((name, bot_config))
+                        ok_names.append(name)
+                        logger.info("Prepared bot: %s", name)
+                    except Exception as bot_error:
+                        logger.error("Failed to prepare bot %s: %s", name, bot_error)
+                if not prepared_bots:
+                    step.status = StepStatus.FAILED
+                    step.detail = "no valid bots"
+                    raise RuntimeError("No valid bots to start")
+                step.detail = ", ".join(ok_names)
 
-        from abyss.chat_server import get_server as _get_chat_server
+            with progress.step("SDK availability") as step:
+                if is_sdk_available():
+                    step.detail = "Python Agent SDK"
+                else:
+                    step.status = StepStatus.SKIPPED
+                    step.detail = "subprocess fallback"
 
-        chat_server = _get_chat_server()
-        try:
-            await chat_server.start()
+            with progress.step("QMD daemon") as step:
+                if not shutil.which("qmd"):
+                    step.status = StepStatus.SKIPPED
+                    step.detail = "qmd not installed"
+                else:
+                    qmd_started = await _start_qmd_daemon()
+                    if qmd_started:
+                        _ensure_qmd_conversations_collection()
+                        step.detail = f"port {QMD_DEFAULT_PORT}"
+                    else:
+                        step.status = StepStatus.FAILED
+                        step.detail = "failed to start"
+
+            with progress.step("API server") as step:
+                from abyss.chat_server import get_server as _get_chat_server
+
+                chat_server = _get_chat_server()
+                try:
+                    await chat_server.start()
+                    step.detail = f"http://{chat_server.host}:{chat_server.port}"
+                except OSError as chat_error:
+                    step.status = StepStatus.FAILED
+                    step.detail = f"bind failed: {chat_error}"
+                    chat_server = None
+
+            import importlib.metadata
+
+            if dashboard_module.is_port_in_use(dashboard_port):
+                # Skip all four dashboard steps cleanly.
+                for step_name in (
+                    "Locate dashboard",
+                    "Install dependencies",
+                    "Build dashboard",
+                    "Start dashboard server",
+                ):
+                    target = progress.get(step_name)
+                    target.status = StepStatus.SKIPPED
+                    target.detail = f"port {dashboard_port} in use"
+                progress.refresh()
+            else:
+                try:
+                    abyss_version = importlib.metadata.version("abyss")
+                    dashboard_handle = await loop.run_in_executor(
+                        None,
+                        dashboard_module.build_and_start,
+                        dashboard_port,
+                        log_path,
+                        progress,
+                        abyss_version,
+                    )
+                except (FileNotFoundError, RuntimeError) as dashboard_error:
+                    logger.error("Dashboard failed to start: %s", dashboard_error)
+                    dashboard_handle = None
+
+            with progress.step("Cron schedulers") as step:
+                from abyss.cron import list_cron_jobs, run_cron_scheduler
+
+                attached = 0
+                total_jobs = 0
+                for name, bot_config in prepared_bots:
+                    jobs = list_cron_jobs(name)
+                    if jobs:
+                        task = asyncio.create_task(run_cron_scheduler(name, bot_config, stop_event))
+                        cron_tasks.append(task)
+                        attached += 1
+                        total_jobs += len(jobs)
+                if attached == 0:
+                    step.status = StepStatus.SKIPPED
+                    step.detail = "no cron jobs"
+                else:
+                    step.detail = f"{attached} bot(s), {total_jobs} job(s)"
+
+            with progress.step("Heartbeat schedulers") as step:
+                from abyss.heartbeat import run_heartbeat_scheduler
+
+                attached = 0
+                for name, bot_config in prepared_bots:
+                    heartbeat_config = bot_config.get("heartbeat", {})
+                    if heartbeat_config.get("enabled"):
+                        task = asyncio.create_task(
+                            run_heartbeat_scheduler(name, bot_config, stop_event)
+                        )
+                        heartbeat_tasks.append(task)
+                        attached += 1
+                if attached == 0:
+                    step.status = StepStatus.SKIPPED
+                    step.detail = "none enabled"
+                else:
+                    step.detail = f"{attached} bot(s)"
+
+        if chat_server is not None:
             console.print(
-                f"  [green]CHAT[/green] dashboard server "
-                f"(http://{chat_server.host}:{chat_server.port})"
+                f"\n[bold green]abyss is up[/bold green] — "
+                f"API http://{chat_server.host}:{chat_server.port}",
+                end="",
             )
-        except OSError as chat_error:
-            console.print(f"  [yellow]CHAT[/yellow] failed to bind: {chat_error}")
-            chat_server = None
-
-        console.print(f"\n{len(prepared_bots)} bot(s) running. Press Ctrl+C to stop.")
+            if dashboard_handle is not None:
+                console.print(
+                    f" · Dashboard http://localhost:{dashboard_handle.port}",
+                    end="",
+                )
+            console.print()
+        console.print("[dim]Press Ctrl+C to stop.[/dim]")
         await stop_event.wait()
 
     finally:
         console.print("\nStopping bots...")
+
+        if dashboard_handle is not None:
+            from abyss import dashboard as dashboard_module
+
+            with suppress(Exception):
+                dashboard_module.stop_handle(dashboard_handle)
+            console.print("  [dim]Dashboard stopped.[/dim]")
 
         if chat_server is not None:
             with suppress(Exception):
@@ -316,32 +418,48 @@ def _stop_qmd_daemon() -> None:
         logger.info("QMD daemon stopped")
 
 
-def start_bots(bot_name: str | None = None, daemon: bool = False) -> None:
-    """Start bot(s), optionally as a daemon."""
-    if daemon:
-        _start_daemon()
+def start_bots(
+    bot_name: str | None = None,
+    foreground: bool = False,
+    dashboard_port: int = 3847,
+) -> None:
+    """Start bot(s) — daemon by default, foreground via ``foreground=True``.
+
+    When ``foreground`` is ``False`` (the default), abyss registers a
+    launchd job that re-invokes ``abyss start --foreground`` in the
+    background. When ``foreground`` is ``True``, the asyncio loop runs
+    directly in the current process — used both for manual debugging
+    and as the actual workload launchd ends up executing.
+    """
+    if not foreground:
+        _start_daemon(dashboard_port=dashboard_port)
         return
 
     bot_names = [bot_name] if bot_name else None
 
     try:
-        asyncio.run(_run_bots(bot_names))
+        asyncio.run(_run_bots(bot_names, dashboard_port=dashboard_port))
     except KeyboardInterrupt:
         pass
 
 
-def _start_daemon() -> None:
-    """Start abyss as a launchd daemon."""
+def _start_daemon(dashboard_port: int = 3847) -> None:
+    """Start abyss as a launchd daemon.
+
+    The launchd job runs ``abyss start --foreground`` so the registered
+    job is the actual workload (not another daemon registration).
+    """
     plist_path = _plist_path()
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
     venv_bin = Path(sys.executable).parent
     abyss_executable = venv_bin / "abyss"
+    extra_args = ["--foreground", "--port", str(dashboard_port)]
     if not abyss_executable.exists():
         abyss_executable = Path(sys.executable)
-        abyss_arguments = [str(abyss_executable), "-m", "abyss.cli", "start"]
+        abyss_arguments = [str(abyss_executable), "-m", "abyss.cli", "start", *extra_args]
     else:
-        abyss_arguments = [str(abyss_executable), "start"]
+        abyss_arguments = [str(abyss_executable), "start", *extra_args]
 
     log_directory = abyss_home() / "logs"
     log_directory.mkdir(parents=True, exist_ok=True)
@@ -391,7 +509,9 @@ def _start_daemon() -> None:
 
 
 def stop_bots() -> None:
-    """Stop the running daemon or foreground process."""
+    """Stop the running daemon or foreground process + the dashboard."""
+    from abyss import dashboard as dashboard_module
+
     plist_path = _plist_path()
 
     if plist_path.exists():
@@ -407,54 +527,40 @@ def stop_bots() -> None:
             console.print(f"[yellow]launchctl unload: {result.stderr.strip()}[/yellow]")
 
     pid_file = _pid_file()
+    sent_signal = False
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text().strip())
             os.kill(pid, signal.SIGTERM)
             console.print(f"[green]Sent SIGTERM to process {pid}.[/green]")
+            sent_signal = True
         except (ValueError, ProcessLookupError):
             pass
         pid_file.unlink(missing_ok=True)
-    elif not plist_path.exists():
+
+    # Always clean up the dashboard subprocess too — launchd doesn't
+    # know about it. The bot_manager normally tears it down on shutdown
+    # but a crashed manager or external `kill` can orphan the child.
+    dashboard_pid = dashboard_module.stop_running()
+    if dashboard_pid is not None:
+        console.print(f"[green]Dashboard stopped (PID {dashboard_pid}).[/green]")
+
+    if not sent_signal and not plist_path.exists() and dashboard_pid is None:
         console.print("[yellow]No running abyss process found.[/yellow]")
 
     _stop_qmd_daemon()
 
 
-def _is_port_in_use(port: int) -> bool:
-    """Check if a port is in use."""
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
-        return connection.connect_ex(("localhost", port)) == 0
-
-
 def _show_dashboard_status() -> None:
     """Show Abysscope dashboard status if running."""
-    default_port = 3847
-    dashboard_pid_file = abyss_home() / "abysscope.pid"
-    pid = None
-    port = default_port
+    from abyss import dashboard as dashboard_module
 
-    if dashboard_pid_file.exists():
-        try:
-            lines = dashboard_pid_file.read_text().strip().splitlines()
-            pid = int(lines[0])
-            os.kill(pid, 0)
-            port = int(lines[1]) if len(lines) > 1 else default_port
-        except (
-            ValueError,
-            ProcessLookupError,
-            PermissionError,
-            IndexError,
-            OverflowError,
-        ):
-            pid = None
-
-    if pid is None and not _is_port_in_use(default_port):
+    running, pid = dashboard_module.is_running()
+    if not running:
         console.print("[dim]Dashboard: not running[/dim]")
         return
 
+    port = dashboard_module.get_port() or dashboard_module.DEFAULT_PORT
     local_ip = _get_local_ip()
     if pid:
         console.print(f"[green]Dashboard: running (PID {pid})[/green]")

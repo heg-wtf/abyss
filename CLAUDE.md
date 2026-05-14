@@ -66,7 +66,8 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `bot_manager.py` | Multi-bot lifecycle, CLAUDE.md regeneration on start, SDK/QMD lifecycle, cron/heartbeat schedulers, internal `ChatServer` lifecycle, dashboard status (port fallback), graceful shutdown |
 | `chat_core.py` | Backend-agnostic chat orchestration shared by PWA handlers and the dashboard chat. `prepare_session_context` + `process_chat_message` (SDK pool first, subprocess + bootstrap fallback) |
 | `chat_server.py` | Internal HTTP/SSE server (aiohttp) for the abysscope dashboard chat. Routes: `/bots`, `/sessions`, `/messages`, `/chat` (SSE), `/upload`, `/files/{id}`, `/transcribe` (ElevenLabs Scribe v2 STT proxy), `/speak` (ElevenLabs TTS streaming proxy), `/scribe-token` (ElevenLabs WebSocket auth token). Origin allowlist + CORS middleware, MIME sniffing, per-session asyncio locks. Shared `aiohttp.ClientSession` created in `start()`, closed in `stop()` |
-| `dashboard_ui.py` | Rich-powered checklist UI (`BuildProgress`, `BuildStep`, `StepStatus`) for `abyss dashboard start/restart` lifecycle, plus `tail()` log helper |
+| `dashboard.py` | abysscope subprocess lifecycle (locate / build / spawn / stop / PID-file tracking). Imported by `bot_manager` during `abyss start` |
+| `dashboard_ui.py` | Rich-powered checklist UI (`BuildProgress`, `BuildStep`, `StepStatus`) for the `abyss start` / `abyss restart` boot sequence, plus `tail()` log helper |
 | `tool_metrics.py` | Per-bot tool execution metrics — append jsonl events under `bots/<name>/tool_metrics/`, aggregate per-tool latency p50/p95/p99, daily rotation with retention |
 | `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection, `import_skill_from_github()` / `parse_github_url()` (GitHub import) |
 | `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support, `edit_cron_job_message()` (message-only edit) |
@@ -212,10 +213,10 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 - Reads/writes `~/.abyss/` directly via `lib/abyss.ts` (no database)
 - Server components for data pages, client components for editors
 - API routes in `src/app/api/` as thin wrappers over `lib/abyss.ts`
-- `abyss dashboard start/stop/restart/status` subcommands, PID file at `~/.abyss/abysscope.pid`
+- Started automatically as a child subprocess of `abyss start` (v2026.05.15 retired the standalone `abyss dashboard` subcommand). PID file at `~/.abyss/abysscope.pid`
 - Status detection: PID file first, then port 3847 fallback (detects externally started dashboards)
 - `abyss status` includes dashboard info (local + network URL)
-- `--daemon` for background mode, `--port` for custom port (default 3847)
+- `abyss start --foreground` runs inline; `--port` overrides the dashboard port (default 3847)
 - Bundled in wheel via `force-include` (abysscope_data/), works after `pip install`
 - Cron editor: inline view/edit toggle in bot detail, supports recurring + one-shot jobs, skills picker
 - Log management: view, filter, delete (single/bulk/by-age), daemon log truncate
@@ -227,7 +228,7 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 - Sidebar: collapsible Bots/Skills sections (localStorage-persisted), theme toggle with emoji icon
 - Dashboard chat: in-browser chat UI talks to internal `ChatServer` (aiohttp, started by `bot_manager`). SSE token streaming via `/chat`, image + PDF uploads via `/upload`, served back via `/files/{id}`. Uses the SDK pool / session continuity via `chat_core`. Single entry point — sidebar `New` opens a base-ui `Menu` listing all bots; clicking one creates the session for that bot. The right-panel header shows the active session's bot avatar + display name + session ID. `display_name` falls back through `display_name → telegram_botname (legacy shim) → bot_name`, applied in both `/chat/bots` and `/chat/sessions` responses so the picker, session list, and message header stay consistent with the sidebar
 - Voice mode: mic button in chat header opens a right sidebar with an animated Orb (ElevenLabs Orb component). `useVoiceMode` hook manages the STT→LLM→TTS cycle. ElevenLabs Scribe v2 WebSocket STT via `/api/chat/scribe-token` → `use-voice-mode.ts`. Transcribed text sent to `/api/chat` with `voice_mode: true`; Python `_handle_chat` appends a Korean spoken-style instruction to the message. TTS reply streamed from `/api/chat/speak` (ElevenLabs TTS proxy) and played via Web Audio API. Orb `colors` prop is theme-aware (`useTheme`): dark → white tones, light → black tones. Auto-restart loop: recording → processing → speaking → recording. Messenger-style timestamps shown on chat messages (`toLocaleTimeString("ko-KR")`)
-- `abyss dashboard start/restart` shows a Rich `BuildProgress` checklist (install deps → build Next.js → boot server) instead of streaming raw `next build` output
+- `abyss start` / `abyss restart` show a single Rich `BuildProgress` checklist covering prepare bots → SDK availability → QMD daemon → API server → install deps → build dashboard → start dashboard → cron / heartbeat scheduler attach, instead of streaming raw `next build` output
 
 ## Tool Metrics + Hooks
 

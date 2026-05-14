@@ -79,9 +79,10 @@ abyss bot add                  # Create a bot
 abyss bot list
 abyss bot remove <name>
 
-# Run bots
-abyss start              # Foreground
-abyss start --daemon     # Background (launchd)
+# Run abyss (API + dashboard + schedulers)
+abyss start              # Daemon by default (launchd)
+abyss start --foreground # Run inline (Ctrl+C to stop)
+abyss start --port 8080  # Custom dashboard port (default 3847)
 abyss stop               # Stop daemon
 abyss status             # Show running status
 ```
@@ -254,10 +255,11 @@ abyss heartbeat disable <bot>  # Disable heartbeat
 abyss heartbeat run <bot>      # Run heartbeat immediately (test)
 abyss heartbeat edit <bot>     # Edit HEARTBEAT.md ($EDITOR)
 
-# Run
-abyss start                    # Foreground
-abyss start --daemon           # Background (launchd)
-abyss stop                     # Stop daemon
+# Run abyss
+abyss start                    # Daemon by default (boots API + dashboard + schedulers)
+abyss start --foreground       # Run inline (Ctrl+C to stop)
+abyss start --port 8080        # Custom dashboard port (default 3847)
+abyss stop                     # Stop daemon + dashboard
 abyss restart                  # Stop then start
 abyss status                   # Show status
 
@@ -290,7 +292,8 @@ abyss/
 │   ├── bot_manager.py      # Multi-bot lifecycle (regenerate CLAUDE.md on start)
 │   ├── chat_core.py        # Backend-agnostic chat orchestration (PWA + dashboard)
 │   ├── chat_server.py      # Internal aiohttp HTTP/SSE server for dashboard chat
-│   ├── dashboard_ui.py     # Rich checklist UI for `abyss dashboard` lifecycle
+│   ├── dashboard.py        # abysscope subprocess management (build / spawn / stop)
+│   ├── dashboard_ui.py     # Rich checklist UI for `abyss start` boot sequence
 │   ├── tool_metrics.py     # Per-bot tool call metrics (jsonl + p50/p95/p99)
 │   ├── conversation_index.py # SQLite FTS5 index over conversation markdown
 │   ├── llm/                # LLM backend layer (claude_code only post-v2026.05.15)
@@ -321,16 +324,14 @@ abyss/
 
 ## Abysscope Dashboard
 
-Abysscope is a web-based dashboard for managing `~/.abyss/` configuration, bots, skills, cron jobs, sessions, and logs. No terminal required.
+Abysscope is a web-based dashboard for managing `~/.abyss/` configuration, bots, skills, cron jobs, sessions, and logs. No terminal required. As of v2026.05.15 the dashboard boots automatically as part of `abyss start` — there is no separate `abyss dashboard` subcommand.
 
 ```bash
-abyss dashboard start              # Foreground (port 3847)
-abyss dashboard start --daemon     # Background
-abyss dashboard start --port 8080  # Custom port
-abyss dashboard stop               # Stop
-abyss dashboard restart             # Restart
-abyss dashboard restart --daemon   # Restart as background
-abyss dashboard status             # Show status
+abyss start                        # Daemon (default) — boots API + dashboard
+abyss start --foreground           # Run inline; Ctrl+C stops both
+abyss start --port 8080            # Custom dashboard port (default 3847)
+abyss stop                         # Stop daemon + dashboard
+abyss status                       # Show running state (API + dashboard URLs)
 
 # Or directly
 cd abysscope && npx next build && npx next start --port 3847

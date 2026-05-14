@@ -19,21 +19,19 @@ purplemux recommends for the same scenario.
 - Mac (server): https://tailscale.com/download — install + sign in.
 - Phone (client): App Store / Play Store — sign in to the same account.
 
-### 2. Start the dashboard
+### 2. Start abyss
 
 ```bash
-abyss dashboard start
+abyss start                     # daemon (default) — boots API + dashboard + schedulers
+abyss start --foreground        # run inline (Ctrl+C to stop)
 ```
 
 By default the dashboard binds to loopback only. Bind to all interfaces
 so Tailscale clients can reach it:
 
 ```bash
-ABYSS_DASHBOARD_HOST=0.0.0.0 abyss dashboard start
+ABYSS_DASHBOARD_HOST=0.0.0.0 abyss start
 ```
-
-(You can still keep the dashboard process foreground; `--daemon` works
-the same way.)
 
 ### 3. Find your Tailscale hostname
 
@@ -114,7 +112,7 @@ If both devices are on your home network you can skip Tailscale entirely:
 
 ```bash
 ipconfig getifaddr en0          # find the Mac's LAN IP, e.g. 192.168.1.42
-ABYSS_DASHBOARD_HOST=0.0.0.0 abyss dashboard start
+ABYSS_DASHBOARD_HOST=0.0.0.0 abyss start
 ```
 
 On the phone, open `http://192.168.1.42:3847/mobile`. This breaks the
