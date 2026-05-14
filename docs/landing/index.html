@@ -598,7 +598,7 @@
         <div class="header-left">
           <img src="logo-square.png" alt="abyss" />
           <span>abyss</span>
-          <span class="version-badge">v2026.05.14</span>
+          <span class="version-badge">v2026.05.15</span>
         </div>
         <div class="header-links">
           <a href="#features">Features</a>
@@ -874,6 +874,28 @@
       <div class="container">
         <h2>What's New</h2>
         <div class="changelog">
+          <div class="changelog-item">
+            <span class="changelog-ver">v2026.05.15</span>
+            <span class="changelog-desc"
+              ><strong>One process, fewer dials</strong> — `abyss start` now
+              boots the API server, the dashboard subprocess, and the per-bot
+              schedulers as a single Rich `BuildProgress` checklist; the
+              standalone `abyss dashboard` subcommand and the `--daemon` flag
+              are retired (daemon is the default, `--foreground` for
+              debugging). The OpenAI-compatible backends
+              (`openai_compat` / `openrouter` / `minimax`) are removed too —
+              abyss is a Claude Code persona agent toolkit, the simpler
+              surface is the point. Mobile chat picks up
+              <strong>single-slot message queueing</strong> (Send while a reply
+              is still streaming → it fires the moment the turn finishes), a
+              cleaner three-dot streaming indicator with an inline ✕ cancel,
+              and a new <strong>Settings dialog</strong> (gear icon in the
+              sidebar) hosting Light / Dark / System theme — first of more
+              quick toggles to come. Logo / favicon / PWA icon pipeline now
+              flows through a square 600 × 600 source so home-screen tiles
+              and apple-touch render without letterboxing.</span
+            >
+          </div>
           <div class="changelog-item">
             <span class="changelog-ver">v2026.05.14</span>
             <span class="changelog-desc"
