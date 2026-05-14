@@ -146,7 +146,7 @@ export function useWebPush(options: UseWebPushOptions = {}) {
       if (bot && sessionId) {
         router.push(`/mobile/chat/${bot}/${sessionId}`);
       } else {
-        router.push("/mobile/sessions");
+        router.push("/mobile");
       }
     };
     navigator.serviceWorker.addEventListener("message", handle);

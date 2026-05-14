@@ -7,7 +7,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * shared from desktop) they land on the heavyweight desktop dashboard
  * heatmap with a sidebar that does not fit a phone screen. We sniff
  * the User-Agent on the root path only and bounce them to
- * ``/mobile/sessions``. The desktop UI stays one tap away via the
+ * ``/mobile``. The desktop UI stays one tap away via the
  * "Desktop UI" link in the mobile header.
  *
  * The matcher restricts the middleware to a tiny set of paths so we
@@ -32,7 +32,7 @@ export function middleware(request: NextRequest) {
   }
 
   const target = nextUrl.clone();
-  target.pathname = "/mobile/sessions";
+  target.pathname = "/mobile";
   target.search = "";
   return NextResponse.redirect(target);
 }

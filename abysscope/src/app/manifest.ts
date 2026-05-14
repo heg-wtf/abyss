@@ -14,7 +14,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Abyss",
     short_name: "Abyss",
     description: "abyss personal AI assistant",
-    start_url: "/mobile/sessions",
+    start_url: "/mobile",
     scope: "/",
     display: "standalone",
     orientation: "portrait",

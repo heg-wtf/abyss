@@ -327,7 +327,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
         <Link
-          href="/mobile/sessions"
+          href="/mobile"
           aria-label="Back to sessions"
           className="rounded-md p-2 hover:bg-muted"
         >
