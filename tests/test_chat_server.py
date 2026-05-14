@@ -1401,3 +1401,71 @@ async def test_slash_command_logs_to_conversation_markdown(client, abyss_home, p
     # the first entry in the command catalog and must appear.
     assert "## assistant" in body
     assert "/start" in body
+
+
+@pytest.mark.asyncio
+async def test_routines_endpoint_lists_cron_and_heartbeat(client, abyss_home):
+    """``GET /chat/routines`` walks each bot's ``cron_sessions/*`` and
+    ``heartbeat_sessions`` directories and returns a flat list with
+    ``kind``, ``job_name``, ``preview``, and ``updated_at`` ready to
+    render in the mobile Routines tab."""
+    bot_dir = abyss_home / "bots" / "alpha"
+    cron_dir = bot_dir / "cron_sessions" / "daily-weather"
+    cron_dir.mkdir(parents=True)
+    (cron_dir / "conversation-260514.md").write_text(
+        "## user (2026-05-14 06:00:00 UTC)\n\nGet weather\n\n"
+        "## assistant (2026-05-14 06:00:01 UTC)\n\nSunny 22C.\n"
+    )
+    heartbeat_dir = bot_dir / "heartbeat_sessions"
+    heartbeat_dir.mkdir()
+    (heartbeat_dir / "conversation-260514.md").write_text(
+        "## user (2026-05-14 09:00:00 UTC)\n\nHB\n\n"
+        "## assistant (2026-05-14 09:00:01 UTC)\n\nHEARTBEAT_OK\n"
+    )
+
+    resp = await client.get("/chat/routines")
+    assert resp.status == 200
+    body = await resp.json()
+    routines = body["routines"]
+
+    kinds = {(r["kind"], r["job_name"]) for r in routines}
+    assert ("cron", "daily-weather") in kinds
+    assert ("heartbeat", "heartbeat") in kinds
+
+    weather = next(r for r in routines if r["kind"] == "cron" and r["job_name"] == "daily-weather")
+    # Preview prefers the assistant reply over the trigger prompt.
+    assert "Sunny 22C" in weather["preview"]
+    assert weather["bot"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_routine_messages_returns_parsed_pair(client, abyss_home):
+    """``GET /chat/routines/<bot>/<kind>/<job>/messages`` reuses the
+    same parser as the chat-session messages endpoint, so a routine
+    detail page can render the run history as a chat-like transcript.
+    """
+    cron_dir = abyss_home / "bots" / "alpha" / "cron_sessions" / "morning-brief"
+    cron_dir.mkdir(parents=True)
+    (cron_dir / "conversation-260514.md").write_text(
+        "## user (2026-05-14 06:00:00 UTC)\n\nMorning summary\n\n"
+        "## assistant (2026-05-14 06:00:01 UTC)\n\nHere's your brief.\n"
+    )
+
+    resp = await client.get("/chat/routines/alpha/cron/morning-brief/messages")
+    assert resp.status == 200
+    body = await resp.json()
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["user", "assistant"]
+    assert "Morning summary" in body["messages"][0]["content"]
+    assert "Here's your brief" in body["messages"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_routine_messages_rejects_unknown_kind(client, abyss_home):
+    """Path-traversal hardening: ``kind`` is regex-pinned to
+    ``cron|heartbeat``. Any other value short-circuits to an empty
+    list rather than walking ``bot_dir / <kind>``."""
+    resp = await client.get("/chat/routines/alpha/escape/x/messages")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["messages"] == []

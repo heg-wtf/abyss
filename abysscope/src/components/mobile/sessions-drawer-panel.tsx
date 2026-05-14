@@ -3,8 +3,11 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
+  Clock,
+  HeartPulse,
   MessageSquarePlus,
   Moon,
   MoreVertical,
@@ -23,7 +26,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { BotSummary, ChatSession } from "@/lib/abyss-api";
+import type {
+  BotSummary,
+  ChatSession,
+  RoutineSummary,
+} from "@/lib/abyss-api";
 
 interface Props {
   /** Bot id currently shown in the chat behind the drawer. */
@@ -49,8 +56,11 @@ export function SessionsDrawerPanel({
   onSelect,
   onCreate,
 }: Props) {
+  const router = useRouter();
   const [bots, setBots] = React.useState<BotSummary[]>([]);
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
+  const [routines, setRoutines] = React.useState<RoutineSummary[]>([]);
+  const [routinesLoading, setRoutinesLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [tab, setTab] = React.useState<"chats" | "routines">("chats");
@@ -124,6 +134,29 @@ export function SessionsDrawerPanel({
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  // Routines (cron + heartbeat) fetch lazily — only when the tab is
+  // opened — so cold-loading the drawer for normal chat use doesn't
+  // do an extra network round-trip on phones over Tailscale.
+  React.useEffect(() => {
+    if (tab !== "routines") return;
+    let cancelled = false;
+    const run = async () => {
+      setRoutinesLoading(true);
+      try {
+        const response = await fetch("/api/chat/routines");
+        if (!response.ok) return;
+        const body = (await response.json()) as { routines: RoutineSummary[] };
+        if (!cancelled) setRoutines(body.routines ?? []);
+      } finally {
+        if (!cancelled) setRoutinesLoading(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab]);
 
   const handleCreate = async (botName: string) => {
     try {
@@ -217,9 +250,42 @@ export function SessionsDrawerPanel({
           </li>
         )}
         {tab === "routines" ? (
-          <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No routines yet
-          </li>
+          routinesLoading && routines.length === 0 ? (
+            <li className="px-4 py-3 text-sm text-muted-foreground">Loading…</li>
+          ) : routines.length === 0 ? (
+            <li className="px-4 py-6 text-center text-sm text-muted-foreground">
+              No routines yet
+            </li>
+          ) : (
+            routines.map((routine) => (
+              <li key={`${routine.bot}:${routine.kind}:${routine.job_name}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    router.push(
+                      `/mobile/routine/${routine.bot}/${routine.kind}/${routine.job_name}`,
+                    );
+                  }}
+                  className="flex w-full min-w-0 items-center gap-3 border-b px-4 py-3 text-left active:bg-muted"
+                >
+                  <BotAvatar
+                    botName={routine.bot}
+                    displayName={routine.bot_display_name}
+                    size="md"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <RoutineKindIcon kind={routine.kind} />
+                      <span className="truncate">{routine.job_name}</span>
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {routine.preview || "(no runs yet)"}
+                    </div>
+                  </div>
+                </button>
+              </li>
+            ))
+          )
         ) : loading && sessions.length === 0 ? (
           <li className="px-4 py-3 text-sm text-muted-foreground">Loading…</li>
         ) : sessions.length === 0 ? (
@@ -369,6 +435,11 @@ function TabButton({
       {children}
     </button>
   );
+}
+
+function RoutineKindIcon({ kind }: { kind: RoutineSummary["kind"] }) {
+  const Icon = kind === "cron" ? Clock : HeartPulse;
+  return <Icon className="size-3.5 shrink-0 text-muted-foreground" />;
 }
 
 function useHydrated() {

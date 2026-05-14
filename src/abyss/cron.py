@@ -427,6 +427,19 @@ async def execute_cron_job(
         response = f"Cron job '{job_name}' failed: {error}"
         logger.error("Cron job '%s' failed: %s", job_name, error)
 
+    # Persist the run to ``conversation-*.md`` so the mobile Routines
+    # tab and any future history surface have something to render.
+    # Best-effort: a logging failure must never block delivery, so we
+    # swallow exceptions just like the Web Push branch below.
+    try:
+        from abyss.session import log_conversation as _log_conversation
+
+        session_dir = Path(working_directory)
+        _log_conversation(session_dir, "user", message)
+        _log_conversation(session_dir, "assistant", response)
+    except Exception as log_error:  # noqa: BLE001
+        logger.warning("Cron job '%s' conversation log skipped: %s", job_name, log_error)
+
     # Web Push delivery (coexists with the Telegram callback below).
     # ``send_push`` no-ops when no PWA subscriptions exist, so this is
     # safe on freshly-installed dashboards. Failures must never break

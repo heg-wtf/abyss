@@ -259,6 +259,20 @@ async def execute_heartbeat(
         response = f"Heartbeat failed: {error}"
         logger.error("Heartbeat for '%s' failed: %s", bot_name, error)
 
+    # Persist the run to ``conversation-*.md`` so the mobile Routines
+    # tab can render heartbeat history. Best-effort; failures must
+    # never block notification delivery downstream. HEARTBEAT_OK runs
+    # are logged too — silence is itself a meaningful data point when
+    # debugging "did this bot run at all today?".
+    try:
+        from abyss.session import log_conversation as _log_conversation
+
+        session_dir = Path(working_directory)
+        _log_conversation(session_dir, "user", message)
+        _log_conversation(session_dir, "assistant", response)
+    except Exception as log_error:  # noqa: BLE001
+        logger.warning("Heartbeat for '%s' conversation log skipped: %s", bot_name, log_error)
+
     # Check for HEARTBEAT_OK marker
     if HEARTBEAT_OK_MARKER in response:
         logger.info("Heartbeat for '%s': HEARTBEAT_OK, no notification needed", bot_name)

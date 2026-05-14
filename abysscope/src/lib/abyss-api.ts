@@ -187,6 +187,39 @@ export async function getChatMessages(
   return data.messages;
 }
 
+/**
+ * A scheduled-run surface: cron job or heartbeat session. Shares the
+ * core "bot + last-run + preview" shape with ``ChatSession`` so the
+ * mobile Routines tab can use the same row component, with two extra
+ * fields (``kind`` / ``job_name``) for the detail-page URL.
+ */
+export interface RoutineSummary {
+  bot: string;
+  bot_display_name: string;
+  kind: "cron" | "heartbeat";
+  job_name: string;
+  updated_at: string;
+  preview: string;
+}
+
+export async function listRoutines(): Promise<RoutineSummary[]> {
+  const data = await jsonFetch<{ routines: RoutineSummary[] }>(
+    "/chat/routines"
+  );
+  return data.routines;
+}
+
+export async function getRoutineMessages(
+  bot: string,
+  kind: RoutineSummary["kind"],
+  jobName: string
+): Promise<ChatMessage[]> {
+  const data = await jsonFetch<{ messages: ChatMessage[] }>(
+    `/chat/routines/${encodeURIComponent(bot)}/${encodeURIComponent(kind)}/${encodeURIComponent(jobName)}/messages`
+  );
+  return data.messages;
+}
+
 export async function cancelChat(bot: string, sessionId: string): Promise<void> {
   await jsonFetch("/chat/cancel", {
     method: "POST",
