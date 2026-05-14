@@ -438,8 +438,13 @@ async def execute_cron_job(
     try:
         from abyss.session import log_conversation as _log_conversation
 
+        # Only the assistant reply lands in the conversation log. The
+        # "user" side of a cron run is the trigger prompt from
+        # ``cron.yaml`` (e.g. system memory + checklist), which is
+        # noisy and unhelpful when surfaced in the mobile Routines
+        # transcript. Real user replies typed into the routine
+        # detail screen still log normally via the chat server.
         session_dir = Path(working_directory)
-        _log_conversation(session_dir, "user", message)
         _log_conversation(session_dir, "assistant", response)
     except Exception as log_error:  # noqa: BLE001
         logger.warning("Cron job '%s' conversation log skipped: %s", job_name, log_error)
@@ -456,7 +461,11 @@ async def execute_cron_job(
         preview = response.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"
-        display_name = bot_config.get("display_name") or bot_name
+        display_name = (
+            bot_config.get("display_name")
+            or bot_config.get("telegram_botname")
+            or bot_name
+        )
         await _send_push(
             title=f"⏰ {display_name}: {job_name}",
             body=preview or f"Cron job '{job_name}' finished.",

@@ -267,8 +267,11 @@ async def execute_heartbeat(
     try:
         from abyss.session import log_conversation as _log_conversation
 
+        # See ``cron.execute_cron_job`` for the same rationale: only
+        # the assistant side of a heartbeat run lands in the
+        # conversation log so the Routines transcript doesn't begin
+        # every entry with the verbose ``HEARTBEAT.md`` trigger prompt.
         session_dir = Path(working_directory)
-        _log_conversation(session_dir, "user", message)
         _log_conversation(session_dir, "assistant", response)
     except Exception as log_error:  # noqa: BLE001
         logger.warning("Heartbeat for '%s' conversation log skipped: %s", bot_name, log_error)
@@ -290,7 +293,11 @@ async def execute_heartbeat(
         preview = response.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"
-        display_name = bot_config.get("display_name") or bot_name
+        display_name = (
+            bot_config.get("display_name")
+            or bot_config.get("telegram_botname")
+            or bot_name
+        )
         await _send_push(
             title=f"💓 {display_name}",
             body=preview or "Heartbeat check ran.",
