@@ -52,10 +52,14 @@ def test_get_or_create_returns_cached_instance_and_refreshes_config():
 
 
 def test_get_or_create_recreates_on_backend_type_change(caplog):
-    alt_factory = registry._BACKENDS.get("openai_compat")
+    """Backend type swap triggers a recreate and a warning log.
+
+    Uses a stand-in ``alt`` backend because Claude Code is now the only
+    shipped backend type.
+    """
 
     class _OtherBackend:
-        type = "openai_compat"
+        type = "alt"
 
         def __init__(self, _bot_config=None) -> None:
             self.bot_config = {}
@@ -72,16 +76,15 @@ def test_get_or_create_recreates_on_backend_type_change(caplog):
         async def close(self):  # pragma: no cover - unused
             return None
 
-    registry._BACKENDS["openai_compat"] = _OtherBackend
+    registry._BACKENDS["alt"] = _OtherBackend
     try:
         first = registry.get_or_create("alpha", {"backend": {"type": "claude_code"}})
         with caplog.at_level(logging.WARNING):
-            second = registry.get_or_create("alpha", {"backend": {"type": "openai_compat"}})
+            second = registry.get_or_create("alpha", {"backend": {"type": "alt"}})
         assert first is not second
         assert any("Backend type changed" in record.message for record in caplog.records)
     finally:
-        if alt_factory is not None:
-            registry._BACKENDS["openai_compat"] = alt_factory
+        registry._BACKENDS.pop("alt", None)
 
 
 def test_drop_removes_entry_without_closing():

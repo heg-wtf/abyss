@@ -22,7 +22,6 @@ from abyss.llm.base import backend_options, resolve_backend_type
 def test_registered_backends_includes_defaults() -> None:
     types = registered_backend_types()
     assert "claude_code" in types
-    assert "openrouter" in types
 
 
 def test_resolve_backend_type_default() -> None:
@@ -30,7 +29,7 @@ def test_resolve_backend_type_default() -> None:
 
 
 def test_resolve_backend_type_explicit() -> None:
-    assert resolve_backend_type({"backend": {"type": "openrouter"}}) == "openrouter"
+    assert resolve_backend_type({"backend": {"type": "claude_code"}}) == "claude_code"
 
 
 def test_resolve_backend_type_blank_falls_back() -> None:
@@ -38,13 +37,23 @@ def test_resolve_backend_type_blank_falls_back() -> None:
 
 
 def test_backend_options_strips_type() -> None:
-    options = backend_options({"backend": {"type": "openrouter", "model": "x"}})
+    options = backend_options({"backend": {"type": "claude_code", "model": "x"}})
     assert options == {"model": "x"}
 
 
 def test_get_backend_unknown_type_raises() -> None:
     with pytest.raises(ValueError, match="Unknown LLM backend"):
         get_backend({"backend": {"type": "moonshine"}})
+
+
+def test_get_backend_retired_openai_compat_raises_with_migration_hint() -> None:
+    with pytest.raises(ValueError, match="removed in v2026.05.15"):
+        get_backend({"backend": {"type": "openai_compat"}})
+
+
+def test_get_backend_retired_openrouter_raises_with_migration_hint() -> None:
+    with pytest.raises(ValueError, match="removed in v2026.05.15"):
+        get_backend({"backend": {"type": "openrouter"}})
 
 
 def test_get_backend_returns_fresh_instance() -> None:
@@ -61,18 +70,46 @@ def test_get_or_create_caches_per_bot_name() -> None:
 
 
 def test_get_or_create_recreates_on_type_change() -> None:
-    a = get_or_create("alpha", {"backend": {"type": "claude_code"}})
-    b = get_or_create(
-        "alpha",
-        {
-            "backend": {
-                "type": "openrouter",
-                "model": "anthropic/claude-haiku-4.5",
-            }
-        },
-    )
-    assert a is not b
-    assert b.type == "openrouter"
+    """Backend type swap clears the cached instance.
+
+    Uses a registered stand-in backend instead of a second concrete
+    backend because Claude Code is now the only shipped backend.
+    """
+    from abyss.llm import registry
+
+    class _AltBackend:
+        type = "alt"
+
+        def __init__(self, bot_config: dict) -> None:
+            self.bot_config = bot_config
+
+        async def run(self, request):  # pragma: no cover
+            return LLMResult(text="ok")
+
+        async def run_streaming(self, request, on_chunk):  # pragma: no cover
+            return LLMResult(text="ok")
+
+        async def cancel(self, session_key: str) -> bool:  # pragma: no cover
+            return False
+
+        async def close(self) -> None:  # pragma: no cover
+            return None
+
+        def supports_tools(self) -> bool:
+            return False
+
+        def supports_session_resume(self) -> bool:
+            return False
+
+    register("alt", _AltBackend)
+    try:
+        a = get_or_create("alpha", {"backend": {"type": "claude_code"}})
+        b = get_or_create("alpha", {"backend": {"type": "alt"}})
+        assert a is not b
+        assert b.type == "alt"
+    finally:
+        registry._INSTANCES.pop("alpha", None)
+        registry._BACKENDS.pop("alt", None)
 
 
 def test_get_or_create_updates_bot_config_on_cached_return() -> None:

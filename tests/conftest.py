@@ -38,10 +38,10 @@ def pytest_configure(config: pytest.Config) -> None:
 def clear_llm_backend_cache():
     """Reset cached LLM backend instances between tests.
 
-    The ``abyss.llm.registry`` cache persists ``ClaudeCodeBackend`` /
-    ``OpenRouterBackend`` instances per bot for the lifetime of the
-    process. Tests that exercise the same bot name with different
-    configs must start from a clean slate.
+    The ``abyss.llm.registry`` cache persists ``ClaudeCodeBackend``
+    instances per bot for the lifetime of the process. Tests that
+    exercise the same bot name with different configs must start from a
+    clean slate.
     """
     from abyss.llm import registry
 

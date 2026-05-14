@@ -14,8 +14,8 @@ reached from the phone over Tailscale.
 ## Tech Stack
 
 - Python >= 3.11, uv package manager
-- Typer (CLI), Rich (output), PyYAML (config), croniter (cron), httpx (HTTP for OpenRouter)
-- LLM backends: Claude Code CLI (`claude -p`) + Python Agent SDK (default), OpenAI-compatible (`openai_compat`) for MiniMax / OpenRouter / any OpenAI-compat endpoint (opt-in per bot)
+- Typer (CLI), Rich (output), PyYAML (config), croniter (cron)
+- LLM: Claude Code CLI (`claude -p`) + Python Agent SDK — single backend (full agent: tools, MCP, skills, `--resume`)
 - Delivery: in-process `chat_server` (aiohttp HTTP/SSE on 127.0.0.1:3848) + Web Push via `pywebpush`
 
 ## Dev Commands
@@ -80,9 +80,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `hooks/precompact_hook.py` | Claude Code `PreCompact` hook — runs `token_compact` for the active bot before host compaction, never blocks (always exits 0) |
 | `llm/base.py` | `LLMBackend` Protocol, `LLMRequest`, `LLMResult`. Backend-agnostic envelope used by handlers / cron / heartbeat |
 | `llm/registry.py` | `register`, `get_backend`, `get_or_create` (per-bot cache), `close_all` for shutdown |
-| `llm/claude_code.py` | `ClaudeCodeBackend` wrapping `claude_runner` (subprocess + Agent SDK). Default backend |
-| `llm/openai_compat.py` | `OpenAICompatBackend` — text-only chat against any OpenAI-compatible endpoint. `PROVIDER_PRESETS` for `openrouter`, `minimax`, `minimax_china`. No tools, no resume, replays history from disk |
-| `llm/openrouter.py` | `OpenRouterBackend` — backward-compat subclass of `OpenAICompatBackend` with `type="openrouter"` and `_default_provider="openrouter"`. Existing bots unchanged |
+| `llm/claude_code.py` | `ClaudeCodeBackend` wrapping `claude_runner` (subprocess + Agent SDK). Only registered backend |
 
 ### Built-in Skills
 
@@ -138,17 +136,15 @@ For each bot on `abyss start`:
 
 ### LLM Backend Selection
 
-`abyss.llm.LLMBackend` Protocol with three registered backends:
+`abyss.llm.LLMBackend` Protocol with a single registered backend:
 
-- **claude_code** (default): wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent (tools, MCP, skills, `--resume`).
-- **openai_compat**: text-only chat against any OpenAI-compatible endpoint via `httpx` + SSE streaming. Supports named providers via `PROVIDER_PRESETS`: `openrouter`, `minimax` (international), `minimax_china`. Configure with `provider: minimax` in bot.yaml — see `docs/MINIMAX_SETUP.md`.
-- **openrouter** (legacy alias): identical to `openai_compat` with `provider: openrouter`. Existing `bot.yaml` files with `type: openrouter` continue to work unchanged.
+- **claude_code** (only): wraps `claude_runner.run_claude_with_sdk` and `run_claude_streaming_with_sdk`. Full agent (tools, MCP, skills, `--resume`).
 
-Per-bot caching via `get_or_create(bot_name, bot_config)` shares HTTPX clients / SDK pools across handler / cron / heartbeat call sites. `bot_config` is refreshed in-place on cached returns; backend-type changes recreate the instance. `bot_manager.close_all()` on shutdown.
+> v2026.05.15 — the OpenAI-compatible (`openai_compat` / `openrouter` / `minimax`) backends were removed. Bots that still set `backend.type` to one of those receive a clear migration error at startup. The `LLMBackend` Protocol + registry stay in place to make future full-agent backends drop-in.
+
+Per-bot caching via `get_or_create(bot_name, bot_config)` shares SDK pools across handler / cron / heartbeat call sites. `bot_config` is refreshed in-place on cached returns; backend-type changes recreate the instance. `bot_manager.close_all()` on shutdown.
 
 `/cancel` calls `cached_backend(bot_name).cancel(session_key)` and falls through to legacy Claude Code paths for cold bots.
-
-Dedup: handlers log the user message before `backend.run`, so `_build_messages` drops a trailing user turn whose content matches `request.user_prompt`. `max_history` precedence: explicit caller override (>20) wins, otherwise `bot.yaml`'s `backend.max_history`, otherwise dataclass default (20).
 
 ### Conversation Search (FTS5)
 

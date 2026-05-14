@@ -1,14 +1,9 @@
 """Backend-agnostic request / result types and the ``LLMBackend`` Protocol.
 
-Two concrete backends ship today: ``claude_code`` (the default — wraps
-``claude_runner.py`` + the Python Agent SDK) and ``openrouter`` (a
-plain text-only chat adapter that talks to OpenRouter's OpenAI-compatible
-chat completions endpoint).
-
-The shape of :class:`LLMRequest` carries the union of fields needed by
-both. Backends ignore fields that aren't meaningful to them
-(``claude_session_id`` / ``resume_session`` are no-ops on OpenRouter,
-for example).
+One concrete backend ships today: ``claude_code`` — wraps
+``claude_runner.py`` + the Python Agent SDK. The Protocol stays in place
+so a future full-agent backend can be slotted in without touching call
+sites.
 """
 
 from __future__ import annotations
@@ -21,9 +16,8 @@ from typing import Any, Awaitable, Callable, ClassVar, Protocol
 class ToolUnavailableError(Exception):
     """Raised when a backend cannot satisfy a request that requires tools.
 
-    The OpenRouter backend uses this to signal that a bot configured for
-    text-only chat has been asked to invoke a tool. Handlers translate
-    this into a user-facing message rather than crashing the run.
+    Handlers translate this into a user-facing message rather than
+    crashing the run. Reserved for future non-tool backends.
     """
 
 
