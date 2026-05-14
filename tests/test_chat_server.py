@@ -1001,8 +1001,14 @@ async def test_slash_send_returns_file_metadata(client, abyss_home, patch_backen
 
 
 @pytest.mark.asyncio
-async def test_slash_does_not_log_to_conversation(client, abyss_home, patch_backend):
-    """Slash command replies must not pollute the conversation log."""
+async def test_slash_messages_endpoint_returns_logged_pair(
+    client, abyss_home, patch_backend
+):
+    """The slash exchange must come back through the standard
+    ``/messages`` endpoint so a navigation away + return rebuilds the
+    chat surface with the slash result intact. The opposite policy
+    (skip logging) used to live here; we flipped it after users
+    reported that slash replies vanished when they switched chats."""
 
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
@@ -1011,15 +1017,16 @@ async def test_slash_does_not_log_to_conversation(client, abyss_home, patch_back
         "/chat",
         json={"bot": "alpha", "session_id": sid, "message": "/help"},
     )
-    # Drain.
     async for _ in sse.content.iter_any():
         pass
 
     msgs = await client.get(f"/chat/sessions/alpha/{sid}/messages")
     assert msgs.status == 200
     body = await msgs.json()
-    # No user/assistant pair recorded for /help.
-    assert body["messages"] == []
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["user", "assistant"]
+    assert body["messages"][0]["content"] == "/help"
+    assert "/start" in body["messages"][1]["content"]
 
 
 @pytest.mark.asyncio
@@ -1364,3 +1371,37 @@ async def test_slash_reply_does_not_trigger_push(client, abyss_home, patch_backe
             pass
 
     sender.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_slash_command_logs_to_conversation_markdown(
+    client, abyss_home, patch_backend
+):
+    """Slash command results must persist to ``conversation-*.md`` so
+    navigating away from a chat and returning does not silently drop
+    the reply. Regular LLM messages get this through
+    ``process_chat_message``; the dashboard slash path needs to mirror
+    that contract so the message history reload after navigation
+    surfaces the result."""
+
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/help"},
+    )
+    async for _ in sse.content.iter_any():
+        pass
+
+    session_dir = abyss_home / "bots" / "alpha" / "sessions" / sid
+    convo_files = list(session_dir.glob("conversation-*.md"))
+    assert len(convo_files) == 1
+    body = convo_files[0].read_text()
+    # User side records the literal slash command exactly as typed.
+    assert "## user" in body
+    assert "/help" in body
+    # Assistant side records the rendered help text — ``/start`` is
+    # the first entry in the command catalog and must appear.
+    assert "## assistant" in body
+    assert "/start" in body
