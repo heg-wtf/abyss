@@ -941,18 +941,33 @@ async def test_slash_cron_usage(client, patch_backend):
 
 
 @pytest.mark.asyncio
-async def test_slash_cron_run_falls_back(client, patch_backend):
-    """``/cron run`` is not yet wired into the PWA chat — surface a
-    clear hint instead of crashing on the missing scheduler hook."""
+async def test_slash_cron_run_unknown_job(client, patch_backend):
+    """``/cron run <job>`` returns a clear "not found" message when
+    the job slug doesn't match anything in cron.yaml — without
+    crashing the scheduler hook."""
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
     sse = await client.post(
         "/chat",
-        json={"bot": "alpha", "session_id": sid, "message": "/cron run x"},
+        json={"bot": "alpha", "session_id": sid, "message": "/cron run nope"},
     )
     events = await _parse_sse_events(sse)
     result = next(e for e in events if e["type"] == "command_result")
-    assert "not yet wired" in result["text"]
+    assert "not found" in result["text"]
+
+
+@pytest.mark.asyncio
+async def test_slash_cron_run_missing_arg(client, patch_backend):
+    """``/cron run`` without a job name surfaces the usage hint."""
+    create = await client.post("/chat/sessions", json={"bot": "alpha"})
+    sid = (await create.json())["id"]
+    sse = await client.post(
+        "/chat",
+        json={"bot": "alpha", "session_id": sid, "message": "/cron run"},
+    )
+    events = await _parse_sse_events(sse)
+    result = next(e for e in events if e["type"] == "command_result")
+    assert "Usage" in result["text"]
 
 
 @pytest.mark.asyncio
@@ -1088,9 +1103,15 @@ async def test_slash_heartbeat_status(client, patch_backend, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_slash_heartbeat_run_falls_back(client, patch_backend):
-    """``/heartbeat run`` (manual trigger) is not yet wired into the
-    PWA chat — return a hint, not a crash."""
+async def test_slash_heartbeat_run_fires(client, patch_backend, monkeypatch):
+    """``/heartbeat run`` calls ``execute_heartbeat`` (same code path
+    as the scheduler) and reports back. We stub the executor to keep
+    the test deterministic; the real function is tested elsewhere."""
+    from unittest.mock import AsyncMock
+
+    called = AsyncMock()
+    monkeypatch.setattr("abyss.heartbeat.execute_heartbeat", called)
+
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     sid = (await create.json())["id"]
     sse = await client.post(
@@ -1099,7 +1120,8 @@ async def test_slash_heartbeat_run_falls_back(client, patch_backend):
     )
     events = await _parse_sse_events(sse)
     result = next(e for e in events if e["type"] == "command_result")
-    assert "not yet wired" in result["text"]
+    assert "Heartbeat fired" in result["text"]
+    called.assert_called_once()
 
 
 @pytest.mark.asyncio
