@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AvatarUploader } from "@/components/bots/avatar-uploader";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -25,7 +26,6 @@ interface BotFormData {
   model: string;
   streaming: boolean;
   command_timeout?: number;
-  telegram_botname: string;
   skills: string[];
   heartbeat?: {
     enabled: boolean;
@@ -60,7 +60,6 @@ export default function BotEditPage() {
         model: bot.model || "sonnet",
         streaming: bot.streaming || false,
         command_timeout: bot.command_timeout,
-        telegram_botname: bot.telegram_botname || "",
         skills: bot.skills || [],
         heartbeat: bot.heartbeat || {
           enabled: false,
@@ -138,13 +137,8 @@ export default function BotEditPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Bot Name (Telegram)</Label>
-              <Input
-                value={form.telegram_botname}
-                onChange={(e) =>
-                  setForm({ ...form, telegram_botname: e.target.value })
-                }
-              />
+              <Label>Avatar</Label>
+              <AvatarUploader botName={name} />
             </div>
             <div className="space-y-2">
               <Label>Model</Label>

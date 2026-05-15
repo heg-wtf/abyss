@@ -3,66 +3,70 @@ import fs from "fs";
 import path from "path";
 import { getBot, getAbyssHome } from "@/lib/abyss";
 
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+/**
+ * Bot avatar — file-backed at ``~/.abyss/bots/<name>/avatar.jpg``.
+ *
+ * Earlier revisions fetched a fallback from Telegram via the bot's
+ * ``telegram_token``. That dependency is gone — the dashboard now
+ * owns avatar lifecycle directly via the edit page's upload field.
+ *
+ * GET serves the cached file (or 404 → the ``BotAvatar`` component
+ * falls back to the colored initial). POST accepts a multipart
+ * upload to replace the file. DELETE removes it. The on-disk filename
+ * stays ``avatar.jpg`` regardless of source mime so older code that
+ * points at that path keeps working.
+ */
 
-async function fetchTelegramAvatar(token: string): Promise<Buffer | null> {
-  try {
-    const baseUrl = `https://api.telegram.org/bot${token}`;
-
-    const meResponse = await fetch(`${baseUrl}/getMe`, {
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!meResponse.ok) return null;
-    const meData = (await meResponse.json()) as { result?: { id?: number } };
-    const botId = meData.result?.id;
-    if (!botId) return null;
-
-    const photosResponse = await fetch(
-      `${baseUrl}/getUserProfilePhotos?user_id=${botId}&limit=1`,
-      { signal: AbortSignal.timeout(10_000) },
-    );
-    if (!photosResponse.ok) return null;
-    const photosData = (await photosResponse.json()) as {
-      result?: { photos?: Array<Array<{ file_id: string }>> };
-    };
-    const photos = photosData.result?.photos;
-    if (!photos || photos.length === 0) return null;
-
-    // Use largest size (last in array)
-    const photoSizes = photos[0];
-    const bestPhoto = photoSizes[photoSizes.length - 1];
-    if (!bestPhoto) return null;
-
-    const fileResponse = await fetch(
-      `${baseUrl}/getFile?file_id=${bestPhoto.file_id}`,
-      { signal: AbortSignal.timeout(10_000) },
-    );
-    if (!fileResponse.ok) return null;
-    const fileData = (await fileResponse.json()) as {
-      result?: { file_path?: string };
-    };
-    const filePath = fileData.result?.file_path;
-    if (!filePath) return null;
-
-    const imageResponse = await fetch(
-      `https://api.telegram.org/file/bot${token}/${filePath}`,
-      { signal: AbortSignal.timeout(15_000) },
-    );
-    if (!imageResponse.ok) return null;
-
-    const arrayBuffer = await imageResponse.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (err) {
-    console.error(`[avatar] Telegram fetch failed: ${err}`);
-    return null;
-  }
-}
+const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
+// Short cache so a freshly uploaded avatar reaches the rest of the
+// dashboard within seconds.
+const CACHE_CONTROL = "private, max-age=60, must-revalidate";
 
 function getBotAvatarPath(botName: string): string {
   return path.join(getAbyssHome(), "bots", botName, "avatar.jpg");
 }
 
+function magicBytesOk(prefix: Buffer, declared: string): boolean {
+  if (declared === "image/png")
+    return prefix
+      .slice(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (declared === "image/jpeg")
+    return prefix[0] === 0xff && prefix[1] === 0xd8 && prefix[2] === 0xff;
+  if (declared === "image/webp")
+    return (
+      prefix.slice(0, 4).toString("ascii") === "RIFF" &&
+      prefix.slice(8, 12).toString("ascii") === "WEBP"
+    );
+  return false;
+}
+
 export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ name: string }> },
+) {
+  const { name } = await params;
+  const bot = getBot(name);
+  if (!bot) {
+    return NextResponse.json({ error: "Bot not found" }, { status: 404 });
+  }
+  const avatarPath = getBotAvatarPath(name);
+  if (!fs.existsSync(avatarPath)) {
+    return NextResponse.json({ error: "No avatar" }, { status: 404 });
+  }
+  const stat = fs.statSync(avatarPath);
+  const imageBuffer = fs.readFileSync(avatarPath);
+  return new NextResponse(imageBuffer.buffer as ArrayBuffer, {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": CACHE_CONTROL,
+      ETag: `"${stat.mtimeMs}"`,
+    },
+  });
+}
+
+export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ name: string }> },
 ) {
@@ -72,46 +76,61 @@ export async function GET(
     return NextResponse.json({ error: "Bot not found" }, { status: 404 });
   }
 
-  const forceRefresh = request.nextUrl.searchParams.get("refresh") === "1";
+  let formData: FormData;
+  try {
+    formData = await request.formData();
+  } catch {
+    return NextResponse.json({ error: "Invalid form data" }, { status: 400 });
+  }
+
+  const file = formData.get("avatar");
+  if (!(file instanceof File)) {
+    return NextResponse.json(
+      { error: "avatar field is required (file)" },
+      { status: 400 },
+    );
+  }
+  if (!ALLOWED_MIME.has(file.type)) {
+    return NextResponse.json(
+      { error: `Unsupported type: ${file.type}. Use JPEG, PNG, or WebP.` },
+      { status: 400 },
+    );
+  }
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json(
+      { error: `File too large (${file.size} bytes). Max 2 MB.` },
+      { status: 413 },
+    );
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  if (!magicBytesOk(buffer.subarray(0, 16), file.type)) {
+    return NextResponse.json(
+      { error: "File content does not match declared type." },
+      { status: 400 },
+    );
+  }
+
   const avatarPath = getBotAvatarPath(name);
+  fs.mkdirSync(path.dirname(avatarPath), { recursive: true });
+  fs.writeFileSync(avatarPath, buffer);
 
-  // Serve cache if fresh
-  if (!forceRefresh && fs.existsSync(avatarPath)) {
-    const stat = fs.statSync(avatarPath);
-    if (Date.now() - stat.mtimeMs < CACHE_MAX_AGE_MS) {
-      const imageBuffer = fs.readFileSync(avatarPath);
-      return new NextResponse(imageBuffer.buffer as ArrayBuffer, {
-        headers: {
-          "Content-Type": "image/jpeg",
-          "Cache-Control": "public, max-age=86400",
-        },
-      });
-    }
+  return NextResponse.json({ ok: true, bytes: buffer.length });
+}
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ name: string }> },
+) {
+  const { name } = await params;
+  const bot = getBot(name);
+  if (!bot) {
+    return NextResponse.json({ error: "Bot not found" }, { status: 404 });
   }
-
-  // Fetch from Telegram
-  const imageBuffer = await fetchTelegramAvatar(bot.telegram_token);
-  if (!imageBuffer) {
-    // Serve stale cache if Telegram fetch fails
-    if (fs.existsSync(avatarPath)) {
-      const staleBuffer = fs.readFileSync(avatarPath);
-      return new NextResponse(staleBuffer.buffer as ArrayBuffer, {
-        headers: {
-          "Content-Type": "image/jpeg",
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
-    }
-    return NextResponse.json({ error: "No avatar available" }, { status: 404 });
+  const avatarPath = getBotAvatarPath(name);
+  if (fs.existsSync(avatarPath)) {
+    fs.unlinkSync(avatarPath);
   }
-
-  // Cache to disk
-  fs.writeFileSync(avatarPath, imageBuffer);
-
-  return new NextResponse(imageBuffer.buffer as ArrayBuffer, {
-    headers: {
-      "Content-Type": "image/jpeg",
-      "Cache-Control": "public, max-age=86400",
-    },
-  });
+  return NextResponse.json({ ok: true });
 }

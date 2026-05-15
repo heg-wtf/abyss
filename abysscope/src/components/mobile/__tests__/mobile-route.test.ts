@@ -228,6 +228,39 @@ describe("/mobile route skeleton", () => {
     expect(shell).toMatch(/splashVisible && <LogoSplash/);
   });
 
+  it("bot edit page drops the Telegram field and hosts an avatar uploader", () => {
+    const edit = read("app/bots/[name]/edit/page.tsx");
+    // Telegram surface is gone — the Telegram backend is removed from
+    // abyss, no point editing a field that has no effect.
+    expect(edit).not.toMatch(/telegram_botname/);
+    expect(edit).not.toMatch(/Bot Name \(Telegram\)/);
+    // Avatar uploader is mounted in its place.
+    expect(edit).toMatch(/<AvatarUploader botName=\{name\} \/>/);
+    expect(edit).toMatch(/from "@\/components\/bots\/avatar-uploader"/);
+  });
+
+  it("avatar uploader wires POST / DELETE against the bot avatar route", () => {
+    const uploader = read("components/bots/avatar-uploader.tsx");
+    expect(uploader).toMatch(/method: "POST"/);
+    expect(uploader).toMatch(/method: "DELETE"/);
+    // Cache-busting version stamp so the freshly uploaded image
+    // shows immediately instead of waiting for the GET cache window.
+    expect(uploader).toMatch(/\?v=\$\{version\}/);
+    // Accept list matches the server-side MIME allowlist.
+    expect(uploader).toMatch(/image\/jpeg.*image\/png.*image\/webp/s);
+  });
+
+  it("avatar route owns upload + delete and no longer depends on Telegram", () => {
+    const route = read("app/api/bots/[name]/avatar/route.ts");
+    expect(route).toMatch(/export async function POST/);
+    expect(route).toMatch(/export async function DELETE/);
+    expect(route).toMatch(/magicBytesOk/);
+    // Legacy Telegram fallback fetch is gone — the dashboard owns
+    // the avatar lifecycle directly.
+    expect(route).not.toMatch(/api\.telegram\.org/);
+    expect(route).not.toMatch(/fetchTelegramAvatar/);
+  });
+
   it("display_name fallback chain is display_name → telegram_botname → name everywhere it's shown", () => {
     // Bots created before display_name existed have ``display_name:
     // ''`` in their yaml, with the friendly name only in the legacy
