@@ -1,80 +1,110 @@
 "use client";
 
-import Image from "next/image";
 import * as React from "react";
 
 /**
  * Minimal logo splash for cold page loads.
  *
  * Renders a full-screen dark overlay with the app logo centered.
- * Fades in 0.3s → holds 0.9s → fades out 0.3s (total 1.5s) and then
- * calls ``onComplete`` so ``MobileShell`` can unmount it. Honors
+ * Holds 1.2 s, fades out 0.3 s (total ~1.5 s) and unmounts. Honors
  * ``prefers-reduced-motion``.
  *
- * Why ``MobileShell`` only mounts this on the *initial* render and
- * never on background↔foreground transitions: a hot resume keeps the
- * React tree mounted, so ``useState`` initial values don't run again
- * and ``visibilitychange`` is intentionally not wired here.
+ * Implementation notes (revisited 2026-05-15):
+ *   - **No CSS keyframes.** Earlier revisions used ``@keyframes
+ *     logo-splash-bg / -logo`` in ``globals.css``. On iOS PWA cold
+ *     starts the browser would render the SSR HTML for one frame
+ *     before the bundled stylesheet (with the keyframes + the
+ *     ``--background`` token) arrived, briefly revealing the chat
+ *     content beneath the still-transparent overlay. We now drive
+ *     the fade with a state machine + inline ``transition: opacity``
+ *     so the first paint already has ``opacity: 1`` baked in.
+ *   - **No ``next/image``.** Plain ``<img>`` so there's no
+ *     placeholder swap mid-animation.
+ *   - **Inline color.** Background uses the same ``#131313`` the
+ *     PWA manifest does for the OS splash, so the hand-off between
+ *     the system-rendered splash and our overlay is seamless.
  */
+
+type Phase = "showing" | "fading-out" | "done";
 
 interface LogoSplashProps {
   onComplete: () => void;
 }
 
+const HOLD_MS = 1200;
+const FADE_MS = 300;
+
 export function LogoSplash({ onComplete }: LogoSplashProps) {
+  const [phase, setPhase] = React.useState<Phase>("showing");
   const completedRef = React.useRef(false);
 
-  const complete = React.useCallback(() => {
+  const finish = React.useCallback(() => {
     if (completedRef.current) return;
     completedRef.current = true;
     onComplete();
   }, [onComplete]);
 
-  // Belt-and-suspenders: the CSS animation triggers ``onAnimationEnd``,
-  // but if that event is swallowed (e.g. reduced-motion shortens the
-  // keyframes to 0–100% opacity-0 and some engines skip the event) we
-  // still complete on a timer.
   React.useEffect(() => {
-    const id = window.setTimeout(complete, 1600);
-    return () => window.clearTimeout(id);
-  }, [complete]);
+    // Reduced-motion users skip the animation entirely.
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      const id = window.setTimeout(finish, 50);
+      return () => window.clearTimeout(id);
+    }
+
+    const fadeTimer = window.setTimeout(
+      () => setPhase("fading-out"),
+      HOLD_MS,
+    );
+    // Safety: if ``onTransitionEnd`` never fires (e.g. element
+    // detached mid-transition), still complete after the full
+    // expected lifetime + a small margin.
+    const fallback = window.setTimeout(finish, HOLD_MS + FADE_MS + 100);
+    return () => {
+      window.clearTimeout(fadeTimer);
+      window.clearTimeout(fallback);
+    };
+  }, [finish]);
+
+  if (phase === "done") return null;
+
+  const fading = phase === "fading-out";
 
   return (
     <div
-      className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center"
       role="presentation"
       aria-hidden
-      onAnimationEnd={complete}
+      onTransitionEnd={(event) => {
+        // Only react when the OUTER ``opacity`` transition ends —
+        // the inner ``<img>`` doesn't currently animate, but guard
+        // against future changes.
+        if (event.target !== event.currentTarget) return;
+        if (fading) finish();
+      }}
       style={{
-        // Inline ``backgroundColor`` instead of relying on the
-        // Tailwind background token on purpose. On a PWA cold start
-        // the browser can paint the SSR HTML before the bundled
-        // stylesheet finishes loading, which would briefly show the
-        // chat behind a transparent overlay. Hardcoding the same
-        // color the PWA manifest already uses for the system splash
-        // (``#131313``) keeps the screen solid through that gap and
-        // matches the OS-rendered splash that precedes us.
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         backgroundColor: "#131313",
-        // Background stays opaque until t=1.2s, then fades out to
-        // 1.5s. The logo image runs its own fade-in / fade-out
-        // inside. Splitting the two animations is what stops the
-        // "chat → splash → chat" flash we saw with a single
-        // outer-opacity keyframe — a 0% → 20% fade-in on the outer
-        // ``opacity`` briefly revealed everything behind it.
-        animation: "logo-splash-bg 1.5s ease-in-out forwards",
+        opacity: fading ? 0 : 1,
+        transition: `opacity ${FADE_MS}ms ease-in-out`,
+        pointerEvents: "none",
       }}
     >
-      <Image
+      {/* eslint-disable-next-line @next/next/no-img-element -- plain
+          <img> keeps the splash free of next/image placeholder
+          swapping mid-animation. */}
+      <img
         src="/logo-square.png"
         alt=""
         width={160}
         height={160}
-        priority
-        style={{
-          width: "160px",
-          height: "160px",
-          animation: "logo-splash-logo 1.5s ease-in-out forwards",
-        }}
+        style={{ width: 160, height: 160 }}
       />
     </div>
   );
