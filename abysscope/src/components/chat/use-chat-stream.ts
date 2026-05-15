@@ -155,6 +155,12 @@ async function send(
         accumulated = event.text;
         commandFile = event.file ?? null;
         patchStream(sessionId, { text: accumulated, commandFile });
+      } else if (event.type === "reset_partial") {
+        // Upstream 5xx triggered a retry on the server. Discard any
+        // partial JSON error text we already streamed so the retry's
+        // clean reply doesn't accumulate on top of it.
+        accumulated = "";
+        patchStream(sessionId, { text: "" });
       } else if (event.type === "error") {
         patchStream(sessionId, { error: event.message });
       } else if (event.type === "done") {

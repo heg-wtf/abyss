@@ -273,3 +273,187 @@ async def test_attachments_without_caption(bot, fake_backend):
     sent = fake_backend.last_request.user_prompt
     assert "I sent files." in sent
     assert f"File: {img}" in sent
+
+
+# ---------------------------------------------------------------------------
+# Upstream-error retry + sanitize
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedBackend(_FakeBackend):
+    """Emits a queued sequence of full-text responses across calls."""
+
+    def __init__(self, responses: list[str]):
+        super().__init__()
+        self._responses = list(responses)
+        self.calls = 0
+
+    def _next_text(self) -> str:
+        if self.calls >= len(self._responses):
+            raise RuntimeError(
+                f"backend asked for response {self.calls + 1} "
+                f"but only {len(self._responses)} were scripted"
+            )
+        text = self._responses[self.calls]
+        self.calls += 1
+        return text
+
+    async def run(self, request):
+        from abyss.llm.base import LLMResult
+
+        self.last_request = request
+        text = self._next_text()
+        return LLMResult(text=text, session_id="sess-1")
+
+    async def run_streaming(self, request, on_chunk):
+        from abyss.llm.base import LLMResult
+
+        self.last_request = request
+        text = self._next_text()
+        if text and on_chunk is not None:
+            await on_chunk(text)
+        return LLMResult(text=text, session_id="sess-1")
+
+
+@pytest.fixture
+def _patch_sleep(monkeypatch):
+    """Drop the exponential backoff sleep so tests run instantly."""
+    sleeps: list[float] = []
+
+    async def _fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(chat_core.asyncio, "sleep", _fake_sleep)
+    return sleeps
+
+
+_REAL_529 = (
+    'API Error: 529 {"error":{"message":"{\\"type\\":\\"error\\",'
+    '\\"error\\":{\\"type\\":\\"overloaded_error\\",'
+    '\\"message\\":\\"Overloaded\\"},'
+    '\\"request_id\\":\\"req_011Cb3RtVZBrZgTH4FQB7tct\\"}'
+    '","type":"None","code":"529"}}'
+)
+_REAL_400 = (
+    'API Error: 400 {"error":{"type":"invalid_request_error",'
+    '"message":"Bad input"},"request_id":"req_011Cbad"}'
+)
+
+
+@pytest.mark.asyncio
+async def test_retry_succeeds_on_second_attempt(bot, monkeypatch, _patch_sleep):
+    backend = _ScriptedBackend([_REAL_529, "안녕하세요, 도와드릴게요."])
+    monkeypatch.setattr(chat_core, "get_or_create", lambda *a, **kw: backend)
+    resets: list[None] = []
+
+    async def on_reset():
+        resets.append(None)
+
+    text = await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=bot["config"],
+        chat_id="chat_web_retry1",
+        user_message="hi",
+        on_reset=on_reset,
+    )
+
+    assert text == "안녕하세요, 도와드릴게요."
+    assert backend.calls == 2
+    assert len(resets) == 1, "on_reset must fire once before the retry"
+    assert len(_patch_sleep) == 1, "exactly one backoff sleep between attempts"
+    # Raw JSON must not survive to the conversation log.
+    body = ""
+    for path in sorted((bot["path"] / "sessions" / "chat_web_retry1").glob("conversation-*.md")):
+        body += path.read_text()
+    assert "안녕하세요, 도와드릴게요." in body
+    assert "API Error: 529" not in body
+
+
+@pytest.mark.asyncio
+async def test_retry_exhausted_sanitizes(bot, monkeypatch, _patch_sleep):
+    """All attempts fail with 529 → user sees Korean sanitized message."""
+    backend = _ScriptedBackend([_REAL_529, _REAL_529, _REAL_529])
+    monkeypatch.setattr(chat_core, "get_or_create", lambda *a, **kw: backend)
+    resets: list[None] = []
+
+    async def on_reset():
+        resets.append(None)
+
+    text = await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=bot["config"],
+        chat_id="chat_web_retry2",
+        user_message="hi",
+        on_reset=on_reset,
+    )
+
+    assert backend.calls == 3, "default = 1 initial + 2 retries"
+    assert len(resets) == 2, "on_reset fires between attempts, not after the last"
+    assert len(_patch_sleep) == 2
+    assert "혼잡" in text
+    assert "<!-- upstream error: HTTP 529 overloaded_error" in text
+    assert "API Error:" not in text
+
+
+@pytest.mark.asyncio
+async def test_non_retryable_4xx_is_sanitized_without_retry(bot, monkeypatch, _patch_sleep):
+    backend = _ScriptedBackend([_REAL_400])
+    monkeypatch.setattr(chat_core, "get_or_create", lambda *a, **kw: backend)
+    resets: list[None] = []
+
+    async def on_reset():
+        resets.append(None)
+
+    text = await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=bot["config"],
+        chat_id="chat_web_retry3",
+        user_message="hi",
+        on_reset=on_reset,
+    )
+
+    assert backend.calls == 1
+    assert resets == []
+    assert _patch_sleep == []
+    assert "HTTP 400 invalid_request_error" in text
+    assert "API Error:" not in text
+
+
+@pytest.mark.asyncio
+async def test_retry_disabled_via_max_attempts_zero(bot, monkeypatch, _patch_sleep):
+    backend = _ScriptedBackend([_REAL_529])
+    monkeypatch.setattr(chat_core, "get_or_create", lambda *a, **kw: backend)
+    config = {**bot["config"], "retry": {"max_attempts": 0}}
+
+    text = await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=config,
+        chat_id="chat_web_retry4",
+        user_message="hi",
+    )
+
+    assert backend.calls == 1
+    assert _patch_sleep == []
+    assert "혼잡" in text
+
+
+@pytest.mark.asyncio
+async def test_normal_response_takes_no_retry(bot, monkeypatch, _patch_sleep):
+    backend = _ScriptedBackend(["all good!"])
+    monkeypatch.setattr(chat_core, "get_or_create", lambda *a, **kw: backend)
+
+    text = await chat_core.process_chat_message(
+        bot_name=bot["name"],
+        bot_path=bot["path"],
+        bot_config=bot["config"],
+        chat_id="chat_web_retry5",
+        user_message="hi",
+    )
+
+    assert text == "all good!"
+    assert backend.calls == 1
+    assert _patch_sleep == []

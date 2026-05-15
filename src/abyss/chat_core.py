@@ -9,6 +9,7 @@ clean for future adapters (CLI streaming, MCP, etc.).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -27,10 +28,17 @@ from abyss.session import (
     log_conversation,
     save_claude_session_id,
 )
+from abyss.upstream_errors import classify, sanitize
 
 logger = logging.getLogger(__name__)
 
 OnChunk = Callable[[str], Awaitable[None]]
+OnReset = Callable[[], Awaitable[None]]
+
+# Defaults applied when ``bot.yaml`` has no ``retry:`` block. One initial
+# attempt + ``DEFAULT_MAX_RETRIES`` retries with exponential backoff.
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_BACKOFF_SECONDS = 3.0
 
 
 def _build_bootstrap_prompt(bot_path: Path, session_dir: Path, user_message: str) -> str:
@@ -149,6 +157,7 @@ async def process_chat_message(
     chat_id: int | str,
     user_message: str,
     on_chunk: OnChunk | None = None,
+    on_reset: OnReset | None = None,
     session_key: str | None = None,
     timeout: int = 600,
     attachments: tuple[Path, ...] = (),
@@ -189,24 +198,56 @@ async def process_chat_message(
     )
 
     effective_key = session_key or f"{bot_name}:{chat_id}"
+    retry_cfg = bot_config.get("retry") or {}
+    max_attempts = int(retry_cfg.get("max_attempts", DEFAULT_MAX_RETRIES)) + 1
+    backoff_seconds = float(retry_cfg.get("backoff_seconds", DEFAULT_BACKOFF_SECONDS))
 
-    try:
-        full_text = await _run_with_resume_fallback(
-            bot_name=bot_name,
-            bot_path=bot_path,
-            bot_config=bot_config,
-            session_dir=session_dir,
-            user_message=prompt_text,
-            prompt=prompt,
-            claude_session_id=claude_session_id,
-            resume_session=resume_session,
-            session_key=effective_key,
-            on_chunk=on_chunk,
-            timeout=timeout,
+    full_text = ""
+    for attempt in range(max_attempts):
+        try:
+            full_text = await _run_with_resume_fallback(
+                bot_name=bot_name,
+                bot_path=bot_path,
+                bot_config=bot_config,
+                session_dir=session_dir,
+                user_message=prompt_text,
+                prompt=prompt,
+                claude_session_id=claude_session_id,
+                resume_session=resume_session,
+                session_key=effective_key,
+                on_chunk=on_chunk,
+                timeout=timeout,
+            )
+        except Exception as error:
+            logger.exception("chat_core: backend failure for %s/%s", bot_name, chat_id)
+            full_text = f"Error: {error}"
+            break
+
+        match = classify(full_text)
+        if match is None:
+            break
+
+        logger.warning(
+            "upstream error from %s/%s (attempt %d/%d): %s",
+            bot_name,
+            chat_id,
+            attempt + 1,
+            max_attempts,
+            full_text[:500],
         )
-    except Exception as error:
-        logger.exception("chat_core: backend failure for %s/%s", bot_name, chat_id)
-        full_text = f"Error: {error}"
+
+        is_last_attempt = attempt == max_attempts - 1
+        if not match.retryable or is_last_attempt:
+            full_text = sanitize(match)
+            break
+
+        if on_reset is not None:
+            try:
+                await on_reset()
+            except Exception:  # pragma: no cover - defensive
+                logger.debug("on_reset callback raised; continuing")
+        delay = backoff_seconds * (2**attempt)
+        await asyncio.sleep(delay)
 
     log_conversation(session_dir, "assistant", full_text)
     return full_text
