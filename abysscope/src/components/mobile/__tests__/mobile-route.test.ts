@@ -158,9 +158,11 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/aria-label="Slash commands"/);
     expect(source).toMatch(/aria-label="Attach file"/);
     expect(source).toMatch(/aria-label="Send message"/);
-    // Voice button has two states (recording / idle), so we just
-    // pin the start-recording label.
-    expect(source).toMatch(/Start voice dictation/);
+    // Mic button now opens the full conversational voice-mode
+    // overlay (mirrors the removed desktop chat-view pattern from
+    // c983c9b); the legacy dictation flow is gone on purpose.
+    expect(source).toMatch(/Start voice mode/);
+    expect(source).toMatch(/handleVoiceOpen/);
     // Workspace + sessions slide in from the side instead of
     // stacking a centred Dialog.
     expect(source).toMatch(/<SlideDrawer/);
@@ -383,16 +385,35 @@ it("workspace and sessions slide in from the side instead of a centred modal", (
     expect(source).toMatch(/-translate-x-full/);
   });
 
-  it("chat screen wires voice dictation and swipe navigation", () => {
+  it("chat screen wires conversational voice mode and swipe navigation", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
-    // Mic button used to be a disabled stub. It now drives a real
-    // dictation pipeline backed by ElevenLabs Scribe through the
-    // shared ``useVoiceMode`` hook.
+    // Mic button used to feed a dictation pipeline (transcript →
+    // textarea). It now opens a full-screen Orb voice mode that
+    // mirrors the desktop chat-view pattern removed in c983c9b:
+    // speak → auto-submit with ``voice_mode: true`` → reply TTS'd
+    // → recording auto-restarts.
     expect(source).toMatch(/useVoiceMode/);
-    expect(source).toMatch(/onTranscript:/);
+    expect(source).toMatch(/VoiceScreen/);
+    expect(source).toMatch(/voiceMode/);
+    // Auto-submit goes through submitTranscript with voiceFlag=true.
+    expect(source).toMatch(/submitTranscript/);
+    expect(source).toMatch(/voiceFlag: true/);
+    // Auto-restart after TTS: prev=speaking → cur=idle.
+    expect(source).toMatch(/prev === "speaking"/);
     // Horizontal swipes on the message area page between sibling
     // sessions of the same bot.
     expect(source).toMatch(/onMessagesTouchStart/);
     expect(source).toMatch(/goToSibling/);
+  });
+
+  it("voice-screen renders the Orb with theme-aware colors and a close button", () => {
+    const source = read("components/chat/voice-screen.tsx");
+    expect(source).toMatch(/import \{ Orb/);
+    expect(source).toMatch(/useTheme/);
+    expect(source).toMatch(/onClose/);
+    // State → AgentState mapping must be present so the Orb actually
+    // animates between listening / thinking / talking.
+    expect(source).toMatch(/toAgentState/);
+    expect(source).toMatch(/partialTranscript/);
   });
 });
