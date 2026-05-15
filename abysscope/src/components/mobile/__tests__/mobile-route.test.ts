@@ -199,6 +199,32 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/file\?: \{ name: string; path: string; url: string \}/);
   });
 
+  it("LogoSplash renders a fading logo and dismisses itself", () => {
+    const splash = read("components/mobile/logo-splash.tsx");
+    expect(splash).toMatch(/animation: "logo-splash 1\.5s/);
+    // Dismisses on animation end + a belt-and-suspenders timeout so
+    // a swallowed onAnimationEnd never strands the splash.
+    expect(splash).toMatch(/onAnimationEnd=\{complete\}/);
+    expect(splash).toMatch(/setTimeout\(complete, 1600\)/);
+    expect(splash).toMatch(/\/logo-square\.png/);
+  });
+
+  it("MobileShell mounts LogoSplash on cold start (no localStorage flag)", () => {
+    const shell = read("components/mobile/mobile-shell.tsx");
+    expect(shell).toMatch(/from "@\/components\/mobile\/logo-splash"/);
+    // Cold-start surface: initial state is "visible" and there is no
+    // localStorage check — every mount of the shell shows the splash.
+    expect(shell).toMatch(/useState\(true\)/);
+    expect(shell).not.toMatch(/localStorage/);
+    expect(shell).toMatch(/splashVisible && <LogoSplash/);
+  });
+
+  it("globals.css declares the logo-splash keyframes + reduced-motion override", () => {
+    const css = read("app/globals.css");
+    expect(css).toMatch(/@keyframes logo-splash/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+  });
+
   it("ChatEvent + stream hook handle the reset_partial signal", () => {
     // chat_core emits a ``reset_partial`` SSE event between retries when
     // the upstream Claude API returned a retryable 5xx. The hook must

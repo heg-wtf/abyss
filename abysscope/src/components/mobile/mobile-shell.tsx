@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { LogoSplash } from "@/components/mobile/logo-splash";
 import { useVisualViewport } from "@/hooks/use-visual-viewport-height";
 
 /**
@@ -20,6 +21,15 @@ import { useVisualViewport } from "@/hooks/use-visual-viewport-height";
  */
 export function MobileShell({ children }: { children: React.ReactNode }) {
   const vp = useVisualViewport();
+
+  // Cold-start logo splash. ``useState`` initial value runs once per
+  // React mount — and because ``MobileShell`` lives in the mobile
+  // layout, it survives client-side route changes and stays mounted
+  // across background/foreground transitions on iOS. So this only
+  // fires on a genuine cold load (first PWA launch after a quit, or
+  // a hard browser reload), which is exactly the surface we want.
+  const [splashVisible, setSplashVisible] = React.useState(true);
+  const dismissSplash = React.useCallback(() => setSplashVisible(false), []);
 
   // Pin html and body via ``position: fixed`` + lock overflow so iOS
   // cannot auto-scroll the document when the textarea gains focus.
@@ -86,6 +96,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+      {splashVisible && <LogoSplash onComplete={dismissSplash} />}
     </div>
   );
 }

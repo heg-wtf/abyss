@@ -142,6 +142,34 @@
   }
 }
 
+/* Logo splash — fade in, hold, fade out over 1.5s. Plays once on
+   each cold page load via ``LogoSplash``. ``opacity: 0`` start so the
+   first paint is the dark background instead of a flash of full logo
+   before the animation reaches the first frame. */
+@keyframes logo-splash {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes logo-splash {
+    0%,
+    100% {
+      opacity: 0;
+    }
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
