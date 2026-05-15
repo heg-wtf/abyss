@@ -46,7 +46,13 @@ export function LogoSplash({ onComplete }: LogoSplashProps) {
       aria-hidden
       onAnimationEnd={complete}
       style={{
-        animation: "logo-splash 1.5s ease-in-out forwards",
+        // Background stays opaque until t=1.2s, then fades out to
+        // 1.5s. The logo image runs its own fade-in/out inside.
+        // Splitting the two animations is what prevents the
+        // "chat → splash → chat" flicker we saw with a single
+        // outer-opacity keyframe: a 0%→20% fade-in on the outer
+        // ``opacity`` briefly reveals everything behind it.
+        animation: "logo-splash-bg 1.5s ease-in-out forwards",
       }}
     >
       <Image
@@ -56,6 +62,9 @@ export function LogoSplash({ onComplete }: LogoSplashProps) {
         height={160}
         priority
         className="size-40"
+        style={{
+          animation: "logo-splash-logo 1.5s ease-in-out forwards",
+        }}
       />
     </div>
   );
