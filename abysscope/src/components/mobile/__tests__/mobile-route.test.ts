@@ -211,6 +211,31 @@ describe("/mobile route skeleton", () => {
     expect(hook).toMatch(/accumulated = ""/);
   });
 
+  it("LaunchIntro renders a WebGL canvas with auto-complete + tap skip", () => {
+    const intro = read("components/mobile/launch-intro.tsx");
+    // Renders a canvas + reaches for a WebGL context.
+    expect(intro).toMatch(/<canvas ref=\{canvasRef\}/);
+    expect(intro).toMatch(/getContext\("webgl"/);
+    // Calls onComplete after duration AND on tap.
+    expect(intro).toMatch(/onComplete\(\)/);
+    expect(intro).toMatch(/onTouchStart=\{complete\}/);
+    // Honors reduced-motion preference.
+    expect(intro).toMatch(/prefers-reduced-motion: reduce/);
+  });
+
+  it("MobileShell shows the launch intro once and persists the seen flag", () => {
+    const shell = read("components/mobile/mobile-shell.tsx");
+    expect(shell).toMatch(/from "@\/components\/mobile\/launch-intro"/);
+    expect(shell).toMatch(/abyss_pwa_intro_seen/);
+    // SSR safety: initial state is "not visible" until the effect
+    // reads localStorage.
+    expect(shell).toMatch(/useState\(false\)/);
+    // Dismissal writes the flag.
+    expect(shell).toMatch(/setItem\(INTRO_STORAGE_KEY, "true"\)/);
+    // Render uses a conditional overlay.
+    expect(shell).toMatch(/introVisible && <LaunchIntro/);
+  });
+
   it("chat screen renders assistant replies through ReactMarkdown", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
     // Markdown rendering shares the desktop `prose prose-sm`
