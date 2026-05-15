@@ -304,6 +304,11 @@ function SidebarImpl() {
       <div className="border-t p-3 flex items-center justify-between">
         <span className="text-xs text-muted-foreground font-mono">
           {process.env.NEXT_PUBLIC_ABYSS_VERSION || "dev"}
+          {process.env.NEXT_PUBLIC_ABYSS_COMMIT && (
+            <span className="ml-1.5 opacity-70">
+              ({process.env.NEXT_PUBLIC_ABYSS_COMMIT})
+            </span>
+          )}
         </span>
         <SettingsButton />
       </div>

@@ -486,10 +486,14 @@ function DrawerFooter() {
   // ``dev`` when running outside the packaged wheel so a local
   // checkout doesn't pretend to be a released version.
   const version = process.env.NEXT_PUBLIC_ABYSS_VERSION || "dev";
+  const commit = process.env.NEXT_PUBLIC_ABYSS_COMMIT;
 
   return (
     <div className="flex shrink-0 items-center justify-between gap-2 border-t bg-background/80 px-3 py-2 backdrop-blur">
-      <span className="font-mono text-xs text-muted-foreground">{version}</span>
+      <span className="font-mono text-xs text-muted-foreground">
+        {version}
+        {commit && <span className="ml-1.5 opacity-70">({commit})</span>}
+      </span>
       <div className="flex items-center gap-2">
         <SettingsButton />
       </div>
