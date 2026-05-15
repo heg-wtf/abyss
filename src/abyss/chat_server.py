@@ -1133,6 +1133,17 @@ class ChatServer:
             with suppress(Exception):
                 await _sse_write(sse, {"type": "chunk", "text": chunk})
 
+        async def on_reset() -> None:
+            """Tell the client to discard any partial chunks streamed so far.
+
+            ``chat_core`` invokes this between retries when the upstream
+            API returned a retryable 5xx — the partial JSON error text
+            already pushed to the client must not be concatenated onto
+            the successful retry's reply.
+            """
+            with suppress(Exception):
+                await _sse_write(sse, {"type": "reset_partial"})
+
         effective_message = message
         if voice_mode:
             effective_message += (
@@ -1151,6 +1162,7 @@ class ChatServer:
                     chat_id=session_id,
                     user_message=effective_message,
                     on_chunk=on_chunk,
+                    on_reset=on_reset,
                     session_key=f"{bot_name}:{session_id}",
                     attachments=attachment_paths,
                 )
