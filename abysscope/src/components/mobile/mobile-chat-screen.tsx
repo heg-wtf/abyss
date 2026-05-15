@@ -44,7 +44,8 @@ import {
   getSessionStream,
   useMultiSessionChatStream,
 } from "@/components/chat/use-chat-stream";
-import { useVoiceMode } from "@/components/chat/use-voice-mode";
+import { useVoiceMode, type VoiceState } from "@/components/chat/use-voice-mode";
+import { VoiceScreen } from "@/components/chat/voice-screen";
 
 interface Props {
   bots: BotSummary[];
@@ -115,6 +116,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [sessionsOpen, setSessionsOpen] = React.useState(false);
   const [slashOpen, setSlashOpen] = React.useState(false);
+  const [voiceMode, setVoiceMode] = React.useState(false);
   const router = useRouter();
   const [slashCommands, setSlashCommands] = React.useState<
     SlashCommandSpec[] | null
@@ -128,16 +130,14 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   const stream = useMultiSessionChatStream();
   const activeStream = getSessionStream(stream.streams, session.id);
 
-  // Voice dictation — taps the mic, transcribes via ElevenLabs
-  // Scribe (the same backend the desktop chat already uses), drops
-  // the result into the textarea so the user can review + tap send.
-  // We deliberately do not auto-send: voice transcripts are easy to
-  // misfire and the desktop pattern of "speak → bot replies via TTS"
-  // belongs to a follow-up that wires the orb UI back in.
+  // Voice mode — taps the mic, transcribes via ElevenLabs Scribe,
+  // and runs the full conversational loop: speak → auto-submit with
+  // ``voice_mode: true`` → assistant reply auto-TTS'd → recording
+  // auto-restarts. Mirrors the desktop chat-view pattern (removed in
+  // commit c983c9b) inside a mobile full-screen overlay.
   const voice = useVoiceMode({
     onTranscript: (text) => {
-      setDraft((current) => (current ? `${current} ${text}` : text));
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      void submitTranscript(text);
     },
   });
 
@@ -298,17 +298,24 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     userMessageId: string;
     display: string;
     attachmentPaths: string[];
+    voiceFlag: boolean;
   };
   const [queued, setQueued] = React.useState<QueuedSend | null>(null);
 
   const executeStreamSend = React.useCallback(
-    async (userMessageId: string, display: string, attachmentPaths: string[]) => {
+    async (
+      userMessageId: string,
+      display: string,
+      attachmentPaths: string[],
+      voiceFlag = false,
+    ) => {
       try {
         const reply = await stream.send(
           session.bot,
           session.id,
           display,
-          attachmentPaths
+          attachmentPaths,
+          voiceFlag,
         );
         // Skip the assistant bubble only when both text *and* file are
         // empty (e.g. ``AbortError`` early return). ``/send <filename>``
@@ -338,25 +345,99 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     [session.bot, session.id, stream]
   );
 
-  // Falling-edge of streaming → flush the queued message, if any.
-  // ``useRef`` guards against firing on the initial mount when the
-  // stream was already idle.
+  // Falling-edge of streaming → (a) in voice mode, auto-TTS the last
+  // assistant reply; (b) flush a queued send, if any. ``useRef``
+  // guards against firing on the initial mount when the stream was
+  // already idle.
   const previousStreamingRef = React.useRef(activeStream.streaming);
   React.useEffect(() => {
     const wasStreaming = previousStreamingRef.current;
     previousStreamingRef.current = activeStream.streaming;
-    if (!wasStreaming || activeStream.streaming || !queued) return;
-    const next = queued;
-    setQueued(null);
-    void executeStreamSend(next.userMessageId, next.display, next.attachmentPaths);
-  }, [activeStream.streaming, queued, executeStreamSend]);
+    if (!wasStreaming || activeStream.streaming) return;
+
+    if (voiceMode) {
+      const last = messages[messages.length - 1];
+      if (last?.role === "assistant" && last.content) {
+        void voice.speak(last.content);
+      }
+    }
+
+    if (queued) {
+      const next = queued;
+      setQueued(null);
+      void executeStreamSend(
+        next.userMessageId,
+        next.display,
+        next.attachmentPaths,
+        next.voiceFlag,
+      );
+    }
+  }, [activeStream.streaming, queued, executeStreamSend, voiceMode, messages, voice]);
+
+  // Auto-restart recording after the assistant TTS reply finishes.
+  // ``speaking → idle`` transition with ``voiceMode`` still active
+  // means the user just heard the reply; reopen the mic for the
+  // next turn. Closing the overlay flips ``voiceMode`` to false
+  // first, so this effect no-ops in that case.
+  const prevVoiceStateRef = React.useRef<VoiceState>("idle");
+  React.useEffect(() => {
+    const prev = prevVoiceStateRef.current;
+    prevVoiceStateRef.current = voice.voiceState;
+    if (prev === "speaking" && voice.voiceState === "idle" && voiceMode) {
+      void voice.start();
+    }
+  }, [voice.voiceState, voiceMode, voice]);
+
+  const submitTranscript = React.useCallback(
+    async (rawText: string) => {
+      const text = rawText.trim();
+      if (!text) return;
+      const userMessage: ConversationMessage = {
+        id: newId(),
+        role: "user",
+        content: text,
+        timestamp: new Date().toISOString(),
+      };
+      if (activeStream.streaming) {
+        setMessages((prev) => {
+          const withoutOldQueue = queued
+            ? prev.filter((m) => m.id !== queued.userMessageId)
+            : prev;
+          return [...withoutOldQueue, userMessage];
+        });
+        setQueued({
+          userMessageId: userMessage.id,
+          display: text,
+          attachmentPaths: [],
+          voiceFlag: true,
+        });
+        return;
+      }
+      setMessages((prev) => [...prev, userMessage]);
+      await executeStreamSend(userMessage.id, text, [], true);
+    },
+    [activeStream.streaming, queued, executeStreamSend, setMessages, setQueued],
+  );
+
+  const handleVoiceOpen = React.useCallback(() => {
+    setWorkspaceOpen(false);
+    setSessionsOpen(false);
+    setSlashOpen(false);
+    setVoiceMode(true);
+    void voice.start();
+  }, [voice]);
+
+  const handleVoiceClose = React.useCallback(() => {
+    voice.cancel();
+    setVoiceMode(false);
+  }, [voice]);
 
   const cancelQueued = React.useCallback(() => {
     if (!queued) return;
     const targetId = queued.userMessageId;
     setMessages((prev) => prev.filter((m) => m.id !== targetId));
     setQueued(null);
-  }, [queued]);
+  }, [queued, setMessages, setQueued]);
 
   const handleSend = async () => {
     if (!sendable) return;
@@ -410,6 +491,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         userMessageId: userMessage.id,
         display,
         attachmentPaths,
+        voiceFlag: false,
       });
       return;
     }
@@ -418,7 +500,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     setMessages((prev) => [...prev, userMessage]);
     setDraft("");
     setPending([]);
-    await executeStreamSend(userMessage.id, display, attachmentPaths);
+    await executeStreamSend(userMessage.id, display, attachmentPaths, false);
   };
 
   const handleSlashOpen = async () => {
@@ -655,32 +737,10 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           ) : (
             <button
               type="button"
-              aria-label={
-                voice.voiceState === "recording"
-                  ? "Stop recording"
-                  : "Start voice dictation"
-              }
-              onClick={() => {
-                if (voice.voiceState === "recording") {
-                  voice.stop();
-                } else if (voice.voiceState === "idle") {
-                  voice.start();
-                }
-              }}
-              disabled={
-                voice.voiceState === "processing" ||
-                voice.voiceState === "speaking"
-              }
-              className={`rounded-full p-2 transition-colors ${
-                voice.voiceState === "recording"
-                  ? "bg-destructive text-destructive-foreground"
-                  : "text-muted-foreground hover:bg-muted"
-              } disabled:opacity-50`}
-              title={
-                voice.voiceState === "recording"
-                  ? "녹음 중 — 탭해서 종료"
-                  : "음성 입력"
-              }
+              aria-label="Start voice mode"
+              onClick={handleVoiceOpen}
+              className="rounded-full p-2 text-muted-foreground transition-colors hover:bg-muted"
+              title="음성 모드"
             >
               <Mic className="size-5" />
             </button>
@@ -756,6 +816,21 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
         </DialogContent>
       </Dialog>
 
+      {/* Voice mode — full-screen Orb overlay. Mirrors the desktop
+          right-sidebar pattern (removed in c983c9b) on mobile. The
+          ``fixed inset-0 z-[60]`` covers everything except slide
+          drawers (which we force-close on open). */}
+      {voiceMode && (
+        <div className="fixed inset-0 z-[60] bg-background">
+          <VoiceScreen
+            botDisplayName={botSummary.display_name}
+            voiceState={voice.voiceState}
+            partialTranscript={voice.partialTranscript}
+            error={voice.error}
+            onClose={handleVoiceClose}
+          />
+        </div>
+      )}
     </div>
   );
 }
