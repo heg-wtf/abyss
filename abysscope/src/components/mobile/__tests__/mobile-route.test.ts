@@ -247,7 +247,9 @@ describe("/mobile route skeleton", () => {
     // shows immediately instead of waiting for the GET cache window.
     expect(uploader).toMatch(/\?v=\$\{version\}/);
     // Accept list matches the server-side MIME allowlist.
-    expect(uploader).toMatch(/image\/jpeg.*image\/png.*image\/webp/s);
+    expect(uploader).toMatch(/image\/jpeg/);
+    expect(uploader).toMatch(/image\/png/);
+    expect(uploader).toMatch(/image\/webp/);
   });
 
   it("avatar route owns upload + delete and no longer depends on Telegram", () => {
