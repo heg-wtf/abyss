@@ -3,21 +3,22 @@
 import * as React from "react";
 import { useScribe, CommitStrategy } from "@elevenlabs/react";
 
-// Voice-activity detection tuning. The previous values (threshold
-// 0.2, min duration 100ms) were sensitive enough that ambient room
-// noise + TTS playback echo on a phone speaker would auto-commit
-// during the recording window after the assistant finished
-// speaking. The user landed in a "듣는중 → 처리중 → 응답중" loop
-// without ever actually speaking. These tighter numbers require
-// louder, longer speech before Scribe will commit a transcript;
-// pair with the ``MIN_TRANSCRIPT_CHARS`` guard in
-// ``onCommittedTranscript`` so a one-syllable false trigger still
-// gets dropped.
+// Voice-activity detection tuning. Mirrors the *previously*
+// test-tuned thresholds from the original RMS-based VAD
+// (commit f18789e: ``SILENCE_DURATION_MS = 1500``,
+// ``MIN_RECORDING_MS = 300``) and aligns ``vadThreshold`` with the
+// ElevenLabs Scribe v2 realtime default (0.4). The earlier 0.2 /
+// 0.5 / 100 numbers were guesses landed during the Scribe v2
+// migration and were sensitive enough that ambient room noise +
+// TTS playback echo could auto-commit a transcript on every
+// auto-restart cycle, locking the user into a 듣는중→처리중→응답중
+// loop. ``no_verbatim`` strips filler words / false starts /
+// disfluencies before we ever see the transcript.
 const VAD_CONFIG = {
   commitStrategy: CommitStrategy.VAD,
-  vadSilenceThresholdSecs: 0.7,
-  vadThreshold: 0.45,
-  minSpeechDurationMs: 400,
+  vadSilenceThresholdSecs: 1.5,
+  vadThreshold: 0.4,
+  minSpeechDurationMs: 300,
 } as const;
 
 /** Minimum transcript length to forward to the chat. Drops single
@@ -56,6 +57,11 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   const scribe = useScribe({
     modelId: "scribe_v2_realtime",
     languageCode: "ko",
+    // Drop filler words, false starts, and disfluencies before
+    // they reach the chat — same option ElevenLabs added for Scribe
+    // v2 batch + realtime. Gets us cleaner Korean transcripts
+    // without a post-hoc cleanup step on our side.
+    noVerbatim: true,
     ...VAD_CONFIG,
     onCommittedTranscript: ({ text }) => {
       const trimmed = text.trim();
