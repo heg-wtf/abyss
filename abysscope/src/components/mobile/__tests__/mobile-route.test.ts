@@ -380,19 +380,26 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/setInterval/);
   });
 
-  it("push toggle lives in its own module and is mounted in the drawer footer", () => {
-    const toggle = read("components/mobile/push-toggle.tsx");
-    expect(toggle).toMatch(/export function PushToggle/);
+  it("notifications toggle now lives inside the Settings dialog", () => {
+    const dialog = read("components/settings-dialog.tsx");
     // Reads from the shared provider — calling ``useWebPush``
     // directly here would mount a second instance and re-register
     // notification-click + visibility listeners.
-    expect(toggle).toMatch(/useWebPushContext/);
-    expect(toggle).not.toMatch(/= useWebPush\(/);
-    expect(toggle).toMatch(/Add to Home Screen/);
+    expect(dialog).toMatch(/useWebPushContext/);
+    expect(dialog).not.toMatch(/= useWebPush\(/);
+    // The NotificationsSection is rendered alongside the appearance
+    // section so the dialog now owns every "set once" toggle.
+    expect(dialog).toMatch(/<NotificationsSection \/>/);
+    expect(dialog).toMatch(/function NotificationsSection/);
+    // Enable / Disable actions still wire to the provider.
+    expect(dialog).toMatch(/push\.enable\(\)/);
+    expect(dialog).toMatch(/push\.disable\(\)/);
 
+    // The drawer footer no longer carries the bell button — it
+    // would duplicate the Settings entry point one row above it.
     const drawer = read("components/mobile/sessions-drawer-panel.tsx");
-    expect(drawer).toMatch(/import \{ PushToggle \}/);
-    expect(drawer).toMatch(/<PushToggle \/>/);
+    expect(drawer).not.toMatch(/PushToggle/);
+    expect(drawer).not.toMatch(/push-toggle/);
   });
 
   it("root layout mounts WebPushProvider once for every page", () => {
