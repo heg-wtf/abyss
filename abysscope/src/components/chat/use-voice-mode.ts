@@ -3,12 +3,26 @@
 import * as React from "react";
 import { useScribe, CommitStrategy } from "@elevenlabs/react";
 
+// Voice-activity detection tuning. The previous values (threshold
+// 0.2, min duration 100ms) were sensitive enough that ambient room
+// noise + TTS playback echo on a phone speaker would auto-commit
+// during the recording window after the assistant finished
+// speaking. The user landed in a "듣는중 → 처리중 → 응답중" loop
+// without ever actually speaking. These tighter numbers require
+// louder, longer speech before Scribe will commit a transcript;
+// pair with the ``MIN_TRANSCRIPT_CHARS`` guard in
+// ``onCommittedTranscript`` so a one-syllable false trigger still
+// gets dropped.
 const VAD_CONFIG = {
   commitStrategy: CommitStrategy.VAD,
-  vadSilenceThresholdSecs: 0.5,
-  vadThreshold: 0.2,
-  minSpeechDurationMs: 100,
+  vadSilenceThresholdSecs: 0.7,
+  vadThreshold: 0.45,
+  minSpeechDurationMs: 400,
 } as const;
+
+/** Minimum transcript length to forward to the chat. Drops single
+ * syllables / spurious commits that survive VAD. */
+const MIN_TRANSCRIPT_CHARS = 2;
 
 export type VoiceState = "idle" | "recording" | "processing" | "speaking";
 
@@ -45,7 +59,7 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     ...VAD_CONFIG,
     onCommittedTranscript: ({ text }) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
+      if (trimmed.length < MIN_TRANSCRIPT_CHARS) return;
       scribeRef.current?.disconnect();
       setVoiceState("processing");
       onTranscriptRef.current(trimmed);
