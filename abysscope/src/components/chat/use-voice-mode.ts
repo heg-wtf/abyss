@@ -31,6 +31,10 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   const [error, setError] = React.useState<string | null>(null);
   const currentAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = React.useRef<string | null>(null);
+  // Controller for the in-flight /api/chat/speak fetch. ``cancel()``
+  // aborts it so the X button kills audio playback even when the
+  // request hasn't returned yet.
+  const speakAbortRef = React.useRef<AbortController | null>(null);
   const onTranscriptRef = React.useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
   const scribeRef = React.useRef<ReturnType<typeof useScribe> | null>(null);
@@ -93,8 +97,13 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
 
   const cancel = React.useCallback(() => {
     scribeRef.current?.disconnect();
+    if (speakAbortRef.current) {
+      speakAbortRef.current.abort();
+      speakAbortRef.current = null;
+    }
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
+      currentAudioRef.current.src = "";
       currentAudioRef.current = null;
     }
     if (objectUrlRef.current) {
@@ -113,17 +122,23 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     }
     setVoiceState("speaking");
     setError(null);
+    const controller = new AbortController();
+    speakAbortRef.current?.abort();
+    speakAbortRef.current = controller;
     try {
       const response = await fetch("/api/chat/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         throw new Error(`speak ${response.status}${detail ? `: ${detail}` : ""}`);
       }
       const blob = await response.blob();
+      if (controller.signal.aborted) return;
       // Force a known MIME so iOS Safari's audio element doesn't
       // refuse the blob when the server response omits the type.
       const audioBlob =
@@ -161,8 +176,17 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
         });
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Aborts come through as ``AbortError`` — that's our own
+      // ``cancel()`` killing the in-flight speak, not an actual
+      // failure. Don't surface it as a user-visible error.
+      const name = (err as { name?: string } | null)?.name;
+      if (name !== "AbortError") {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
+      if (speakAbortRef.current === controller) {
+        speakAbortRef.current = null;
+      }
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
