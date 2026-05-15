@@ -89,6 +89,15 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   // ``COLD_START_MUTE_MS`` to drop phantom commits caused by TTS
   // speaker decay / ambient noise during the re-arm window.
   const startedAtRef = React.useRef<number>(0);
+  // Persistent ``<audio>`` element reused across every TTS playback.
+  // iOS Safari ties autoplay authorization to a specific element
+  // instance — once an element has been ``.play()``'d during a user
+  // gesture, future ``.play()`` calls on the same element succeed
+  // without re-prompting. Recreating ``new Audio(url)`` on every
+  // speak() call (the previous behaviour) meant each fresh element
+  // was unauthorized, ``audio.play()`` rejected with
+  // ``NotAllowedError``, and the user heard silence.
+  const audioElementRef = React.useRef<HTMLAudioElement | null>(null);
   const onTranscriptRef = React.useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
   const scribeRef = React.useRef<ReturnType<typeof useScribe> | null>(null);
@@ -161,6 +170,22 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
 
   const start = React.useCallback(async () => {
     setError(null);
+    // iOS Safari audio unlock — must instantiate the ``<audio>``
+    // element and call ``play()`` *synchronously* during the user
+    // gesture (mic tap) for subsequent autoplay to be allowed.
+    // Empty-src play() rejects harmlessly but flags the element as
+    // user-authorized. We reuse the same element in ``speak()``
+    // below; iOS preserves the authorization for that instance.
+    if (!audioElementRef.current) {
+      const element = new Audio();
+      element.preload = "auto";
+      audioElementRef.current = element;
+    }
+    audioElementRef.current.play().catch(() => {
+      // Empty audio play always rejects — fine, the unlock side
+      // effect already happened.
+    });
+
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current.src = "";
@@ -248,8 +273,13 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
           : new Blob([blob], { type: "audio/mpeg" });
       const url = URL.createObjectURL(audioBlob);
       objectUrlRef.current = url;
-      const audio = new Audio(url);
+      // Reuse the iOS-unlocked element from ``start()``. Falling
+      // back to ``new Audio()`` here would mean a fresh
+      // unauthorized element on the very first ``speak()``.
+      const audio = audioElementRef.current ?? new Audio();
+      audioElementRef.current = audio;
       audio.preload = "auto";
+      audio.src = url;
       currentAudioRef.current = audio;
       await new Promise<void>((resolve, reject) => {
         audio.onended = () => resolve();
