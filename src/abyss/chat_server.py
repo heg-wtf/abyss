@@ -82,6 +82,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import suppress
@@ -1779,6 +1780,12 @@ class ChatServer:
             content_type="audio/webm",
         )
 
+        logger.info(
+            "ElevenLabs STT request: model=%s audio=%d bytes",
+            ELEVENLABS_STT_MODEL,
+            len(audio_bytes),
+        )
+        start = time.perf_counter()
         try:
             if self._http_session is None:
                 raise RuntimeError(
@@ -1791,17 +1798,39 @@ class ChatServer:
             ) as response:
                 if response.status != 200:
                     body = await response.text()
-                    logger.warning("ElevenLabs STT error %d: %s", response.status, body)
+                    logger.warning(
+                        "ElevenLabs STT error %d after %.0fms: %s",
+                        response.status,
+                        (time.perf_counter() - start) * 1000,
+                        body[:300],
+                    )
                     return web.json_response({"error": f"upstream {response.status}"}, status=502)
                 data = await response.json()
         except Exception as exc:
-            logger.exception("ElevenLabs STT request failed")
+            logger.exception(
+                "ElevenLabs STT request failed after %.0fms", (time.perf_counter() - start) * 1000
+            )
             return web.json_response({"error": str(exc)}, status=502)
 
+        elapsed_ms = (time.perf_counter() - start) * 1000
         language_probability = data.get("language_probability", 1.0)
         text = data.get("text", "").strip()
         if language_probability < MIN_STT_LANGUAGE_PROBABILITY:
+            logger.info(
+                "ElevenLabs STT %.0fms: dropped low-confidence transcript "
+                "(lang_prob=%.2f, chars=%d) → returning empty",
+                elapsed_ms,
+                language_probability,
+                len(text),
+            )
             text = ""
+        else:
+            logger.info(
+                "ElevenLabs STT %.0fms: lang_prob=%.2f, chars=%d",
+                elapsed_ms,
+                language_probability,
+                len(text),
+            )
 
         return web.json_response({"text": text})
 
@@ -1810,6 +1839,7 @@ class ChatServer:
         if not ELEVENLABS_API_KEY:
             return web.json_response({"error": "ELEVENLABS_API_KEY not set"}, status=503)
 
+        start = time.perf_counter()
         try:
             if self._http_session is None:
                 raise RuntimeError(
@@ -1819,14 +1849,24 @@ class ChatServer:
                 "https://api.elevenlabs.io/v1/single-use-token/realtime_scribe",
                 headers={"xi-api-key": ELEVENLABS_API_KEY},
             ) as response:
+                elapsed_ms = (time.perf_counter() - start) * 1000
                 if response.status != 200:
                     body = await response.text()
-                    logger.warning("ElevenLabs scribe token error %d: %s", response.status, body)
+                    logger.warning(
+                        "ElevenLabs scribe-token error %d after %.0fms: %s",
+                        response.status,
+                        elapsed_ms,
+                        body[:300],
+                    )
                     return web.json_response({"error": f"upstream {response.status}"}, status=502)
                 data = await response.json()
+                logger.info("ElevenLabs scribe-token issued in %.0fms", elapsed_ms)
                 return web.json_response({"token": data["token"]})
         except Exception as exc:
-            logger.exception("ElevenLabs scribe token request failed")
+            logger.exception(
+                "ElevenLabs scribe-token request failed after %.0fms",
+                (time.perf_counter() - start) * 1000,
+            )
             return web.json_response({"error": str(exc)}, status=502)
 
     async def _handle_speak(self, request: web.Request) -> web.StreamResponse:
@@ -1852,6 +1892,14 @@ class ChatServer:
         voice_id: str = body.get("voice_id") or ELEVENLABS_DEFAULT_VOICE_ID
         url = ELEVENLABS_TTS_URL.format(voice_id=voice_id)
 
+        logger.info(
+            "ElevenLabs TTS request: chars=%d voice=%s model=%s",
+            len(text),
+            voice_id,
+            ELEVENLABS_TTS_MODEL,
+        )
+        start = time.perf_counter()
+        bytes_streamed = 0
         try:
             if self._http_session is None:
                 raise RuntimeError(
@@ -1872,9 +1920,15 @@ class ChatServer:
             ) as upstream:
                 if upstream.status != 200:
                     err_body = await upstream.text()
-                    logger.warning("ElevenLabs TTS error %d: %s", upstream.status, err_body)
+                    logger.warning(
+                        "ElevenLabs TTS error %d after %.0fms: %s",
+                        upstream.status,
+                        (time.perf_counter() - start) * 1000,
+                        err_body[:300],
+                    )
                     return web.json_response({"error": f"upstream {upstream.status}"}, status=502)
 
+                first_byte_ms: float | None = None
                 stream_response = web.StreamResponse(
                     status=200,
                     headers={
@@ -1884,11 +1938,24 @@ class ChatServer:
                 )
                 await stream_response.prepare(request)
                 async for chunk in upstream.content.iter_chunked(8192):
+                    if first_byte_ms is None:
+                        first_byte_ms = (time.perf_counter() - start) * 1000
+                    bytes_streamed += len(chunk)
                     await stream_response.write(chunk)
                 await stream_response.write_eof()
+                logger.info(
+                    "ElevenLabs TTS streamed %d bytes (ttfb=%.0fms total=%.0fms)",
+                    bytes_streamed,
+                    first_byte_ms if first_byte_ms is not None else 0.0,
+                    (time.perf_counter() - start) * 1000,
+                )
                 return stream_response
         except Exception as exc:
-            logger.exception("ElevenLabs TTS request failed")
+            logger.exception(
+                "ElevenLabs TTS request failed after %.0fms (streamed=%d bytes)",
+                (time.perf_counter() - start) * 1000,
+                bytes_streamed,
+            )
             return web.json_response({"error": str(exc)}, status=502)
 
 

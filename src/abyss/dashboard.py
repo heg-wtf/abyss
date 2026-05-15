@@ -111,6 +111,37 @@ def _node_modules_present(directory: Path) -> bool:
     return (directory / "node_modules").exists()
 
 
+def _detect_commit_sha(start: Path) -> str:
+    """Best-effort ``git rev-parse --short HEAD`` from the source tree.
+
+    Returns the short SHA when run from an editable checkout (the
+    common dev path), or an empty string when ``.git`` is missing
+    (e.g. a packaged wheel install). Errors are silenced because the
+    SHA is a UX nicety, not a correctness signal.
+    """
+    candidates: list[Path] = []
+    current = start.resolve()
+    for _ in range(5):
+        candidates.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for candidate in candidates:
+        try:
+            result = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=candidate,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return ""
+
+
 def _next_build_artifact_size(directory: Path) -> int:
     artifact = directory / ".next"
     if not artifact.exists():
@@ -217,9 +248,11 @@ def build_and_start(
             step.detail = "installed"
 
     existing_node_options = os.environ.get("NODE_OPTIONS", "")
+    commit_sha = _detect_commit_sha(abysscope_directory)
     next_env = {
         **os.environ,
         "NEXT_PUBLIC_ABYSS_VERSION": abyss_version,
+        "NEXT_PUBLIC_ABYSS_COMMIT": commit_sha,
         "NODE_OPTIONS": (f"{existing_node_options} --dns-result-order=ipv4first".strip()),
     }
 
