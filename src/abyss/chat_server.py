@@ -1876,9 +1876,7 @@ class ChatServer:
         chars_raw = body.get("chars")
         chars = int(chars_raw) if isinstance(chars_raw, (int, float)) else None
         latency_raw = body.get("latency_ms")
-        latency_ms = (
-            float(latency_raw) if isinstance(latency_raw, (int, float)) else None
-        )
+        latency_ms = float(latency_raw) if isinstance(latency_raw, (int, float)) else None
         language_code = str(body.get("language_code") or "").strip()[:8]
         detail = str(body.get("detail") or "").strip()[:300]
 
