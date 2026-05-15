@@ -108,6 +108,104 @@ async def test_list_bots(client, abyss_home):
 
 
 @pytest.mark.asyncio
+async def test_create_bot_writes_yaml_and_updates_config(client, abyss_home):
+    """``POST /chat/bots`` mirrors ``abyss bot add`` byte-for-byte on disk."""
+    resp = await client.post(
+        "/chat/bots",
+        json={
+            "name": "newbot",
+            "display_name": "New Bot",
+            "personality": "calm and helpful",
+            "role": "answer questions",
+            "goal": "help the user",
+        },
+    )
+    assert resp.status == 201
+    body = await resp.json()
+    assert body["ok"] is True
+    assert body["name"] == "newbot"
+
+    bot_yaml = abyss_home / "bots" / "newbot" / "bot.yaml"
+    assert bot_yaml.exists()
+    saved = yaml.safe_load(bot_yaml.read_text())
+    assert saved["display_name"] == "New Bot"
+    assert saved["personality"] == "calm and helpful"
+    assert saved["role"] == "answer questions"
+    assert saved["goal"] == "help the user"
+
+    config = yaml.safe_load((abyss_home / "config.yaml").read_text())
+    bot_names = [entry["name"] for entry in config["bots"]]
+    assert "newbot" in bot_names
+
+    listing = await client.get("/chat/bots")
+    listed = await listing.json()
+    assert "newbot" in [b["name"] for b in listed["bots"]]
+
+
+@pytest.mark.asyncio
+async def test_create_bot_rejects_duplicate_name(client, abyss_home):
+    """A second create with an existing name returns 409 without overwriting."""
+    resp = await client.post(
+        "/chat/bots",
+        json={
+            "name": "alpha",
+            "display_name": "Duplicate",
+            "personality": "x",
+            "role": "x",
+        },
+    )
+    assert resp.status == 409
+    body = await resp.json()
+    assert "already exists" in body["error"]
+
+    original = yaml.safe_load((abyss_home / "bots" / "alpha" / "bot.yaml").read_text())
+    assert original["display_name"] == "Alpha"
+
+
+@pytest.mark.asyncio
+async def test_create_bot_normalizes_and_validates_name(client, abyss_home):
+    """Spaces are hyphenated, uppercase is lowered; bad chars are rejected."""
+    ok = await client.post(
+        "/chat/bots",
+        json={
+            "name": "Casual Helper",
+            "display_name": "Casual",
+            "personality": "p",
+            "role": "r",
+        },
+    )
+    assert ok.status == 201
+    assert (await ok.json())["name"] == "casual-helper"
+
+    bad = await client.post(
+        "/chat/bots",
+        json={
+            "name": "bot/with/slash",
+            "display_name": "x",
+            "personality": "p",
+            "role": "r",
+        },
+    )
+    assert bad.status == 400
+
+
+@pytest.mark.asyncio
+async def test_create_bot_requires_core_fields(client, abyss_home):
+    for missing in ("display_name", "personality", "role"):
+        payload = {
+            "name": f"bot-missing-{missing.replace('_', '-')}",
+            "display_name": "x",
+            "personality": "p",
+            "role": "r",
+        }
+        payload[missing] = ""
+        resp = await client.post("/chat/bots", json=payload)
+        assert resp.status == 400, f"missing {missing} should 400"
+        body = await resp.json()
+        assert missing in body["error"]
+
+
+@pytest.mark.asyncio
 async def test_create_list_delete_session(client, abyss_home):
     create = await client.post("/chat/sessions", json={"bot": "alpha"})
     assert create.status == 200
