@@ -11,7 +11,6 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { PushToggle } from "@/components/mobile/push-toggle";
 import { SettingsButton } from "@/components/settings-button";
 import { BotAvatar } from "@/components/bot-avatar";
 import {
@@ -492,7 +491,6 @@ function DrawerFooter() {
     <div className="flex shrink-0 items-center justify-between gap-2 border-t bg-background/80 px-3 py-2 backdrop-blur">
       <span className="font-mono text-xs text-muted-foreground">{version}</span>
       <div className="flex items-center gap-2">
-        <PushToggle />
         <SettingsButton />
       </div>
     </div>
