@@ -142,11 +142,21 @@
   }
 }
 
-/* Logo splash — fade in, hold, fade out over 1.5s. Plays once on
-   each cold page load via ``LogoSplash``. ``opacity: 0`` start so the
-   first paint is the dark background instead of a flash of full logo
-   before the animation reaches the first frame. */
-@keyframes logo-splash {
+/* Logo splash — plays once on each cold page load via ``LogoSplash``.
+   Two animations on purpose: the background stays fully opaque until
+   the very end so the chat content underneath never flashes through,
+   and the logo image fades in / out within that solid backdrop. */
+@keyframes logo-splash-bg {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes logo-splash-logo {
   0% {
     opacity: 0;
   }
@@ -162,7 +172,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  @keyframes logo-splash {
+  @keyframes logo-splash-bg {
+    0%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes logo-splash-logo {
     0%,
     100% {
       opacity: 0;
