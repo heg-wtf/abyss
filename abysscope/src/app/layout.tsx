@@ -59,15 +59,22 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         {/*
-          Paint the document background dark from the very first byte
-          so iOS PWA cold starts (and ordinary browser navigations)
+          Paint the document root dark from the very first byte so
+          iOS PWA cold starts (and ordinary browser navigations)
           never flash a frame of white between the OS splash and our
           first React paint. Matches the PWA manifest
           ``background_color`` and the LogoSplash inline color.
-          Inline ``<style>`` rather than relying on globals.css so
-          there's no stylesheet load race.
+
+          IMPORTANT: only ``html`` here, not ``body``. Tailwind's
+          ``@layer base`` applies ``body { @apply bg-background }``
+          and our inline rule is unlayered — including ``body``
+          would beat the layered rule and force every page (even
+          light mode) to render on top of #131313, breaking the
+          light theme. ``body`` covers the viewport, so html's
+          background only ever shows in the pre-hydration cold-start
+          frame, which is exactly when we want the dark splash.
         */}
-        <style>{"html,body{background-color:#131313;}"}</style>
+        <style>{"html{background-color:#131313;}"}</style>
       </head>
       <body
         className={`${pretendard.variable} ${geistMono.variable} antialiased`}

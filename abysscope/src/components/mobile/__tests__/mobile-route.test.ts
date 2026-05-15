@@ -236,7 +236,10 @@ describe("/mobile route skeleton", () => {
     // so the document is dark from the very first byte. This guard
     // makes sure nobody removes it later thinking it is dead code.
     const layout = read("app/layout.tsx");
-    expect(layout).toMatch(/<style>\{?"html,body\{background-color:#131313;\}"\}?<\/style>/);
+    // ``html`` only — including ``body`` here forces every page
+    // onto a #131313 background and breaks the light theme.
+    expect(layout).toMatch(/<style>\{?"html\{background-color:#131313;\}"\}?<\/style>/);
+    expect(layout).not.toMatch(/html,body\{background-color/);
   });
 
   it("sessions drawer shows a streaming indicator on rows mid-reply", () => {
