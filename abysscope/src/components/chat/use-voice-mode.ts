@@ -119,16 +119,46 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!response.ok) throw new Error(`speak ${response.status}`);
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`speak ${response.status}${detail ? `: ${detail}` : ""}`);
+      }
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      // Force a known MIME so iOS Safari's audio element doesn't
+      // refuse the blob when the server response omits the type.
+      const audioBlob =
+        blob.type && blob.type !== ""
+          ? blob
+          : new Blob([blob], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(audioBlob);
       objectUrlRef.current = url;
       const audio = new Audio(url);
+      audio.preload = "auto";
       currentAudioRef.current = audio;
       await new Promise<void>((resolve, reject) => {
         audio.onended = () => resolve();
-        audio.onerror = () => reject(new Error("audio playback failed"));
-        void audio.play();
+        audio.onerror = () => {
+          const mediaError = audio.error;
+          reject(
+            new Error(
+              `audio playback failed${
+                mediaError ? ` (code ${mediaError.code}: ${mediaError.message})` : ""
+              }`,
+            ),
+          );
+        };
+        // ``play()`` returns a Promise that rejects with
+        // ``NotAllowedError`` (iOS autoplay block), ``AbortError``
+        // (concurrent play), or other DOMException values. Without
+        // this catch the outer ``await`` hangs forever because the
+        // element never reaches ``onended`` or ``onerror``.
+        audio.play().catch((playError: unknown) => {
+          reject(
+            playError instanceof Error
+              ? playError
+              : new Error(`audio play rejected: ${String(playError)}`),
+          );
+        });
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
