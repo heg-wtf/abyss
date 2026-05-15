@@ -228,6 +228,22 @@ describe("/mobile route skeleton", () => {
     expect(shell).toMatch(/splashVisible && <LogoSplash/);
   });
 
+  it("display_name fallback chain is display_name → telegram_botname → name everywhere it's shown", () => {
+    // Bots created before display_name existed have ``display_name:
+    // ''`` in their yaml, with the friendly name only in the legacy
+    // ``telegram_botname`` field. Skipping that fallback shows the
+    // raw slug (e.g. ``cclawnotifybot``) instead of the Korean name.
+    // Pin every surface that renders a bot label so the fallback
+    // stays consistent.
+    const sidebar = read("components/sidebar.tsx");
+    expect(sidebar).toMatch(/bot\.display_name \|\| bot\.telegram_botname \|\| bot\.name/);
+    expect(sidebar).not.toMatch(/bot\.display_name \|\| bot\.name\b/);
+
+    const lib = read("lib/abyss.ts");
+    expect(lib).toMatch(/bot\.display_name \|\| bot\.telegram_botname \|\| bot\.name/);
+    expect(lib).not.toMatch(/bot\.display_name \|\| bot\.name\b/);
+  });
+
   it("root layout paints the document background dark before CSS loads", () => {
     // The actual root cause of the "한 번 깜빡임" report was the
     // standard iOS PWA white frame between the system splash and
