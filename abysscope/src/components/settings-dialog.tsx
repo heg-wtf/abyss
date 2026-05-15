@@ -173,29 +173,34 @@ function NotificationsSection() {
         </div>
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-sm font-medium">
-            {subscribed ? "푸시 알림이 켜져 있어요" : "푸시 알림이 꺼져 있어요"}
+            {subscribed
+              ? "Push notifications are on"
+              : "Push notifications are off"}
           </p>
           <p className="text-xs text-muted-foreground">
-            봇이 응답하거나 cron / heartbeat 가 결과를 내면 폰으로 알림이
-            옵니다. 현재 보고 있는 탭에는 발송하지 않아 중복 알림을
-            피해요.
+            The phone fires a notification when a bot replies, a cron
+            job finishes, or a heartbeat reports something worth
+            looking at. Active tabs are skipped so you don&apos;t get
+            double-notified.
           </p>
           <p className="text-xs text-muted-foreground">
-            상태:{" "}
+            Status:{" "}
             <span className="font-mono text-foreground">{push.status}</span>
           </p>
 
           {unsupported && (
             <p className="rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-              이 브라우저 / 오리진에선 Web Push 가 지원되지 않아요. HTTPS
-              로 접속한 iOS Safari 16.4+, Chrome, Edge 에서 켜주세요.
+              This browser / origin does not support Web Push. Open
+              the dashboard over HTTPS in iOS Safari 16.4+, Chrome,
+              or Edge.
             </p>
           )}
 
           {denied && (
             <p className="rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
-              브라우저 / iOS 설정에서 알림이 차단돼 있어요. 사이트
-              알림을 다시 허용한 뒤 새로고침 해주세요.
+              Notifications are blocked in your browser / iOS
+              settings. Re-enable them for this site, then reload the
+              page.
             </p>
           )}
 
@@ -204,7 +209,7 @@ function NotificationsSection() {
           )}
 
           <p className="pt-1 text-xs text-muted-foreground">
-            iOS 는 홈 화면에 추가된 PWA 에서만 푸시가 도착해요.
+            iOS only delivers push to PWAs added to the home screen.
           </p>
         </div>
         <div className="shrink-0">
