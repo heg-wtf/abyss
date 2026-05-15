@@ -11,3 +11,15 @@ build/
 .next/
 .claude/
 .coverage
+
+# Secrets — never commit. ``~/.abyss/`` is the runtime data dir
+# (VAPID keypair, push subscriptions, bot tokens). Guard against
+# anyone accidentally creating an ``.abyss/`` inside the repo, and
+# against stray PEM / key files landing anywhere in the tree.
+.abyss/
+**/.abyss/
+*.pem
+*.key
+vapid-keys.json
+push-subscriptions.json
+.DS_Store
