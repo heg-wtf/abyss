@@ -749,7 +749,7 @@ export function getConversationFrequency(): BotConversationFrequency[] {
     const data: Record<string, number> = {};
 
     if (!fs.existsSync(sessionsDir)) {
-      return { botName: bot.name, displayName: bot.display_name || bot.name, data, total: 0 };
+      return { botName: bot.name, displayName: bot.display_name || bot.telegram_botname || bot.name, data, total: 0 };
     }
 
     const sessionDirs = fs.readdirSync(sessionsDir, { withFileTypes: true })
@@ -792,7 +792,7 @@ export function getConversationFrequency(): BotConversationFrequency[] {
     const total = Object.values(data).reduce((sum, n) => sum + n, 0);
     return {
       botName: bot.name,
-      displayName: bot.display_name || bot.name,
+      displayName: bot.display_name || bot.telegram_botname || bot.name,
       data,
       total,
     };
