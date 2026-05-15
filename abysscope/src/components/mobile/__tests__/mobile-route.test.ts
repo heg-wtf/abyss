@@ -199,6 +199,18 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/file\?: \{ name: string; path: string; url: string \}/);
   });
 
+  it("ChatEvent + stream hook handle the reset_partial signal", () => {
+    // chat_core emits a ``reset_partial`` SSE event between retries when
+    // the upstream Claude API returned a retryable 5xx. The hook must
+    // wipe its in-progress accumulator so the retry's clean reply does
+    // not concatenate onto the leaked JSON error chunk.
+    const api = read("lib/abyss-api.ts");
+    expect(api).toMatch(/type: "reset_partial"/);
+    const hook = read("components/chat/use-chat-stream.ts");
+    expect(hook).toMatch(/event\.type === "reset_partial"/);
+    expect(hook).toMatch(/accumulated = ""/);
+  });
+
   it("chat screen renders assistant replies through ReactMarkdown", () => {
     const source = read("components/mobile/mobile-chat-screen.tsx");
     // Markdown rendering shares the desktop `prose prose-sm`

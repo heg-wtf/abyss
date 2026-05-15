@@ -68,6 +68,7 @@ export type ChatEvent =
   | { type: "chunk"; text: string }
   | { type: "done"; text: string }
   | { type: "error"; message: string }
+  | { type: "reset_partial" }
   | {
       type: "command_result";
       command: string;
