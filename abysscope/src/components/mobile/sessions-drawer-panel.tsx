@@ -14,6 +14,10 @@ import {
 import { PushToggle } from "@/components/mobile/push-toggle";
 import { SettingsButton } from "@/components/settings-button";
 import { BotAvatar } from "@/components/bot-avatar";
+import {
+  getSessionStream,
+  useMultiSessionChatStream,
+} from "@/components/chat/use-chat-stream";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -54,6 +58,10 @@ export function SessionsDrawerPanel({
   onCreate,
 }: Props) {
   const router = useRouter();
+  // Subscribes to the module-level streaming store so the indicator
+  // dot lights up the instant any session in the list flips into
+  // streaming — including ones the user is not currently viewing.
+  const stream = useMultiSessionChatStream();
   const [bots, setBots] = React.useState<BotSummary[]>([]);
   const [sessions, setSessions] = React.useState<ChatSession[]>([]);
   const [routines, setRoutines] = React.useState<RoutineSummary[]>([]);
@@ -307,6 +315,7 @@ export function SessionsDrawerPanel({
               sess.custom_name?.trim() ||
               sess.bot_display_name ||
               sess.bot;
+            const isStreaming = getSessionStream(stream.streams, sess.id).streaming;
             const menuOpen = menuAnchor?.session.id === sess.id;
             return (
               <li key={key}>
@@ -338,9 +347,26 @@ export function SessionsDrawerPanel({
                       size="md"
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{label}</div>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        {isStreaming && (
+                          <span
+                            aria-label="진행중"
+                            title="진행중"
+                            className="inline-block size-1.5 shrink-0 rounded-full bg-emerald-500"
+                            style={{
+                              animation:
+                                "stream-pulse 1.4s ease-in-out infinite",
+                            }}
+                          />
+                        )}
+                        <div className="truncate text-sm font-medium">
+                          {label}
+                        </div>
+                      </div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {sess.preview || "(no messages yet)"}
+                        {isStreaming
+                          ? "응답 생성 중…"
+                          : sess.preview || "(no messages yet)"}
                       </div>
                     </div>
                   </button>

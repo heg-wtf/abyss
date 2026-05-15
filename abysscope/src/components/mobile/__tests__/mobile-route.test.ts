@@ -239,6 +239,23 @@ describe("/mobile route skeleton", () => {
     expect(layout).toMatch(/<style>\{?"html,body\{background-color:#131313;\}"\}?<\/style>/);
   });
 
+  it("sessions drawer shows a streaming indicator on rows mid-reply", () => {
+    const panel = read("components/mobile/sessions-drawer-panel.tsx");
+    // Subscribes to the module-level streaming store so the
+    // indicator lights up even on rows the user is not viewing.
+    expect(panel).toMatch(/useMultiSessionChatStream/);
+    expect(panel).toMatch(/getSessionStream\(stream\.streams, sess\.id\)/);
+    // Renders a pulsing emerald dot + swaps the preview line for an
+    // explicit Korean "진행중" message.
+    expect(panel).toMatch(/stream-pulse/);
+    expect(panel).toMatch(/aria-label="진행중"/);
+    expect(panel).toMatch(/응답 생성 중/);
+    // Pulse keyframes live in globals.css next to the existing
+    // stream-dot ones so the indicator works without inline keyframes.
+    const css = read("app/globals.css");
+    expect(css).toMatch(/@keyframes stream-pulse/);
+  });
+
   it("ChatEvent + stream hook handle the reset_partial signal", () => {
     // chat_core emits a ``reset_partial`` SSE event between retries when
     // the upstream Claude API returned a retryable 5xx. The hook must
