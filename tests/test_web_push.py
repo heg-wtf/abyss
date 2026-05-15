@@ -259,3 +259,33 @@ class TestSendPush:
         mock.assert_not_called()
         # The malformed subscription is reaped on the next send.
         assert web_push.list_subscriptions() == []
+
+    @pytest.mark.asyncio
+    async def test_passes_b64url_der_not_pem_to_webpush(self, abyss_home, fake_subscription):
+        """``pywebpush`` forwards ``vapid_private_key`` into
+        ``py_vapid.Vapid.from_string`` which only accepts the
+        base64url-encoded raw or DER form. Passing the full PEM
+        (``-----BEGIN PRIVATE KEY-----``) silently fails with an
+        ASN.1 parsing error and no pushes are ever delivered. This
+        regression guard pins the converted form."""
+        await web_push.add_subscription(fake_subscription)
+        with patch("abyss.web_push.webpush") as mock:
+            await web_push.send_push(title="t", body="b", skip_visible=False)
+
+        sent = mock.call_args.kwargs["vapid_private_key"]
+        # base64url alphabet only (letters, digits, '-', '_'), no PEM
+        # headers, no newlines.
+        assert "BEGIN PRIVATE KEY" not in sent
+        assert "\n" not in sent
+        assert all(c.isalnum() or c in "-_" for c in sent), sent
+
+    def test_default_vapid_contact_is_a_real_mailto(self):
+        """Apple Web Push silently drops pushes when ``sub`` looks
+        unroutable (``mailto:abyss@local`` returns 201 but the device
+        never sees the notification). The default must look like a
+        real mailto."""
+        assert web_push.VAPID_CONTACT.startswith("mailto:")
+        local_part, _, domain = web_push.VAPID_CONTACT.removeprefix("mailto:").partition("@")
+        assert local_part
+        # Reject obvious non-routable TLDs.
+        assert "." in domain, f"VAPID_CONTACT domain {domain!r} needs a TLD"

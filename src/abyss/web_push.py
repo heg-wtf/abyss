@@ -288,7 +288,30 @@ class PushPayload:
         return out
 
 
-VAPID_CONTACT = os.environ.get("ABYSS_VAPID_CONTACT", "mailto:abyss@local")
+VAPID_CONTACT = os.environ.get("ABYSS_VAPID_CONTACT", "mailto:me@heg.wtf")
+
+
+def _vapid_private_b64url(private_pem: str) -> str:
+    """Return the VAPID private key as base64url-encoded DER bytes.
+
+    ``pywebpush.webpush`` forwards ``vapid_private_key`` into
+    ``py_vapid.Vapid.from_string``, which only accepts the
+    base64url-encoded raw or DER form — passing the full PEM
+    (``-----BEGIN PRIVATE KEY-----...``) makes ``from_string`` run
+    ``b64urldecode`` on the PEM headers themselves, yielding garbage
+    bytes that fail ASN.1 parsing with
+    ``Could not deserialize key data ... invalid length``.
+
+    Load the PEM through ``cryptography`` once and re-export as DER
+    so callers can hand a clean string to ``pywebpush``.
+    """
+    private_key = serialization.load_pem_private_key(private_pem.encode("utf-8"), password=None)
+    der_bytes = private_key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return base64.urlsafe_b64encode(der_bytes).rstrip(b"=").decode("ascii")
 
 
 async def send_push(
@@ -316,6 +339,7 @@ async def send_push(
         return 0
 
     keys = load_vapid_keys()
+    vapid_private = _vapid_private_b64url(keys.private_pem)
     vapid_claims = {"sub": VAPID_CONTACT}
     payload = json.dumps(
         PushPayload(title=title, body=body, bot=bot, session_id=session_id).to_dict(),
@@ -339,7 +363,7 @@ async def send_push(
                 webpush,
                 subscription_info={"endpoint": endpoint, "keys": keys_block},
                 data=payload,
-                vapid_private_key=keys.private_pem,
+                vapid_private_key=vapid_private,
                 vapid_claims=dict(vapid_claims),
             )
             delivered += 1
