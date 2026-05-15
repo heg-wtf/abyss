@@ -201,7 +201,10 @@ describe("/mobile route skeleton", () => {
 
   it("LogoSplash renders a fading logo and dismisses itself", () => {
     const splash = read("components/mobile/logo-splash.tsx");
-    expect(splash).toMatch(/animation: "logo-splash 1\.5s/);
+    // Two animations on purpose — the background stays opaque until
+    // the final fade, while the logo handles its own fade in / out.
+    expect(splash).toMatch(/animation: "logo-splash-bg 1\.5s/);
+    expect(splash).toMatch(/animation: "logo-splash-logo 1\.5s/);
     // Dismisses on animation end + a belt-and-suspenders timeout so
     // a swallowed onAnimationEnd never strands the splash.
     expect(splash).toMatch(/onAnimationEnd=\{complete\}/);
@@ -221,7 +224,8 @@ describe("/mobile route skeleton", () => {
 
   it("globals.css declares the logo-splash keyframes + reduced-motion override", () => {
     const css = read("app/globals.css");
-    expect(css).toMatch(/@keyframes logo-splash/);
+    expect(css).toMatch(/@keyframes logo-splash-bg/);
+    expect(css).toMatch(/@keyframes logo-splash-logo/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
   });
 
