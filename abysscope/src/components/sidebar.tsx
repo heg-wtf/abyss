@@ -18,6 +18,10 @@ import { BotAvatar } from "@/components/bot-avatar";
 interface BotSummary {
   name: string;
   display_name: string;
+  /** Legacy field; older bots store their friendly Korean name here
+   * with ``display_name`` set to ``""``. The fallback chain below
+   * picks it up so the sidebar doesn't fall through to the raw slug. */
+  telegram_botname?: string;
 }
 
 const STORAGE_KEY = "abysscope.sidebar.collapsed";
@@ -210,11 +214,11 @@ function SidebarImpl() {
                 >
                   <BotAvatar
                     botName={bot.name}
-                    displayName={bot.display_name || bot.name}
+                    displayName={bot.display_name || bot.telegram_botname || bot.name}
                     size="xs"
                   />
                   <span className="truncate">
-                    {bot.display_name || bot.name}
+                    {bot.display_name || bot.telegram_botname || bot.name}
                   </span>
                 </Link>
               ))}
