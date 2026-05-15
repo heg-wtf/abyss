@@ -25,6 +25,40 @@ const VAD_CONFIG = {
  * syllables / spurious commits that survive VAD. */
 const MIN_TRANSCRIPT_CHARS = 2;
 
+/**
+ * Cold-start mute window after ``voice.start()``. When Scribe
+ * reconnects the mic is re-armed instantly, but the phone speaker is
+ * still decaying from the just-played TTS and the room hasn't
+ * settled. Scribe almost always commits a phantom syllable inside
+ * the first ~1.5 s — that's the loop the user has been hitting.
+ * Drop every commit that arrives within this window; the user
+ * can't realistically be speaking yet because they were listening
+ * to the TTS a beat earlier.
+ */
+const COLD_START_MUTE_MS = 1500;
+
+/** Fire-and-forget STT telemetry so the Python sidecar log captures
+ * Scribe v2 realtime activity (the browser → ElevenLabs WebSocket
+ * never crosses our server, so we'd otherwise be blind to it). */
+function logSttEvent(payload: {
+  event: "connect" | "commit" | "disconnect" | "error" | "partial";
+  chars?: number;
+  latency_ms?: number;
+  language_code?: string;
+  detail?: string;
+}): void {
+  // ``keepalive: true`` so the request survives a tab close. The
+  // returned Promise is intentionally not awaited.
+  void fetch("/api/chat/log-stt", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    keepalive: true,
+  }).catch(() => {
+    // Telemetry must never break voice mode.
+  });
+}
+
 export type VoiceState = "idle" | "recording" | "processing" | "speaking";
 
 interface UseVoiceModeOptions {
@@ -50,6 +84,11 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   // aborts it so the X button kills audio playback even when the
   // request hasn't returned yet.
   const speakAbortRef = React.useRef<AbortController | null>(null);
+  // ``performance.now()`` value at the moment Scribe's mic re-armed.
+  // ``onCommittedTranscript`` checks this against
+  // ``COLD_START_MUTE_MS`` to drop phantom commits caused by TTS
+  // speaker decay / ambient noise during the re-arm window.
+  const startedAtRef = React.useRef<number>(0);
   const onTranscriptRef = React.useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
   const scribeRef = React.useRef<ReturnType<typeof useScribe> | null>(null);
@@ -65,15 +104,45 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     ...VAD_CONFIG,
     onCommittedTranscript: ({ text }) => {
       const trimmed = text.trim();
-      if (trimmed.length < MIN_TRANSCRIPT_CHARS) return;
+      const elapsed = performance.now() - startedAtRef.current;
+      if (elapsed < COLD_START_MUTE_MS) {
+        // Phantom commit during the mic re-arm window — almost
+        // always TTS speaker decay or ambient noise. Drop silently
+        // (visible only in the server STT log).
+        logSttEvent({
+          event: "partial",
+          chars: trimmed.length,
+          latency_ms: elapsed,
+          detail: `cold-start drop "${trimmed.slice(0, 40)}"`,
+        });
+        return;
+      }
+      if (trimmed.length < MIN_TRANSCRIPT_CHARS) {
+        logSttEvent({
+          event: "partial",
+          chars: trimmed.length,
+          latency_ms: elapsed,
+          detail: "too short",
+        });
+        return;
+      }
       scribeRef.current?.disconnect();
       setVoiceState("processing");
+      logSttEvent({
+        event: "commit",
+        chars: trimmed.length,
+        latency_ms: elapsed,
+        language_code: "ko",
+      });
       onTranscriptRef.current(trimmed);
     },
     onError: (err) => {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      logSttEvent({ event: "error", detail: message });
+      setError(message);
     },
     onInsufficientAudioActivityError: ({ error: msg }) => {
+      logSttEvent({ event: "error", detail: `insufficient_audio: ${msg}` });
       setError(`음성 감지 실패: ${msg}`);
     },
   });
@@ -97,6 +166,11 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
       currentAudioRef.current.src = "";
       currentAudioRef.current = null;
     }
+    // Reset the cold-start clock *before* the connect so phantom
+    // commits during the re-arm window get rejected by
+    // ``onCommittedTranscript``.
+    startedAtRef.current = performance.now();
+    const tokenStart = performance.now();
     try {
       const res = await fetch("/api/chat/scribe-token", { method: "POST" });
       if (!res.ok) throw new Error(`scribe-token ${res.status}`);
@@ -106,8 +180,15 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
         ...VAD_CONFIG,
         microphone: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      logSttEvent({
+        event: "connect",
+        latency_ms: performance.now() - tokenStart,
+        language_code: "ko",
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      logSttEvent({ event: "error", detail: `start failed: ${message}` });
+      setError(message);
     }
   }, []);
 
