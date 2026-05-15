@@ -377,14 +377,35 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   }, [activeStream.streaming, queued, executeStreamSend]);
 
   // Auto-TTS the latest assistant reply while voice mode is on.
-  // Triggered by ``messages`` changing (i.e. a new bubble landing)
-  // rather than the streaming flag flipping, so we don't race with
-  // the streaming/messages update order. ``lastSpokenMessageIdRef``
-  // dedupes — if this effect re-fires for any other reason we
-  // won't speak the same reply twice.
+  // Triggered by ``messages`` changing rather than the streaming
+  // flag flipping so we don't race with the streaming/messages
+  // update order (see the comment block above).
+  //
+  // When voice mode just opened we **seed** ``lastSpokenMessageIdRef``
+  // to the current last message id. That stops the effect from
+  // speaking whatever historical assistant reply happens to be the
+  // last bubble in chat history — the user reported "마이크 다시
+  // 누르면 이전 응답이 들리는 경우". Only messages that arrive
+  // *after* voice mode opened get spoken.
   const lastSpokenMessageIdRef = React.useRef<string | null>(null);
+  const previousVoiceModeRef = React.useRef(voiceMode);
   React.useEffect(() => {
-    if (!voiceMode) return;
+    const wasVoiceMode = previousVoiceModeRef.current;
+    previousVoiceModeRef.current = voiceMode;
+
+    if (!voiceMode) {
+      // Voice mode off → release the dedup so the next open starts
+      // fresh.
+      lastSpokenMessageIdRef.current = null;
+      return;
+    }
+    if (!wasVoiceMode) {
+      // Voice mode just opened → mark the current tail as
+      // "already spoken" so we never replay history.
+      const last = messages[messages.length - 1];
+      lastSpokenMessageIdRef.current = last?.id ?? null;
+      return;
+    }
     if (activeStream.streaming) return;
     const last = messages[messages.length - 1];
     if (!last || last.role !== "assistant" || !last.content) return;

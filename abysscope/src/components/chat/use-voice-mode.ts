@@ -3,12 +3,27 @@
 import * as React from "react";
 import { useScribe, CommitStrategy } from "@elevenlabs/react";
 
+// Voice-activity detection tuning. Mirrors the *previously*
+// test-tuned thresholds from the original RMS-based VAD
+// (commit f18789e: ``SILENCE_DURATION_MS = 1500``,
+// ``MIN_RECORDING_MS = 300``) and aligns ``vadThreshold`` with the
+// ElevenLabs Scribe v2 realtime default (0.4). The earlier 0.2 /
+// 0.5 / 100 numbers were guesses landed during the Scribe v2
+// migration and were sensitive enough that ambient room noise +
+// TTS playback echo could auto-commit a transcript on every
+// auto-restart cycle, locking the user into a 듣는중→처리중→응답중
+// loop. ``no_verbatim`` strips filler words / false starts /
+// disfluencies before we ever see the transcript.
 const VAD_CONFIG = {
   commitStrategy: CommitStrategy.VAD,
-  vadSilenceThresholdSecs: 0.5,
-  vadThreshold: 0.2,
-  minSpeechDurationMs: 100,
+  vadSilenceThresholdSecs: 1.5,
+  vadThreshold: 0.4,
+  minSpeechDurationMs: 300,
 } as const;
+
+/** Minimum transcript length to forward to the chat. Drops single
+ * syllables / spurious commits that survive VAD. */
+const MIN_TRANSCRIPT_CHARS = 2;
 
 export type VoiceState = "idle" | "recording" | "processing" | "speaking";
 
@@ -31,6 +46,10 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   const [error, setError] = React.useState<string | null>(null);
   const currentAudioRef = React.useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = React.useRef<string | null>(null);
+  // Controller for the in-flight /api/chat/speak fetch. ``cancel()``
+  // aborts it so the X button kills audio playback even when the
+  // request hasn't returned yet.
+  const speakAbortRef = React.useRef<AbortController | null>(null);
   const onTranscriptRef = React.useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
   const scribeRef = React.useRef<ReturnType<typeof useScribe> | null>(null);
@@ -38,10 +57,15 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   const scribe = useScribe({
     modelId: "scribe_v2_realtime",
     languageCode: "ko",
+    // Drop filler words, false starts, and disfluencies before
+    // they reach the chat — same option ElevenLabs added for Scribe
+    // v2 batch + realtime. Gets us cleaner Korean transcripts
+    // without a post-hoc cleanup step on our side.
+    noVerbatim: true,
     ...VAD_CONFIG,
     onCommittedTranscript: ({ text }) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
+      if (trimmed.length < MIN_TRANSCRIPT_CHARS) return;
       scribeRef.current?.disconnect();
       setVoiceState("processing");
       onTranscriptRef.current(trimmed);
@@ -93,8 +117,13 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
 
   const cancel = React.useCallback(() => {
     scribeRef.current?.disconnect();
+    if (speakAbortRef.current) {
+      speakAbortRef.current.abort();
+      speakAbortRef.current = null;
+    }
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
+      currentAudioRef.current.src = "";
       currentAudioRef.current = null;
     }
     if (objectUrlRef.current) {
@@ -113,17 +142,23 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     }
     setVoiceState("speaking");
     setError(null);
+    const controller = new AbortController();
+    speakAbortRef.current?.abort();
+    speakAbortRef.current = controller;
     try {
       const response = await fetch("/api/chat/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       if (!response.ok) {
         const detail = await response.text().catch(() => "");
         throw new Error(`speak ${response.status}${detail ? `: ${detail}` : ""}`);
       }
       const blob = await response.blob();
+      if (controller.signal.aborted) return;
       // Force a known MIME so iOS Safari's audio element doesn't
       // refuse the blob when the server response omits the type.
       const audioBlob =
@@ -161,8 +196,17 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
         });
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Aborts come through as ``AbortError`` — that's our own
+      // ``cancel()`` killing the in-flight speak, not an actual
+      // failure. Don't surface it as a user-visible error.
+      const name = (err as { name?: string } | null)?.name;
+      if (name !== "AbortError") {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
+      if (speakAbortRef.current === controller) {
+        speakAbortRef.current = null;
+      }
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
