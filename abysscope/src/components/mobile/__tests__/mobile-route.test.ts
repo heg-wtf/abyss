@@ -205,6 +205,12 @@ describe("/mobile route skeleton", () => {
     // the final fade, while the logo handles its own fade in / out.
     expect(splash).toMatch(/animation: "logo-splash-bg 1\.5s/);
     expect(splash).toMatch(/animation: "logo-splash-logo 1\.5s/);
+    // Inline ``backgroundColor`` so the splash stays solid even if
+    // the bundled CSS is still loading during a PWA cold start.
+    // Anything that re-introduces the ``bg-background`` Tailwind
+    // class is a regression — the chat behind would flash through.
+    expect(splash).toMatch(/backgroundColor: "#131313"/);
+    expect(splash).not.toMatch(/bg-background/);
     // Dismisses on animation end + a belt-and-suspenders timeout so
     // a swallowed onAnimationEnd never strands the splash.
     expect(splash).toMatch(/onAnimationEnd=\{complete\}/);
