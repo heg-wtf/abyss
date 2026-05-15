@@ -98,9 +98,45 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   // was unauthorized, ``audio.play()`` rejected with
   // ``NotAllowedError``, and the user heard silence.
   const audioElementRef = React.useRef<HTMLAudioElement | null>(null);
+  // Rolling cache of the last few TTS strings we asked the speaker
+  // to play. When a Scribe commit arrives that is contained in (or
+  // nearly identical to) one of these strings we treat it as echo
+  // and drop it. iOS PWAs route ``getUserMedia`` audio through
+  // ``AVAudioSessionCategoryPlayAndRecord`` so the mic stays hot
+  // through TTS playback, and Scribe v2 realtime is *designed* to
+  // transcribe agent voice output (it ships as a "perfect note-
+  // taking" feature). Software AEC can't break the loop on iOS
+  // speaker → mic on the same device — see GitHub issue
+  // elevenlabs/packages#663 + WebRTC AEC3 explainer — so we filter
+  // at the transcript layer.
+  const recentTtsRef = React.useRef<string[]>([]);
   const onTranscriptRef = React.useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
   const scribeRef = React.useRef<ReturnType<typeof useScribe> | null>(null);
+
+  /** Strip whitespace / punctuation for fuzzy comparison. */
+  const _normaliseForEcho = (value: string): string =>
+    value.replace(/[\s.,!?:;~"'…—\-()]/g, "").toLowerCase();
+
+  /** Return true when ``transcript`` looks like echo of a recent TTS. */
+  const _isLikelyEcho = (transcript: string): boolean => {
+    const cleanTranscript = _normaliseForEcho(transcript);
+    if (cleanTranscript.length === 0) return true;
+    for (const tts of recentTtsRef.current) {
+      const cleanTts = _normaliseForEcho(tts);
+      if (cleanTts.length === 0) continue;
+      // Substring match (the bot said it; mic heard part of it back).
+      if (cleanTts.includes(cleanTranscript)) return true;
+      // Or vice versa — Scribe sometimes inserts extras around the
+      // echoed fragment.
+      if (cleanTranscript.includes(cleanTts)) return true;
+    }
+    return false;
+  };
+
+  const _rememberTts = (text: string): void => {
+    recentTtsRef.current = [text, ...recentTtsRef.current].slice(0, 4);
+  };
 
   const scribe = useScribe({
     modelId: "scribe_v2_realtime",
@@ -132,6 +168,19 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
           chars: trimmed.length,
           latency_ms: elapsed,
           detail: "too short",
+        });
+        return;
+      }
+      if (_isLikelyEcho(trimmed)) {
+        // Scribe transcribed the TTS playback bleeding back through
+        // the phone speaker. iOS PWA speaker → mic AEC is a known
+        // dead-end (see elevenlabs/packages#663 + WebRTC AEC3
+        // hardware-limit notes) — filter at the transcript layer.
+        logSttEvent({
+          event: "partial",
+          chars: trimmed.length,
+          latency_ms: elapsed,
+          detail: `echo drop "${trimmed.slice(0, 40)}"`,
         });
         return;
       }
@@ -248,6 +297,10 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     }
     setVoiceState("speaking");
     setError(null);
+    // Record what we're about to say so the echo guard in
+    // ``onCommittedTranscript`` can recognise it bleeding back
+    // through the mic during / right after playback.
+    _rememberTts(text);
     const controller = new AbortController();
     speakAbortRef.current?.abort();
     speakAbortRef.current = controller;
