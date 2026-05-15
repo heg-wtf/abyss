@@ -530,6 +530,12 @@ it("workspace and sessions slide in from the side instead of a centred modal", (
     expect(source).toMatch(/voiceFlag: true/);
     // Auto-restart after TTS: prev=speaking → cur=idle.
     expect(source).toMatch(/prev === "speaking"/);
+    // Auto-TTS is triggered by ``messages`` arriving, not by the
+    // streaming flag flipping — the earlier flip-driven trigger
+    // raced with the order of ``setMessages`` vs the streaming
+    // ``finally`` and left voice mode stuck on "processing".
+    expect(source).toMatch(/lastSpokenMessageIdRef/);
+    expect(source).toMatch(/voice\.speak\(last\.content\)/);
     // Horizontal swipes on the message area page between sibling
     // sessions of the same bot.
     expect(source).toMatch(/onMessagesTouchStart/);
