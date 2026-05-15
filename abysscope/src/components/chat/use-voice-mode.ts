@@ -396,6 +396,26 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
       if (speakAbortRef.current === controller) {
         speakAbortRef.current = null;
       }
+      // Explicitly release the iOS media session held by the
+      // persistent ``<audio>`` element. Without this iOS Dynamic
+      // Island keeps showing the PWA logo + the orange mic dot
+      // tightly clustered as if "playback is still active", because
+      // the audio element still owns a media session for the
+      // (now finished) blob URL. Pausing + clearing ``src`` +
+      // ``.load()`` forces the WebKit MediaSession into a
+      // terminated state — Dynamic Island closes its media slot
+      // and the indicator collapses to just the mic icon when
+      // Scribe reconnects ~2.5 s later.
+      const persistent = audioElementRef.current;
+      if (persistent) {
+        try {
+          persistent.pause();
+          persistent.removeAttribute("src");
+          persistent.load();
+        } catch {
+          // Already torn down — fine.
+        }
+      }
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
