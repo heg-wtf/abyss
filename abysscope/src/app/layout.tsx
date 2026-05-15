@@ -57,6 +57,18 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/*
+          Paint the document background dark from the very first byte
+          so iOS PWA cold starts (and ordinary browser navigations)
+          never flash a frame of white between the OS splash and our
+          first React paint. Matches the PWA manifest
+          ``background_color`` and the LogoSplash inline color.
+          Inline ``<style>`` rather than relying on globals.css so
+          there's no stylesheet load race.
+        */}
+        <style>{"html,body{background-color:#131313;}"}</style>
+      </head>
       <body
         className={`${pretendard.variable} ${geistMono.variable} antialiased`}
       >

@@ -199,22 +199,22 @@ describe("/mobile route skeleton", () => {
     expect(source).toMatch(/file\?: \{ name: string; path: string; url: string \}/);
   });
 
-  it("LogoSplash renders a fading logo and dismisses itself", () => {
+  it("LogoSplash holds the screen with inline color and unmounts itself", () => {
     const splash = read("components/mobile/logo-splash.tsx");
-    // Two animations on purpose — the background stays opaque until
-    // the final fade, while the logo handles its own fade in / out.
-    expect(splash).toMatch(/animation: "logo-splash-bg 1\.5s/);
-    expect(splash).toMatch(/animation: "logo-splash-logo 1\.5s/);
-    // Inline ``backgroundColor`` so the splash stays solid even if
-    // the bundled CSS is still loading during a PWA cold start.
-    // Anything that re-introduces the ``bg-background`` Tailwind
-    // class is a regression — the chat behind would flash through.
+    // State-driven fade. CSS keyframes were dropped because the iOS
+    // PWA cold start would paint the SSR HTML before the bundled
+    // stylesheet (with the @keyframes) loaded, leaving a frame where
+    // the chat behind the still-invisible splash flashed through.
+    expect(splash).toMatch(/setPhase\("fading-out"\)/);
+    expect(splash).toMatch(/transition: `opacity \${FADE_MS}ms/);
+    // Inline ``backgroundColor`` so the overlay is solid from the
+    // very first paint regardless of CSS load order. Anything that
+    // re-introduces the Tailwind background utility is a regression.
     expect(splash).toMatch(/backgroundColor: "#131313"/);
     expect(splash).not.toMatch(/bg-background/);
-    // Dismisses on animation end + a belt-and-suspenders timeout so
-    // a swallowed onAnimationEnd never strands the splash.
-    expect(splash).toMatch(/onAnimationEnd=\{complete\}/);
-    expect(splash).toMatch(/setTimeout\(complete, 1600\)/);
+    // Plain ``<img>`` — ``next/image`` would swap a placeholder in
+    // mid-flight.
+    expect(splash).toMatch(/<img\b/);
     expect(splash).toMatch(/\/logo-square\.png/);
   });
 
@@ -228,11 +228,15 @@ describe("/mobile route skeleton", () => {
     expect(shell).toMatch(/splashVisible && <LogoSplash/);
   });
 
-  it("globals.css declares the logo-splash keyframes + reduced-motion override", () => {
-    const css = read("app/globals.css");
-    expect(css).toMatch(/@keyframes logo-splash-bg/);
-    expect(css).toMatch(/@keyframes logo-splash-logo/);
-    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)/);
+  it("root layout paints the document background dark before CSS loads", () => {
+    // The actual root cause of the "한 번 깜빡임" report was the
+    // standard iOS PWA white frame between the system splash and
+    // the first React paint, not anything inside LogoSplash itself.
+    // The fix lives in the root ``<head>`` as an inline ``<style>``
+    // so the document is dark from the very first byte. This guard
+    // makes sure nobody removes it later thinking it is dead code.
+    const layout = read("app/layout.tsx");
+    expect(layout).toMatch(/<style>\{?"html,body\{background-color:#131313;\}"\}?<\/style>/);
   });
 
   it("ChatEvent + stream hook handle the reset_partial signal", () => {
