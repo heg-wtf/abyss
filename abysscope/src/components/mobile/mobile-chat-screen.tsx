@@ -345,34 +345,53 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     [session.bot, session.id, stream]
   );
 
-  // Falling-edge of streaming → (a) in voice mode, auto-TTS the last
-  // assistant reply; (b) flush a queued send, if any. ``useRef``
-  // guards against firing on the initial mount when the stream was
-  // already idle.
+  // Falling-edge of streaming → flush a queued send, if any. The
+  // previous revision *also* triggered voice TTS from this effect by
+  // sampling ``messages[last]`` on the same render, but
+  // ``streaming`` flips to ``false`` (inside ``stream.send``'s
+  // ``finally``) one render before ``messages`` gains the assistant
+  // bubble (which lives in the ``await stream.send`` continuation).
+  // The effect fired once on the streaming flip with ``last`` still
+  // being the user message, unconditionally bumped
+  // ``previousStreamingRef.current`` to ``false``, then fired again
+  // when ``messages`` updated — but by then ``wasStreaming`` was
+  // already ``false`` and the speak branch never ran. Voice mode
+  // got stuck on the "processing" label forever.
+  //
+  // The fix moved auto-TTS out into its own ``messages``-keyed
+  // effect below. This one keeps the queue-flush behaviour intact.
   const previousStreamingRef = React.useRef(activeStream.streaming);
   React.useEffect(() => {
     const wasStreaming = previousStreamingRef.current;
     previousStreamingRef.current = activeStream.streaming;
     if (!wasStreaming || activeStream.streaming) return;
+    if (!queued) return;
+    const next = queued;
+    setQueued(null);
+    void executeStreamSend(
+      next.userMessageId,
+      next.display,
+      next.attachmentPaths,
+      next.voiceFlag,
+    );
+  }, [activeStream.streaming, queued, executeStreamSend]);
 
-    if (voiceMode) {
-      const last = messages[messages.length - 1];
-      if (last?.role === "assistant" && last.content) {
-        void voice.speak(last.content);
-      }
-    }
-
-    if (queued) {
-      const next = queued;
-      setQueued(null);
-      void executeStreamSend(
-        next.userMessageId,
-        next.display,
-        next.attachmentPaths,
-        next.voiceFlag,
-      );
-    }
-  }, [activeStream.streaming, queued, executeStreamSend, voiceMode, messages, voice]);
+  // Auto-TTS the latest assistant reply while voice mode is on.
+  // Triggered by ``messages`` changing (i.e. a new bubble landing)
+  // rather than the streaming flag flipping, so we don't race with
+  // the streaming/messages update order. ``lastSpokenMessageIdRef``
+  // dedupes — if this effect re-fires for any other reason we
+  // won't speak the same reply twice.
+  const lastSpokenMessageIdRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!voiceMode) return;
+    if (activeStream.streaming) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "assistant" || !last.content) return;
+    if (lastSpokenMessageIdRef.current === last.id) return;
+    lastSpokenMessageIdRef.current = last.id;
+    void voice.speak(last.content);
+  }, [messages, voiceMode, activeStream.streaming, voice]);
 
   // Auto-restart recording after the assistant TTS reply finishes.
   // ``speaking → idle`` transition with ``voiceMode`` still active
