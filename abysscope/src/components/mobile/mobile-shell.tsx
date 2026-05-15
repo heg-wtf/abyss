@@ -1,10 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { LaunchIntro } from "@/components/mobile/launch-intro";
+import { LogoSplash } from "@/components/mobile/logo-splash";
 import { useVisualViewport } from "@/hooks/use-visual-viewport-height";
-
-const INTRO_STORAGE_KEY = "abyss_pwa_intro_seen";
 
 /**
  * Client wrapper that fixes the mobile layout to the iOS visual
@@ -24,31 +22,14 @@ const INTRO_STORAGE_KEY = "abyss_pwa_intro_seen";
 export function MobileShell({ children }: { children: React.ReactNode }) {
   const vp = useVisualViewport();
 
-  // First-run launch animation. SSR renders ``intro = false`` so the
-  // server markup never includes the canvas; the effect below flips
-  // it on for clients that haven't seen the intro yet. ``true`` here
-  // means "still showing".
-  const [introVisible, setIntroVisible] = React.useState(false);
-  React.useEffect(() => {
-    try {
-      if (window.localStorage.getItem(INTRO_STORAGE_KEY) !== "true") {
-        setIntroVisible(true);
-      }
-    } catch {
-      // localStorage can throw under private mode / quota — skip the
-      // intro rather than crashing the shell.
-    }
-  }, []);
-
-  const dismissIntro = React.useCallback(() => {
-    setIntroVisible(false);
-    try {
-      window.localStorage.setItem(INTRO_STORAGE_KEY, "true");
-    } catch {
-      // Same private-mode concern; the user just sees the intro
-      // again next launch.
-    }
-  }, []);
+  // Cold-start logo splash. ``useState`` initial value runs once per
+  // React mount — and because ``MobileShell`` lives in the mobile
+  // layout, it survives client-side route changes and stays mounted
+  // across background/foreground transitions on iOS. So this only
+  // fires on a genuine cold load (first PWA launch after a quit, or
+  // a hard browser reload), which is exactly the surface we want.
+  const [splashVisible, setSplashVisible] = React.useState(true);
+  const dismissSplash = React.useCallback(() => setSplashVisible(false), []);
 
   // Pin html and body via ``position: fixed`` + lock overflow so iOS
   // cannot auto-scroll the document when the textarea gains focus.
@@ -115,7 +96,7 @@ export function MobileShell({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
-      {introVisible && <LaunchIntro onComplete={dismissIntro} />}
+      {splashVisible && <LogoSplash onComplete={dismissSplash} />}
     </div>
   );
 }
