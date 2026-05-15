@@ -609,6 +609,7 @@ class ChatServer:
         router.add_post("/chat", self._handle_chat)
         router.add_post("/chat/cancel", self._handle_cancel)
         router.add_get("/chat/bots", self._handle_list_bots)
+        router.add_post("/chat/bots", self._handle_create_bot)
         router.add_get("/chat/commands", self._handle_list_commands)
         router.add_get("/chat/sessions", self._handle_list_sessions)
         router.add_post("/chat/sessions", self._handle_create_session)
@@ -774,6 +775,78 @@ class ChatServer:
                 }
             )
         return web.json_response({"bots": out})
+
+    async def _handle_create_bot(self, request: web.Request) -> web.Response:
+        """Programmatic bot creation, mirrors ``abyss bot add``.
+
+        Body is the same shape ``onboarding.prompt_bot_profile``
+        returns interactively. We re-use ``onboarding.create_bot`` so
+        the on-disk layout (``bot.yaml`` + ``config.yaml`` entry)
+        stays identical to the CLI flow.
+
+        Cron + heartbeat schedulers are attached on daemon start, so a
+        new bot is chattable through the dashboard immediately but
+        won't fire scheduled jobs until the next ``abyss restart``.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+
+        raw_name = str(body.get("name") or "").strip().lower().replace(" ", "-")
+        if not raw_name:
+            return web.json_response({"error": "name required"}, status=400)
+        if not _BOT_NAME_PATTERN.match(raw_name) or not raw_name.replace("-", "").isalnum():
+            return web.json_response(
+                {"error": ("name must be lowercase letters / digits / hyphens (1–64 chars)")},
+                status=400,
+            )
+
+        from abyss.config import bot_exists
+        from abyss.onboarding import create_bot
+
+        if bot_exists(raw_name):
+            return web.json_response(
+                {"error": f"bot '{raw_name}' already exists"},
+                status=409,
+            )
+
+        display_name = str(body.get("display_name") or "").strip()
+        personality = str(body.get("personality") or "").strip()
+        role = str(body.get("role") or "").strip()
+        goal = str(body.get("goal") or "").strip()
+
+        if not display_name:
+            return web.json_response({"error": "display_name required"}, status=400)
+        if not personality:
+            return web.json_response({"error": "personality required"}, status=400)
+        if not role:
+            return web.json_response({"error": "role required"}, status=400)
+
+        profile = {
+            "name": raw_name,
+            "display_name": display_name,
+            "personality": personality,
+            "role": role,
+            "goal": goal,
+        }
+
+        try:
+            await asyncio.to_thread(create_bot, profile, None)
+        except Exception as error:  # noqa: BLE001 — surface to UI
+            logger.exception("chat_server: bot creation failed: %s", raw_name)
+            return web.json_response({"error": f"creation failed: {error}"}, status=500)
+
+        return web.json_response(
+            {
+                "ok": True,
+                "name": raw_name,
+                "display_name": display_name,
+            },
+            status=201,
+        )
 
     async def _handle_list_sessions(self, request: web.Request) -> web.Response:
         bot_name = request.query.get("bot", "").strip()
