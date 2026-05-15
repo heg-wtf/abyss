@@ -89,6 +89,14 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
   // ``COLD_START_MUTE_MS`` to drop phantom commits caused by TTS
   // speaker decay / ambient noise during the re-arm window.
   const startedAtRef = React.useRef<number>(0);
+  // Turn-level dedup: ``onCommittedTranscript`` fires once per turn,
+  // anything after is ignored until ``voice.start()`` (i.e. the next
+  // turn) resets it. Scribe sometimes emits a second commit after we
+  // call ``disconnect()`` because the WebSocket teardown is async —
+  // without this guard the second commit became a second
+  // ``submitTranscript`` → second chat round-trip → second TTS, and
+  // the user saw "여러번 응답이 나오는" symptom.
+  const committedThisTurnRef = React.useRef(false);
   // Persistent ``<audio>`` element reused across every TTS playback.
   // iOS Safari ties autoplay authorization to a specific element
   // instance — once an element has been ``.play()``'d during a user
@@ -150,6 +158,20 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     onCommittedTranscript: ({ text }) => {
       const trimmed = text.trim();
       const elapsed = performance.now() - startedAtRef.current;
+      if (committedThisTurnRef.current) {
+        // Scribe occasionally fires a second commit after our
+        // ``disconnect()`` because the WebSocket close is async.
+        // We already forwarded this turn's transcript — anything
+        // else is noise that, before this guard, became a duplicate
+        // chat round-trip and a duplicate TTS playback.
+        logSttEvent({
+          event: "partial",
+          chars: trimmed.length,
+          latency_ms: elapsed,
+          detail: `dedup drop "${trimmed.slice(0, 40)}"`,
+        });
+        return;
+      }
       if (elapsed < COLD_START_MUTE_MS) {
         // Phantom commit during the mic re-arm window — almost
         // always TTS speaker decay or ambient noise. Drop silently
@@ -184,6 +206,7 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
         });
         return;
       }
+      committedThisTurnRef.current = true;
       scribeRef.current?.disconnect();
       setVoiceState("processing");
       logSttEvent({
@@ -242,8 +265,10 @@ export function useVoiceMode({ onTranscript }: UseVoiceModeOptions): UseVoiceMod
     }
     // Reset the cold-start clock *before* the connect so phantom
     // commits during the re-arm window get rejected by
-    // ``onCommittedTranscript``.
+    // ``onCommittedTranscript``. Same for the per-turn commit
+    // dedup so the next turn can land its commit through.
     startedAtRef.current = performance.now();
+    committedThisTurnRef.current = false;
     const tokenStart = performance.now();
     try {
       const res = await fetch("/api/chat/scribe-token", { method: "POST" });
