@@ -115,24 +115,32 @@ describe("/mobile route skeleton", () => {
   });
 
   it("drawer session list owns rename / delete / inline-create flows", () => {
-    const source = read("components/mobile/sessions-drawer-panel.tsx");
+    const panel = read("components/mobile/sessions-drawer-panel.tsx");
+    const rename = read(
+      "components/mobile/sessions-drawer-rename-dialog.tsx",
+    );
+    const remove = read(
+      "components/mobile/sessions-drawer-delete-dialog.tsx",
+    );
     // Client-side fetches MUST hit the Next.js proxy (``/api/chat/...``)
     // and not the ``abyss-api`` helpers that point at the
     // ``127.0.0.1:3848`` sidecar — on a phone, ``127.0.0.1`` is the
     // phone, not the Mac, so direct calls silently fail.
-    expect(source).toMatch(/fetch\(\s*`\/api\/chat\/sessions\?bot=/);
-    expect(source).toMatch(/fetch\("\/api\/chat\/sessions"/);
-    expect(source).toMatch(/\/rename/);
-    expect(source).not.toMatch(/listChatSessions\(/);
-    expect(source).not.toMatch(/renameChatSession\(/);
-    expect(source).not.toMatch(/deleteChatSession\(/);
-    expect(source).not.toMatch(/createChatSession\(/);
+    expect(panel).toMatch(/fetch\(\s*`\/api\/chat\/sessions\?bot=/);
+    expect(panel).toMatch(/fetch\("\/api\/chat\/sessions"/);
+    expect(rename).toMatch(/\/rename/);
+    for (const source of [panel, rename, remove]) {
+      expect(source).not.toMatch(/listChatSessions\(/);
+      expect(source).not.toMatch(/renameChatSession\(/);
+      expect(source).not.toMatch(/deleteChatSession\(/);
+      expect(source).not.toMatch(/createChatSession\(/);
+    }
     // Custom name takes priority over bot display name (drawer uses
     // ``sess`` as the loop var, sub-dialogs use ``session``).
-    expect(source).toMatch(/(?:sess|session)\.custom_name/);
+    expect(panel).toMatch(/(?:sess|session)\.custom_name/);
     // Per-row actions: ⋮ button + right-click both open the menu.
-    expect(source).toMatch(/onContextMenu/);
-    expect(source).toMatch(/MoreVertical/);
+    expect(panel).toMatch(/onContextMenu/);
+    expect(panel).toMatch(/MoreVertical/);
   });
 
   it("api helper exposes renameChatSession and proxy route exists", () => {
