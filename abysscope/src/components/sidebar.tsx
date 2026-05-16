@@ -234,7 +234,7 @@ function SidebarImpl() {
                 <span className="flex size-5 items-center justify-center rounded-md border text-xs text-muted-foreground">
                   +
                 </span>
-                <span className="truncate">New bot</span>
+                <span className="truncate">New</span>
               </Link>
             </div>
           )}
