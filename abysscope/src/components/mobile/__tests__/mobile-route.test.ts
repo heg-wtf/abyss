@@ -274,7 +274,7 @@ describe("/mobile route skeleton", () => {
     expect(sidebar).toMatch(/bot\.display_name \|\| bot\.telegram_botname \|\| bot\.name/);
     expect(sidebar).not.toMatch(/bot\.display_name \|\| bot\.name\b/);
 
-    const lib = read("lib/abyss.ts");
+    const lib = read("lib/abyss/metrics.ts");
     expect(lib).toMatch(/bot\.display_name \|\| bot\.telegram_botname \|\| bot\.name/);
     expect(lib).not.toMatch(/bot\.display_name \|\| bot\.name\b/);
   });
