@@ -59,7 +59,7 @@ export function makeRequest(
   url: string,
   init?: RequestInit & { json?: unknown },
 ): NextRequest {
-  const finalInit: RequestInit = { ...init };
+  const finalInit: Record<string, unknown> = { ...init };
   if (init?.json !== undefined) {
     finalInit.body = JSON.stringify(init.json);
     finalInit.headers = {
@@ -67,7 +67,13 @@ export function makeRequest(
       ...(init.headers as Record<string, string> | undefined),
     };
   }
-  return new NextRequest(`http://localhost${url}`, finalInit);
+  // NextRequest's RequestInit has a narrower `signal` type than the
+  // standard one (no `null`), so cast through to satisfy tsc without
+  // changing runtime behavior.
+  return new NextRequest(
+    `http://localhost${url}`,
+    finalInit as ConstructorParameters<typeof NextRequest>[1],
+  );
 }
 
 export function asParams<T>(value: T): Promise<T> {

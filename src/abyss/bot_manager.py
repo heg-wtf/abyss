@@ -398,7 +398,7 @@ async def _qmd_health_check() -> bool:
         writer.close()
         await writer.wait_closed()
         return True
-    except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
+    except ConnectionRefusedError, asyncio.TimeoutError, OSError:
         return False
 
 
@@ -538,7 +538,7 @@ def stop_bots() -> None:
             os.kill(pid, signal.SIGTERM)
             console.print(f"[green]Sent SIGTERM to process {pid}.[/green]")
             sent_signal = True
-        except (ValueError, ProcessLookupError):
+        except ValueError, ProcessLookupError:
             pass
         pid_file.unlink(missing_ok=True)
 
@@ -602,7 +602,7 @@ def show_status() -> None:
             pid = int(pid_file.read_text().strip())
             os.kill(pid, 0)
             console.print(f"[green]Process: running (PID {pid})[/green]")
-        except (ValueError, ProcessLookupError):
+        except ValueError, ProcessLookupError:
             console.print("[yellow]Process: stale PID file[/yellow]")
             pid_file.unlink(missing_ok=True)
     else:

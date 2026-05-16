@@ -190,7 +190,7 @@ def _handle_tools_call(
     limit_raw = args.get("limit", 20)
     try:
         limit = max(1, min(100, int(limit_raw)))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         limit = 20
 
     hits = conversation_index.search(

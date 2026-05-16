@@ -123,7 +123,7 @@ def _extract_request_id(text: str) -> str | None:
     # blob. Try once more after unescaping.
     try:
         unescaped = json.loads(f'"{text}"') if text.startswith('"') else None
-    except (json.JSONDecodeError, ValueError):
+    except json.JSONDecodeError, ValueError:
         unescaped = None
     if unescaped:
         match = _REQUEST_ID.search(unescaped)
