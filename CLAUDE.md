@@ -13,7 +13,7 @@ reached from the phone over Tailscale.
 
 ## Tech Stack
 
-- Python >= 3.11, uv package manager
+- Python >= 3.14, uv package manager
 - Typer (CLI), Rich (output), PyYAML (config), croniter (cron)
 - LLM: Claude Code CLI (`claude -p`) + Python Agent SDK — single backend (full agent: tools, MCP, skills, `--resume`)
 - Delivery: in-process `chat_server` (aiohttp HTTP/SSE on 127.0.0.1:3848) + Web Push via `pywebpush`
