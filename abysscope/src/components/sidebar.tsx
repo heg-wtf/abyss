@@ -266,24 +266,26 @@ function SidebarImpl() {
               <Link
                 href="/skills/builtin"
                 className={cn(
-                  "block rounded-md px-3 py-1.5 text-sm transition-colors",
+                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                   pathname === "/skills/builtin"
                     ? "bg-accent text-accent-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                Built-in
+                <span>📦</span>
+                <span>Built-in</span>
               </Link>
               <Link
                 href="/skills/custom"
                 className={cn(
-                  "block rounded-md px-3 py-1.5 text-sm transition-colors",
+                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                   pathname === "/skills/custom"
                     ? "bg-accent text-accent-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                Custom
+                <span>🧩</span>
+                <span>Custom</span>
               </Link>
             </div>
           )}
