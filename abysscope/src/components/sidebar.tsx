@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SettingsButton } from "@/components/settings-button";
 import { BotAvatar } from "@/components/bot-avatar";
 
 /**
@@ -125,9 +124,6 @@ function SidebarImpl() {
             active={pathname === "/logs"}
           />
         </nav>
-        <div className="flex flex-col items-center gap-2 border-t p-2">
-          <SettingsButton compact />
-        </div>
       </aside>
     );
   }
@@ -222,6 +218,20 @@ function SidebarImpl() {
                   </span>
                 </Link>
               ))}
+              <Link
+                href="/bots/new"
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+                  pathname === "/bots/new"
+                    ? "bg-accent text-accent-foreground font-medium"
+                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                )}
+              >
+                <span className="flex size-5 items-center justify-center rounded-md border text-xs text-muted-foreground">
+                  +
+                </span>
+                <span className="truncate">New</span>
+              </Link>
             </div>
           )}
         </div>
@@ -252,24 +262,26 @@ function SidebarImpl() {
               <Link
                 href="/skills/builtin"
                 className={cn(
-                  "block rounded-md px-3 py-1.5 text-sm transition-colors",
+                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                   pathname === "/skills/builtin"
                     ? "bg-accent text-accent-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                Built-in
+                <span>📦</span>
+                <span>Built-in</span>
               </Link>
               <Link
                 href="/skills/custom"
                 className={cn(
-                  "block rounded-md px-3 py-1.5 text-sm transition-colors",
+                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
                   pathname === "/skills/custom"
                     ? "bg-accent text-accent-foreground font-medium"
                     : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
                 )}
               >
-                Custom
+                <span>🧩</span>
+                <span>Custom</span>
               </Link>
             </div>
           )}
@@ -301,7 +313,7 @@ function SidebarImpl() {
           <span>Logs</span>
         </Link>
       </nav>
-      <div className="border-t p-3 flex items-center justify-between">
+      <div className="border-t p-3">
         <span className="text-xs text-muted-foreground font-mono">
           {process.env.NEXT_PUBLIC_ABYSS_VERSION || "dev"}
           {process.env.NEXT_PUBLIC_ABYSS_COMMIT && (
@@ -310,7 +322,6 @@ function SidebarImpl() {
             </span>
           )}
         </span>
-        <SettingsButton />
       </div>
     </aside>
   );

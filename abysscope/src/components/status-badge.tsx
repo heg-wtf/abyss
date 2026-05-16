@@ -19,7 +19,13 @@ export function ModelBadge({ model }: { model: string }) {
   );
 }
 
-export function SkillTypeBadge({ type }: { type: string }) {
+export function SkillTypeBadge({ type }: { type?: string }) {
+  // Some skill entries (e.g. github-imported skills without a
+  // ``skill.yaml``) don't carry a ``type`` field. Render nothing
+  // rather than crashing on ``type.toUpperCase()``, which is what
+  // surfaced as the "Application error: a client-side exception"
+  // on /skills/custom for users with such skills installed.
+  if (!type) return null;
   return (
     <Badge variant={type === "mcp" ? "default" : "outline"} className="text-xs">
       {type.toUpperCase()}

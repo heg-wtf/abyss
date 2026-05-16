@@ -415,16 +415,32 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   }, [messages, voiceMode, activeStream.streaming, voice]);
 
   // Auto-restart recording after the assistant TTS reply finishes.
-  // ``speaking → idle`` transition with ``voiceMode`` still active
-  // means the user just heard the reply; reopen the mic for the
-  // next turn. Closing the overlay flips ``voiceMode`` to false
-  // first, so this effect no-ops in that case.
+  //
+  // We deliberately wait ``AUTO_RESTART_DELAY_MS`` (≈2.5 s) before
+  // re-opening the mic. Two reasons:
+  //   1. iOS Safari keeps the mic notch indicator on for a few
+  //      seconds after ``MediaStream.getTracks()[*].stop()``, and
+  //      Scribe v2's ``disconnect()`` doesn't always release the
+  //      stream the instant we call it. Re-arming during that
+  //      window left the mic capturing TTS playback through the
+  //      phone speaker, which Scribe transcribed as a phantom
+  //      commit and produced a second (unwanted) chat round-trip
+  //      — the "응답이 2번 나옴" + "노치에 마이크 표시" symptoms.
+  //   2. Speakers physically take a beat to settle after audio.
+  //      Reconnecting too fast = phantom commit on echo.
+  //
+  // Closing the overlay flips ``voiceMode`` to false first, so the
+  // pending timer is cancelled by the cleanup below.
   const prevVoiceStateRef = React.useRef<VoiceState>("idle");
   React.useEffect(() => {
     const prev = prevVoiceStateRef.current;
     prevVoiceStateRef.current = voice.voiceState;
     if (prev === "speaking" && voice.voiceState === "idle" && voiceMode) {
-      void voice.start();
+      const AUTO_RESTART_DELAY_MS = 2500;
+      const id = window.setTimeout(() => {
+        if (voiceMode) void voice.start();
+      }, AUTO_RESTART_DELAY_MS);
+      return () => window.clearTimeout(id);
     }
   }, [voice.voiceState, voiceMode, voice]);
 

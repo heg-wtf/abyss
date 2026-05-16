@@ -9,6 +9,7 @@ import {
 import { MemoryEditor } from "@/components/memory-editor";
 import { SettingsEditor } from "@/components/settings-editor";
 import { PathLink } from "@/components/path-link";
+import { SettingsPageClient } from "@/components/settings-page-client";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,8 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground text-sm">Global configuration</p>
       </div>
+
+      <SettingsPageClient />
 
       <SettingsEditor initialConfig={config} />
 

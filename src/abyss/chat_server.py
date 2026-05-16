@@ -124,9 +124,18 @@ CHAT_SERVER_PORT = int(os.environ.get("ABYSS_CHAT_PORT", "3848"))
 
 ELEVENLABS_API_KEY = get_elevenlabs_api_key()
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
-ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+# ``/stream`` returns progressive SSE chunks so we can pipe bytes to
+# the browser the moment ElevenLabs starts generating them — first
+# audible byte drops from ~1s to ~150–250ms compared to the basic
+# non-streaming endpoint. See
+# https://elevenlabs.io/docs/eleven-api/guides/how-to/best-practices/latency-optimization
+ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
 ELEVENLABS_DEFAULT_VOICE_ID = "8jHHF8rMqMlg8if2mOUe"
-ELEVENLABS_TTS_MODEL = "eleven_multilingual_v2"
+# Flash v2.5 ~75 ms inference, full multilingual support (32 langs
+# incl. Korean). The previous ``eleven_multilingual_v2`` was the
+# quality-tier model with 5–10× the latency, which dominated the
+# total speak() time in voice mode.
+ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_STT_MODEL = "scribe_v2"
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -634,6 +643,7 @@ class ChatServer:
         router.add_post("/chat/transcribe", self._handle_transcribe)
         router.add_post("/chat/speak", self._handle_speak)
         router.add_post("/chat/scribe-token", self._handle_scribe_token)
+        router.add_post("/chat/log-stt", self._handle_log_stt)
         router.add_get("/chat/push/vapid-key", self._handle_push_vapid_key)
         router.add_post("/chat/push/subscribe", self._handle_push_subscribe)
         router.add_delete("/chat/push/subscribe", self._handle_push_unsubscribe)
@@ -1833,6 +1843,54 @@ class ChatServer:
             )
 
         return web.json_response({"text": text})
+
+    async def _handle_log_stt(self, request: web.Request) -> web.Response:
+        """Receive a structured STT event from the browser and log it.
+
+        Scribe v2 realtime streams audio directly from the browser to
+        ElevenLabs over WebSocket, bypassing our ``/chat/transcribe``
+        endpoint — so the server never sees the transcript bytes or
+        latency. The browser fires this fire-and-forget POST whenever
+        it gets a useful event (connect, commit, error, disconnect)
+        so we can correlate STT activity with the rest of the chat
+        log on disk.
+
+        Body shape (all optional except ``event``):
+            ``{"event": "connect" | "commit" | "error" | "disconnect",
+              "chars"?: int, "latency_ms"?: number,
+              "language_code"?: str, "detail"?: str}``
+
+        Bounded fields so a misbehaving client can't flood the log.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+
+        event = str(body.get("event") or "").strip().lower()
+        if event not in {"connect", "commit", "error", "disconnect", "partial"}:
+            return web.json_response({"error": "unknown event"}, status=400)
+
+        chars_raw = body.get("chars")
+        chars = int(chars_raw) if isinstance(chars_raw, (int, float)) else None
+        latency_raw = body.get("latency_ms")
+        latency_ms = float(latency_raw) if isinstance(latency_raw, (int, float)) else None
+        language_code = str(body.get("language_code") or "").strip()[:8]
+        detail = str(body.get("detail") or "").strip()[:300]
+
+        parts = [f"event={event}"]
+        if chars is not None:
+            parts.append(f"chars={chars}")
+        if latency_ms is not None:
+            parts.append(f"latency={latency_ms:.0f}ms")
+        if language_code:
+            parts.append(f"lang={language_code}")
+        if detail:
+            parts.append(f"detail={detail!r}")
+        logger.info("ElevenLabs STT (client): %s", " ".join(parts))
+        return web.json_response({"ok": True})
 
     async def _handle_scribe_token(self, request: web.Request) -> web.Response:
         """Issue a single-use ElevenLabs Scribe realtime token for the browser."""
