@@ -613,10 +613,12 @@ describe("deleteSession", () => {
     expect(deleteSession("nonexistent", "12345")).toBe(false);
   });
 
-  it("returns true for nonexistent session (rmSync force)", () => {
+  it("returns false when the session directory does not exist", () => {
     setupBasicConfig();
-    const result = deleteSession("testbot", "99999");
-    expect(result).toBe(true);
+    // Reflects the post-fix contract: deleteSession reports whether
+    // a real session was removed, so the /api/bots/[name] DELETE
+    // path can return 404 for ghost session ids.
+    expect(deleteSession("testbot", "99999")).toBe(false);
   });
 });
 

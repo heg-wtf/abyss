@@ -60,6 +60,7 @@ export function deleteSession(botName: string, chatId: string): boolean {
   const botPath = getBotPath(botName);
   if (!botPath) return false;
   const sessionDir = path.join(botPath, "sessions", `chat_${chatId}`);
+  if (!fs.existsSync(sessionDir)) return false;
   try {
     fs.rmSync(sessionDir, { recursive: true, force: true });
     return true;
