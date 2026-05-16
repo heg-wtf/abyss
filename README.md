@@ -39,7 +39,7 @@ reached from the phone via a Tailscale-hosted dashboard.
 
 ## Requirements
 
-- Python >= 3.11
+- Python >= 3.14
 - [Claude Code CLI](https://www.npmjs.com/package/@anthropic-ai/claude-code)
 - [uv](https://docs.astral.sh/uv/)
 
