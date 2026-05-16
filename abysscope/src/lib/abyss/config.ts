@@ -5,6 +5,7 @@ export interface GlobalConfig {
   bots: { name: string; path: string }[];
   timezone: string;
   language: string;
+  elevenlabs_api_key?: string;
   settings: {
     command_timeout: number;
     log_level: string;

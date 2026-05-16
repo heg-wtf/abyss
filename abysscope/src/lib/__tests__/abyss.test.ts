@@ -138,6 +138,19 @@ describe("updateConfig", () => {
     expect(result!.timezone).toBe("UTC");
     expect(result!.bots).toHaveLength(1);
   });
+
+  it("persists elevenlabs_api_key through round-trip", () => {
+    const config = {
+      bots: [],
+      timezone: "UTC",
+      language: "Korean",
+      elevenlabs_api_key: "sk_test_abc123",
+      settings: { command_timeout: 300, log_level: "INFO" },
+    };
+    updateConfig(config);
+    const result = getConfig();
+    expect(result!.elevenlabs_api_key).toBe("sk_test_abc123");
+  });
 });
 
 // --- Bots ---

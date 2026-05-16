@@ -44,10 +44,17 @@ interface GlobalConfig {
   bots: { name: string; path: string }[];
   timezone: string;
   language: string;
+  elevenlabs_api_key?: string;
   settings: {
     command_timeout: number;
     log_level: string;
   };
+}
+
+function maskKey(key: string | undefined): string {
+  if (!key) return "—";
+  if (key.length <= 8) return "•".repeat(key.length);
+  return `${key.slice(0, 4)}${"•".repeat(Math.max(key.length - 8, 4))}${key.slice(-4)}`;
 }
 
 export function SettingsEditor({
@@ -190,6 +197,25 @@ export function SettingsEditor({
                 }
               />
             </div>
+            <div className="space-y-2">
+              <Label>ElevenLabs API Key</Label>
+              <Input
+                type="password"
+                autoComplete="off"
+                placeholder="sk_..."
+                value={config.elevenlabs_api_key || ""}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    elevenlabs_api_key: e.target.value,
+                  })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Used for voice mode STT (Scribe v2) and TTS (Flash v2.5). Restart
+                abyss after changing.
+              </p>
+            </div>
           </div>
         ) : (
           <>
@@ -211,6 +237,12 @@ export function SettingsEditor({
               <span className="text-muted-foreground">Command Timeout</span>
               <span className="font-mono">
                 {config.settings?.command_timeout || 300}s
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">ElevenLabs API Key</span>
+              <span className="font-mono">
+                {maskKey(config.elevenlabs_api_key)}
               </span>
             </div>
           </>
