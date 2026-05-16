@@ -49,11 +49,11 @@ export default async function BotDetailPage({
         <span className="text-muted-foreground">/</span>
         <BotAvatar
           botName={name}
-          displayName={bot.display_name || bot.telegram_botname || bot.name}
+          displayName={bot.display_name || bot.name}
           size="sm"
         />
         <h1 className="text-2xl font-bold">
-          {bot.display_name || bot.telegram_botname || bot.name}
+          {bot.display_name || bot.name}
         </h1>
         <ModelBadge model={bot.model} />
         <Link href={`/bots/${name}/edit`} className="ml-auto">
@@ -83,17 +83,9 @@ export default async function BotDetailPage({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm">Telegram</CardTitle>
+                <CardTitle className="text-sm">Runtime</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Bot Name</span>
-                  <span>{bot.telegram_botname}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Username</span>
-                  <span>{bot.telegram_username}</span>
-                </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Streaming</span>
                   <span>{bot.streaming ? "On" : "Off"}</span>

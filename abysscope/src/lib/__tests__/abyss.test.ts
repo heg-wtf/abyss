@@ -71,9 +71,6 @@ function setupBasicConfig(): void {
   });
 
   writeYamlFile(path.join(testHome, "bots", "testbot", "bot.yaml"), {
-    telegram_token: "123:ABC",
-    telegram_username: "test_user",
-    telegram_botname: "testbot",
     display_name: "Test Bot",
     personality: "Helpful assistant",
     role: "assistant",
@@ -85,9 +82,6 @@ function setupBasicConfig(): void {
   });
 
   writeYamlFile(path.join(testHome, "bots", "otherbot", "bot.yaml"), {
-    telegram_token: "456:DEF",
-    telegram_username: "other_user",
-    telegram_botname: "otherbot",
     display_name: "Other Bot",
     personality: "Smart bot",
     role: "analyst",
@@ -173,7 +167,6 @@ describe("listBots", () => {
       settings: { command_timeout: 60, log_level: "INFO" },
     });
     writeYamlFile(path.join(testHome, "bots", "exists", "bot.yaml"), {
-      telegram_token: "t",
       model: "sonnet",
     });
     const bots = listBots();
@@ -1054,13 +1047,12 @@ describe("getConversationFrequency", () => {
     expect(testStats.total).toBe(1);
   });
 
-  it("uses display_name first, falling back through telegram_botname to bot name", () => {
+  it("uses display_name first, falling back to bot name when blank", () => {
     setupBasicConfig();
     const stats = getConversationFrequency();
     const testStats = stats.find((entry) => entry.botName === "testbot")!;
     expect(testStats.displayName).toBe("Test Bot");
 
-    // Override testbot's display_name to empty; expect telegram_botname fallback.
     updateBot("testbot", { display_name: "" });
     const afterEmpty = getConversationFrequency();
     expect(

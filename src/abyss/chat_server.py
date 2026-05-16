@@ -396,17 +396,9 @@ def _parse_conversation_messages(
 
 
 def _bot_display_name(bot_name: str) -> str:
-    """Resolve a bot's user-facing label.
-
-    Priority: ``display_name`` → ``telegram_botname`` → slug. The
-    ``telegram_botname`` lookup is a backward-compat shim for
-    ``bot.yaml`` files written before v2026.05.14 — those carry no
-    ``display_name`` because the original onboarding flow filled it
-    in from BotFather. Without this shim the chat list, drawer, and
-    Routines tab fall back to the raw slug (e.g. ``cclawnotifybot``).
-    """
+    """Resolve a bot's user-facing label. Priority: ``display_name`` → slug."""
     cfg = load_bot_config(bot_name) or {}
-    return cfg.get("display_name") or cfg.get("telegram_botname") or bot_name
+    return cfg.get("display_name") or bot_name
 
 
 # ---------------------------------------------------------------------------
@@ -779,9 +771,7 @@ class ChatServer:
             out.append(
                 {
                     "name": name,
-                    "display_name": (
-                        cfg.get("display_name") or cfg.get("telegram_botname") or name
-                    ),
+                    "display_name": cfg.get("display_name") or name,
                     "type": backend_cfg.get("type", "claude_code"),
                 }
             )
@@ -1285,9 +1275,7 @@ class ChatServer:
         """
         if not reply_text:
             return
-        display_name = (
-            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
-        )
+        display_name = bot_config.get("display_name") or bot_name
         preview = reply_text.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"

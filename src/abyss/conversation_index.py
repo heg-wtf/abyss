@@ -193,7 +193,7 @@ def search(
         since: Inclusive lower bound on the message date.
         until: Inclusive upper bound on the message date.
         chat_id: Restrict to a specific chat directory key
-            (``chat_<telegram_id>``) when provided.
+            (``chat_<id>``) when provided.
         role: Restrict to ``user`` / ``assistant`` (or any group sender
             string) when provided.
         limit: Maximum hits to return; values < 1 yield ``[]``.

@@ -13,7 +13,6 @@ export async function GET() {
 
     return {
       ...bot,
-      telegram_token: "***",
       cronJobCount: cronJobs.length,
       sessionCount: sessions.length,
       lastActivity: lastActivity?.toISOString() || null,

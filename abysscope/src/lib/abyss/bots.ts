@@ -5,9 +5,6 @@ import { getConfig } from "./config";
 
 export interface BotConfig {
   name: string;
-  telegram_token: string;
-  telegram_username: string;
-  telegram_botname: string;
   display_name: string;
   personality: string;
   role: string;

@@ -67,7 +67,6 @@ describe("/api/bots/[name]", () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.telegram_token).toBe("***");
     expect(body.cronJobs).toHaveLength(1);
     expect(body.memory).toBe("remember");
   });

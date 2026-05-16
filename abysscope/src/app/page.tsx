@@ -107,18 +107,18 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-3">
                       <BotAvatar
                         botName={bot.name}
-                        displayName={bot.display_name || bot.telegram_botname || bot.name}
+                        displayName={bot.display_name || bot.name}
                         size="md"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <CardTitle className="text-base truncate">
-                            {bot.display_name || bot.telegram_botname || bot.name}
+                            {bot.display_name || bot.name}
                           </CardTitle>
                           <ModelBadge model={bot.model} />
                         </div>
                         <CardDescription className="text-xs">
-                          {bot.telegram_username}
+                          {bot.name}
                         </CardDescription>
                       </div>
                     </div>

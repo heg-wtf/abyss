@@ -41,9 +41,6 @@ export function setupBasicConfig(home: string): void {
     settings: { command_timeout: 120, log_level: "INFO" },
   });
   writeYamlFile(path.join(home, "bots", "testbot", "bot.yaml"), {
-    telegram_token: "secret-token",
-    telegram_username: "test_user",
-    telegram_botname: "testbot",
     display_name: "Test Bot",
     personality: "p",
     role: "r",
