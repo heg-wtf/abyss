@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Clock,
@@ -9,9 +10,9 @@ import {
   MessageSquarePlus,
   MoreVertical,
   Pencil,
+  Settings,
   Trash2,
 } from "lucide-react";
-import { SettingsButton } from "@/components/settings-button";
 import { BotAvatar } from "@/components/bot-avatar";
 import {
   getSessionStream,
@@ -495,7 +496,14 @@ function DrawerFooter() {
         {commit && <span className="ml-1.5 opacity-70">({commit})</span>}
       </span>
       <div className="flex items-center gap-2">
-        <SettingsButton />
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          title="Settings"
+          className="flex size-9 items-center justify-center rounded-md border bg-background text-foreground transition-colors hover:bg-muted"
+        >
+          <Settings className="size-4" aria-hidden />
+        </Link>
       </div>
     </div>
   );

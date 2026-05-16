@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { SettingsButton } from "@/components/settings-button";
 import { BotAvatar } from "@/components/bot-avatar";
 
 /**
@@ -125,9 +124,6 @@ function SidebarImpl() {
             active={pathname === "/logs"}
           />
         </nav>
-        <div className="flex flex-col items-center gap-2 border-t p-2">
-          <SettingsButton compact />
-        </div>
       </aside>
     );
   }
@@ -317,7 +313,7 @@ function SidebarImpl() {
           <span>Logs</span>
         </Link>
       </nav>
-      <div className="border-t p-3 flex items-center justify-between">
+      <div className="border-t p-3">
         <span className="text-xs text-muted-foreground font-mono">
           {process.env.NEXT_PUBLIC_ABYSS_VERSION || "dev"}
           {process.env.NEXT_PUBLIC_ABYSS_COMMIT && (
@@ -326,7 +322,6 @@ function SidebarImpl() {
             </span>
           )}
         </span>
-        <SettingsButton />
       </div>
     </aside>
   );

@@ -74,7 +74,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
  * needs the hydration guard or the first paint flashes the wrong option
  * because ``theme`` is undefined on the server.
  */
-function AppearanceSection() {
+export function AppearanceSection() {
   const { theme, setTheme } = useTheme();
   const mounted = useHydrated();
   const current = mounted ? theme ?? "system" : "system";
@@ -151,7 +151,7 @@ function ThemeOption({ value, label, icon, selected, onSelect }: ThemeOptionProp
  * the app uses so visibility tracking + notification-click routing
  * stay coherent.
  */
-function NotificationsSection() {
+export function NotificationsSection() {
   const push = useWebPushContext();
   const subscribed = push.status === "subscribed";
   const unsupported = push.status === "unsupported";
