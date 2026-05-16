@@ -3,1151 +3,548 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>
-      abyss — Personal AI Assistant powered by PWA + Claude Code
-    </title>
+    <title>abyss — Your personal AI, right in your hand.</title>
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <meta
       name="description"
-      content="abyss is an open-source personal AI assistant that runs locally on your Mac. Mobile PWA via Tailscale, Claude Code, multi-provider LLM, skills, conversation search, cron, and a web dashboard."
+      content="abyss is an open-source, local-first personal AI assistant built on Claude Code. Multi-bot, file-based, with a mobile PWA and a web dashboard. Runs on your Mac."
     />
     <meta
       name="keywords"
-      content="abyss, claude code, mobile PWA, AI assistant, open source, local first, multi-bot, persona agent, skill system, conversation search, cron, web push, automation, Mac"
+      content="abyss, claude code, personal AI, local-first, multi-bot, mobile PWA, skill system, conversation search, cron, web push, automation, Mac"
     />
     <meta name="author" content="HEG" />
     <meta name="robots" content="index, follow" />
 
-    <!-- Open Graph -->
-    <meta
-      property="og:title"
-      content="abyss — Personal AI Assistant powered by PWA + Claude Code"
-    />
+    <meta property="og:title" content="abyss — Your personal AI, right in your hand." />
     <meta
       property="og:description"
-      content="Open-source, local-first AI assistant. Mobile PWA + web dashboard. Claude Code or any OpenAI-compatible provider, skills, conversation search, cron, and web push notifications."
+      content="Open-source, local-first personal AI built on Claude Code. Multi-bot. File-based. Mobile PWA + web dashboard. Your data, your machine."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://abyss.heg.wtf" />
 
-    <!-- Twitter Card -->
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="abyss — Personal AI Assistant" />
+    <meta name="twitter:title" content="abyss — Your personal AI, right in your hand." />
     <meta
       name="twitter:description"
-      content="Open-source local-first AI assistant. Mobile PWA + web dashboard. Claude Code or any OpenAI-compatible provider. Runs locally on Mac."
+      content="Open-source, local-first personal AI built on Claude Code. Multi-bot. File-based. Mobile PWA + web dashboard."
     />
 
     <link rel="canonical" href="https://abyss.heg.wtf" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=Newsreader:ital,opsz,wght@0,6..72,200..400;1,6..72,200..400&family=JetBrains+Mono:wght@400&display=swap"
       rel="stylesheet"
     />
 
     <style>
       :root {
-        --bg: #0d1117;
-        --surface: #161b22;
-        --surface-hover: #1c2333;
-        --border: #30363d;
-        --text: #e6edf3;
-        --text-secondary: #8b949e;
-        --text-tertiary: #6e7681;
-        --accent: #58a6ff;
-        --accent-hover: #79c0ff;
-        --green: #3fb950;
-        --purple: #bc8cff;
-        --orange: #d29922;
-        --pink: #f778ba;
+        --bg: #0a0a0a;
+        --fg: #f5f5f4;
+        --muted: #8b8680;
+        --hairline: #2a2a2a;
+        --gold: #c9a961;
+        --max: 1280px;
+        --gutter: 48px;
       }
 
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
+
+      html { scroll-behavior: smooth; }
 
       body {
-        font-family:
-          "Inter",
-          -apple-system,
-          sans-serif;
+        margin: 0;
         background: var(--bg);
-        color: var(--text);
-        min-height: 100vh;
+        color: var(--fg);
+        font-family: "Inter", system-ui, sans-serif;
+        font-weight: 400;
         line-height: 1.6;
         -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
       }
 
-      a {
-        color: var(--accent);
-        text-decoration: none;
-      }
-      a:hover {
-        color: var(--accent-hover);
-      }
+      a { color: inherit; text-decoration: none; }
 
       .container {
-        max-width: 960px;
+        max-width: var(--max);
         margin: 0 auto;
-        padding: 0 1.5rem;
+        padding: 0 var(--gutter);
       }
 
-      /* Header */
-      header {
-        padding: 1.5rem 0;
-        border-bottom: 1px solid var(--border);
+      .serif {
+        font-family: "Newsreader", Georgia, serif;
+        font-weight: 200;
       }
-      header .container {
+
+      .mono {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .hairline {
+        height: 1px;
+        background: var(--hairline);
+        border: 0;
+        margin: 0;
+      }
+
+      .gold-hairline {
+        width: 40px;
+        height: 1px;
+        background: var(--gold);
+        margin-top: 8px;
+      }
+
+      .link-underlined {
+        display: inline-block;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--hairline);
+        transition: border-color 0.2s, color 0.2s;
+        font-size: 14px;
+      }
+      .link-underlined:hover {
+        border-bottom-color: var(--fg);
+        color: var(--fg);
+      }
+
+      /* NAV */
+      nav.top {
+        padding: 32px 0;
+      }
+      nav.top .row {
         display: flex;
-        align-items: center;
         justify-content: space-between;
+        align-items: center;
       }
-      .header-left {
+      nav.top .wordmark {
+        font-family: "Newsreader", serif;
+        font-weight: 200;
+        font-size: 28px;
+        letter-spacing: -0.01em;
+      }
+      nav.top .links {
         display: flex;
-        align-items: center;
-        gap: 0.75rem;
-      }
-      .header-left img {
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-      }
-      .header-left span {
-        font-family: "JetBrains Mono", monospace;
-        font-weight: 600;
-        font-size: 1.1rem;
-      }
-      .version-badge {
-        font-family: "JetBrains Mono", monospace;
-        font-size: 0.7rem;
-        padding: 0.15rem 0.5rem;
-        border-radius: 12px;
-        background: rgba(88, 166, 255, 0.12);
-        color: var(--accent);
-        border: 1px solid rgba(88, 166, 255, 0.2);
-      }
-      .header-links {
-        display: flex;
-        gap: 1.25rem;
+        gap: 24px;
         align-items: center;
       }
-      .header-links a {
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-        font-weight: 500;
-        transition: color 0.2s;
-      }
-      .header-links a:hover {
-        color: var(--text);
-      }
-      .gh-star {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        padding: 0.3rem 0.75rem;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        transition: all 0.2s;
-      }
-      .gh-star:hover {
-        border-color: var(--text-secondary);
-        color: var(--text);
-      }
-      .gh-star svg {
-        width: 16px;
-        height: 16px;
-      }
+      nav.top .links a:hover { color: var(--fg); }
+      nav.top .links .sep { color: var(--hairline); }
 
-      /* Hero */
-      .hero {
-        padding: 5rem 0 4rem;
-        text-align: center;
+      /* HERO */
+      section.hero {
+        padding: 80px 0 120px;
       }
-      .hero-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.3rem 0.85rem;
-        border-radius: 20px;
-        background: rgba(63, 185, 80, 0.1);
-        border: 1px solid rgba(63, 185, 80, 0.2);
-        color: var(--green);
-        font-size: 0.78rem;
-        font-weight: 500;
-        margin-bottom: 1.5rem;
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 7fr 5fr;
+        gap: 64px;
+        align-items: start;
       }
       .hero h1 {
-        font-size: clamp(2rem, 5vw, 3rem);
-        font-weight: 600;
-        line-height: 1.2;
-        margin-bottom: 1rem;
+        font-family: "Newsreader", serif;
+        font-weight: 200;
+        font-size: clamp(56px, 7vw, 96px);
+        line-height: 0.95;
         letter-spacing: -0.02em;
+        margin: 40px 0 32px;
       }
-      .hero h1 .highlight {
-        color: var(--accent);
-      }
-      .hero p {
-        font-size: 1.15rem;
-        color: var(--text-secondary);
-        max-width: 580px;
-        margin: 0 auto 2.5rem;
+      .hero h1 i {
+        font-style: italic;
         font-weight: 300;
-        line-height: 1.7;
+      }
+      .hero p.lede {
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.65;
+        max-width: 52ch;
+        margin: 0 0 40px;
+      }
+      .hero .cta {
+        display: flex;
+        gap: 32px;
       }
 
-      /* Install box */
-      .install-box {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.75rem;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 0.75rem 1.25rem;
+      .install-card {
+        padding-top: 64px;
+      }
+      .install-card .label {
+        margin-bottom: 16px;
+      }
+      .install-card .cmd {
         font-family: "JetBrains Mono", monospace;
-        font-size: 0.85rem;
+        font-size: 13px;
+        line-height: 1.6;
+        color: var(--fg);
+        padding: 20px 0;
         cursor: pointer;
-        transition: border-color 0.2s;
         position: relative;
+        word-break: break-all;
       }
-      .install-box:hover {
-        border-color: var(--accent);
+      .install-card .cmd .prompt {
+        color: var(--muted);
+        margin-right: 8px;
       }
-      .install-box .prompt {
-        color: var(--green);
-        user-select: none;
-      }
-      .install-box .cmd {
-        color: var(--text);
-      }
-      .install-box .copy-icon {
-        color: var(--text-tertiary);
-        transition: color 0.2s;
-      }
-      .install-box:hover .copy-icon {
-        color: var(--text-secondary);
-      }
-      .install-box .copied-toast {
-        position: absolute;
-        top: -2rem;
-        left: 50%;
-        transform: translateX(-50%);
-        background: var(--green);
-        color: var(--bg);
-        font-size: 0.7rem;
-        padding: 0.2rem 0.5rem;
-        border-radius: 4px;
+      .install-card .cmd .copy-hint {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-left: 12px;
         opacity: 0;
         transition: opacity 0.2s;
-        pointer-events: none;
       }
-      .install-box .copied-toast.show {
+      .install-card .cmd:hover .copy-hint { opacity: 1; }
+      .install-card .cmd.copied .copy-hint {
         opacity: 1;
+        color: var(--gold);
+      }
+      .install-card .meta {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        color: var(--muted);
+        opacity: 0.7;
+        margin-top: 8px;
       }
 
-      /* Diagram Visual */
-      .diagram-visual {
-        margin: 4rem auto 0;
-        max-width: 640px;
+      /* SECTION DIVIDER */
+      .divider-section {
+        margin: 0 0 96px;
+      }
+
+      /* ARCHITECTURE */
+      section.architecture {
+        padding-bottom: 160px;
+      }
+      .arch-grid {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr auto 1fr;
+        gap: 24px;
+        align-items: stretch;
+      }
+      .arch-box {
+        border: 1px solid var(--hairline);
+        border-radius: 2px;
+        padding: 28px 28px 32px;
+        min-height: 220px;
         display: flex;
         flex-direction: column;
-        align-items: center;
-        gap: 0;
+        gap: 20px;
       }
-      .diag-row {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        width: 100%;
-        justify-content: center;
-      }
-      .diag-arrow {
-        color: var(--text-tertiary);
-        font-size: 1.2rem;
-        flex-shrink: 0;
-      }
-      .diag-box {
-        border-radius: 10px;
-        padding: 1.25rem 1.5rem;
-        font-size: 0.85rem;
-      }
-      .diag-pwa {
-        background: rgba(88, 166, 255, 0.06);
-        border: 1px solid rgba(88, 166, 255, 0.2);
-        min-width: 140px;
-      }
-      .diag-abyss-group {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-      }
-      .diag-abyss {
-        background: rgba(63, 185, 80, 0.06);
-        border: 1px solid rgba(63, 185, 80, 0.2);
-        width: 100%;
-      }
-      .diag-dashboard {
-        background: rgba(247, 120, 186, 0.06);
-        border: 1px solid rgba(247, 120, 186, 0.2);
-        text-align: center;
-      }
-      .diag-label {
-        font-family: "JetBrains Mono", monospace;
-        font-weight: 600;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-secondary);
-        margin-bottom: 0.75rem;
-      }
-      .diag-pwa .diag-label {
-        color: var(--accent);
-      }
-      .diag-abyss .diag-label {
-        color: var(--green);
-      }
-      .diag-dashboard .diag-label {
-        color: var(--pink);
-      }
-      .diag-item {
-        color: var(--text-secondary);
-        font-size: 0.82rem;
+      .arch-box ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        color: var(--muted);
+        font-size: 14px;
         line-height: 1.9;
       }
-      .diag-inner {
-        margin-top: 0.75rem;
-        padding: 0.6rem 0.85rem;
-        border-radius: 6px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px dashed var(--border);
-        font-size: 0.8rem;
-        line-height: 1.7;
-      }
-      .diag-connector {
-        color: var(--text-tertiary);
-        font-family: "JetBrains Mono", monospace;
-        font-size: 1rem;
-        line-height: 1.8;
-        text-align: center;
-      }
-      .c-purple {
-        color: var(--purple);
-      }
-      .c-orange {
-        color: var(--orange);
-      }
-      .c-green {
-        color: var(--green);
-      }
-      @media (max-width: 640px) {
-        .diag-row {
-          flex-direction: column;
-          gap: 0.5rem;
-        }
-        .diag-arrow {
-          transform: rotate(90deg);
-        }
-        .diag-pwa {
-          min-width: unset;
-          width: 100%;
-        }
-      }
-
-      /* Features */
-      .features {
-        padding: 5rem 0;
-      }
-      .features h2 {
-        font-size: 1.6rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-        text-align: center;
-      }
-      .features .subtitle {
-        color: var(--text-secondary);
-        text-align: center;
-        margin-bottom: 3rem;
-        font-weight: 300;
-      }
-      .feature-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 1.25rem;
-      }
-      .feature-card {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 1.5rem;
-        transition: border-color 0.2s;
-      }
-      .feature-card:hover {
-        border-color: var(--text-tertiary);
-      }
-      .feature-card .icon {
-        font-size: 1.5rem;
-        margin-bottom: 0.75rem;
-      }
-      .feature-card h3 {
-        font-size: 0.95rem;
-        font-weight: 600;
-        margin-bottom: 0.4rem;
-      }
-      .feature-card p {
-        font-size: 0.85rem;
-        color: var(--text-secondary);
-        line-height: 1.55;
-      }
-
-      /* Skills */
-      .skills {
-        padding: 0 0 5rem;
-      }
-      .skills h2 {
-        font-size: 1.6rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-        text-align: center;
-      }
-      .skills .subtitle {
-        color: var(--text-secondary);
-        text-align: center;
-        margin-bottom: 2.5rem;
-        font-weight: 300;
-      }
-      .skill-list {
+      .arch-arrow {
         display: flex;
-        flex-wrap: wrap;
-        gap: 0.6rem;
-        justify-content: center;
-        max-width: 700px;
-        margin: 0 auto;
-      }
-      .skill-tag {
-        display: inline-flex;
         align-items: center;
-        gap: 0.35rem;
-        padding: 0.4rem 0.85rem;
-        border-radius: 20px;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-        transition: all 0.2s;
-      }
-      .skill-tag:hover {
-        border-color: var(--accent);
-        color: var(--text);
-      }
-      .skill-tag .emoji {
-        font-size: 0.9rem;
-      }
-
-      /* CLI Preview */
-      .cli-section {
-        padding: 0 0 5rem;
-      }
-      .cli-section h2 {
-        font-size: 1.6rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-        text-align: center;
-      }
-      .cli-section .subtitle {
-        color: var(--text-secondary);
-        text-align: center;
-        margin-bottom: 2.5rem;
-        font-weight: 300;
-      }
-      .cli-block {
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 1.5rem 2rem;
-        font-family: "JetBrains Mono", monospace;
-        font-size: 0.8rem;
-        line-height: 2;
-        overflow-x: auto;
-      }
-      .cli-block pre {
-        margin: 0;
-        font-family: inherit;
-        font-size: inherit;
-        line-height: inherit;
-      }
-      .cli-block .comment {
-        color: var(--text-tertiary);
-      }
-      .cli-block .prompt {
-        color: var(--green);
-      }
-      .cli-block .flag {
-        color: var(--orange);
-      }
-      .cli-block .cmd {
-        color: var(--accent);
-      }
-
-      /* What's New */
-      .whats-new {
-        padding: 0 0 5rem;
-      }
-      .whats-new h2 {
-        font-size: 1.6rem;
-        font-weight: 600;
-        margin-bottom: 2rem;
-        text-align: center;
-      }
-      .changelog {
-        max-width: 600px;
-        margin: 0 auto;
-      }
-      .changelog-item {
-        display: flex;
-        gap: 1rem;
-        padding: 1rem 0;
-        border-bottom: 1px solid var(--border);
-      }
-      .changelog-item:last-child {
-        border-bottom: none;
-      }
-      .changelog-ver {
-        font-family: "JetBrains Mono", monospace;
-        font-size: 0.78rem;
-        color: var(--accent);
-        white-space: nowrap;
-        min-width: 90px;
-      }
-      .changelog-desc {
-        font-size: 0.88rem;
-        color: var(--text-secondary);
-      }
-      .changelog-desc strong {
-        color: var(--text);
-        font-weight: 500;
-      }
-
-      /* Footer */
-      footer {
-        padding: 2rem 0;
-        border-top: 1px solid var(--border);
-        text-align: center;
-      }
-      .footer-links {
-        display: flex;
         justify-content: center;
-        gap: 1.5rem;
-        margin-bottom: 1rem;
-      }
-      .footer-links a {
-        color: var(--text-secondary);
-        font-size: 0.85rem;
-      }
-      .footer-copy {
-        font-size: 0.78rem;
-        color: var(--text-tertiary);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px;
+        color: var(--muted);
+        min-width: 24px;
       }
 
-      @media (max-width: 640px) {
-        .hero {
-          padding: 3rem 0 2.5rem;
+      /* CAPABILITIES */
+      section.capabilities {
+        padding: 160px 0;
+        border-top: 1px solid var(--hairline);
+      }
+      .cap-header {
+        margin-bottom: 80px;
+      }
+      .cap-header h2 {
+        font-family: "Newsreader", serif;
+        font-weight: 200;
+        font-size: clamp(40px, 5vw, 64px);
+        line-height: 1.1;
+        letter-spacing: -0.01em;
+        margin: 32px 0 0;
+      }
+      .cap-header h2 i { font-style: italic; }
+
+      .cap-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 48px 48px;
+      }
+      .cap-card {
+        border-top: 1px solid var(--hairline);
+        padding-top: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .cap-card .num {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: var(--muted);
+      }
+      .cap-card h3 {
+        font-family: "Newsreader", serif;
+        font-weight: 300;
+        font-size: 22px;
+        line-height: 1.2;
+        margin: 0;
+        color: var(--fg);
+      }
+      .cap-card p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.55;
+        color: var(--muted);
+      }
+      .cap-card.empty {
+        border-top: 0;
+      }
+
+      .cap-coda {
+        margin-top: 96px;
+        padding-top: 48px;
+        border-top: 1px solid var(--hairline);
+        text-align: center;
+        font-family: "Newsreader", serif;
+        font-style: italic;
+        font-weight: 300;
+        font-size: 18px;
+        color: var(--muted);
+      }
+
+      /* FOOTER */
+      footer {
+        padding: 56px 0 64px;
+        border-top: 1px solid var(--hairline);
+      }
+      footer .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 24px;
+        flex-wrap: wrap;
+      }
+      footer .mono a:hover { color: var(--fg); }
+
+      /* RESPONSIVE */
+      @media (max-width: 880px) {
+        :root { --gutter: 24px; }
+        .hero-grid {
+          grid-template-columns: 1fr;
+          gap: 48px;
         }
-        .diagram {
-          font-size: 0.65rem;
-          padding: 1.25rem;
+        .install-card { padding-top: 0; }
+        .arch-grid {
+          grid-template-columns: 1fr;
         }
-        .header-links a:not(.gh-star) {
-          display: none;
+        .arch-arrow { display: none; }
+        .cap-grid {
+          grid-template-columns: 1fr;
+          gap: 32px;
         }
+        .cap-card.empty { display: none; }
+        nav.top .links { gap: 16px; }
+        section.hero { padding: 48px 0 80px; }
+        section.capabilities { padding: 96px 0; }
+        section.architecture { padding-bottom: 96px; }
+        .divider-section { margin-bottom: 56px; }
       }
     </style>
-
-    <!-- JSON-LD Structured Data -->
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "abyss",
-        "description": "Personal AI assistant powered by PWA + Claude Code. Mobile PWA via Tailscale, multi-provider LLM, skills, cron, conversation search, local-first.",
-        "applicationCategory": "DeveloperApplication",
-        "operatingSystem": "macOS",
-        "url": "https://abyss.heg.wtf",
-        "downloadUrl": "https://github.com/heg-wtf/abyss",
-        "softwareVersion": "2026.05.14",
-        "author": {
-          "@type": "Organization",
-          "name": "HEG",
-          "url": "https://heg.wtf"
-        },
-        "license": "https://opensource.org/licenses/MIT",
-        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
-      }
-    </script>
   </head>
   <body>
-    <header>
-      <div class="container">
-        <div class="header-left">
-          <img src="logo-square.png" alt="abyss" />
-          <span>abyss</span>
-          <span class="version-badge">v2026.05.15</span>
-        </div>
-        <div class="header-links">
-          <a href="#features">Features</a>
-          <a href="#skills">Skills</a>
-          <a
-            href="https://github.com/heg-wtf/abyss"
-            target="_blank"
-            rel="noopener"
-            class="gh-star"
-          >
-            <svg viewBox="0 0 16 16" fill="currentColor">
-              <path
-                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-              />
-            </svg>
-            GitHub
-          </a>
-        </div>
-      </div>
-    </header>
-
-    <section class="hero">
-      <div class="container">
-        <div class="hero-badge">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-            <circle cx="8" cy="8" r="4" />
-          </svg>
-          Open Source &middot; MIT License
-        </div>
-        <h1>
-          Your personal AI,<br />right in your
-          <span class="highlight">PWA</span>
-        </h1>
-        <p>
-          abyss is a local-first, multi-bot AI assistant<br />powered by Claude
-          Code. <br /><br />
-          No server. No database. No cloud lock-in.
-          <br />
-          Works with Claude subscription — or any OpenAI-compatible provider.
-        </p>
-
-        <div class="install-box" onclick="copyInstall()" id="installBox">
-          <span class="copied-toast" id="copiedToast">Copied!</span>
-          <span class="prompt">$</span>
-          <span class="cmd"
-            >curl -sSL
-            https://raw.githubusercontent.com/heg-wtf/abyss/main/install.sh |
-            bash</span
-          >
-          <svg
-            class="copy-icon"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <rect x="9" y="9" width="13" height="13" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-        </div>
-
-        <div class="diagram-visual">
-          <div class="diag-row">
-            <div class="diag-box diag-pwa">
-              <div class="diag-label">Mobile PWA</div>
-              <div class="diag-item">💬 Chat</div>
-              <div class="diag-item">📎 Files</div>
-              <div class="diag-item">🔔 Web Push</div>
-              <div class="diag-item">📋 Routines</div>
-            </div>
-            <div class="diag-arrow">⟷</div>
-            <div class="diag-abyss-group">
-              <div class="diag-box diag-abyss">
-                <div class="diag-label">abyss</div>
-                <div class="diag-item">🤖 Multi-Bot Manager</div>
-                <div class="diag-item">📁 File-Based Sessions</div>
-                <div class="diag-item">🧩 Skill System</div>
-                <div class="diag-item">⏰ Cron Automation</div>
-                <div class="diag-item">💓 Heartbeat</div>
-                <div class="diag-inner">
-                  <span class="c-purple">Claude Code (SDK Pool)</span><br />
-                  <span class="c-orange">Persistent Sessions</span><br />
-                  <span class="c-green">Multi-Provider LLM</span>
-                </div>
-              </div>
-              <div class="diag-connector">│</div>
-              <div class="diag-box diag-dashboard">
-                <div class="diag-label">Abysscope Dashboard</div>
-                <div class="diag-item">🖥 Web UI (port 3847)</div>
-              </div>
-            </div>
+    <div class="container">
+      <nav class="top">
+        <div class="row">
+          <a href="/" class="wordmark">abyss</a>
+          <div class="mono links">
+            <a href="https://github.com/heg-wtf/abyss/blob/main/README.md">DOCS</a>
+            <span class="sep">·</span>
+            <a href="https://github.com/heg-wtf/abyss">GITHUB</a>
+            <span class="sep">·</span>
+            <a href="https://github.com/heg-wtf/abyss/releases">RELEASES</a>
           </div>
         </div>
-      </div>
-    </section>
+      </nav>
+      <hr class="hairline" />
+    </div>
 
-    <section class="features" id="features">
+    <div class="container">
+      <section class="hero">
+        <div class="hero-grid">
+          <div>
+            <div class="mono">01 — PERSONAL AI · 2026</div>
+            <div class="gold-hairline"></div>
+            <h1>
+              Your <i>personal</i> AI,<br />
+              right in your hand.
+            </h1>
+            <p class="lede">
+              Local-first. Multi-bot. Built on Claude Code. No server, no
+              database, no cloud lock-in.
+            </p>
+            <div class="cta">
+              <a href="#install" class="link-underlined">Install →</a>
+              <a
+                href="https://github.com/heg-wtf/abyss/blob/main/README.md"
+                class="link-underlined"
+                >Read the docs →</a
+              >
+            </div>
+          </div>
+
+          <div class="install-card" id="install">
+            <div class="mono label">00 / INSTALL</div>
+            <hr class="hairline" />
+            <div class="cmd" id="installBox" onclick="copyInstall()">
+              <span class="prompt">$</span>curl -sSL
+              https://raw.githubusercontent.com/heg-wtf/abyss/main/install.sh |
+              bash
+              <span class="copy-hint" id="copyHint">Click to copy</span>
+            </div>
+            <hr class="hairline" />
+            <div class="meta">macOS · Linux · MIT</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="container">
+      <hr class="hairline divider-section" />
+
+      <section class="architecture">
+        <div class="arch-grid">
+          <div class="arch-box">
+            <div class="mono">MOBILE PWA</div>
+            <ul>
+              <li>chat</li>
+              <li>files</li>
+              <li>push</li>
+              <li>routines</li>
+            </ul>
+          </div>
+          <div class="arch-arrow">⟷</div>
+          <div class="arch-box">
+            <div class="mono">ABYSS CORE</div>
+            <ul>
+              <li>multi-bot manager</li>
+              <li>file sessions</li>
+              <li>skills</li>
+              <li>cron</li>
+              <li>heartbeat</li>
+            </ul>
+          </div>
+          <div class="arch-arrow">⟷</div>
+          <div class="arch-box">
+            <div class="mono">DASHBOARD</div>
+            <ul>
+              <li>web ui</li>
+              <li>localhost:3847</li>
+              <li>sessions</li>
+              <li>memory</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <section class="capabilities">
       <div class="container">
-        <h2>Built for power users</h2>
-        <p class="subtitle">Everything runs locally. No cloud dependency.</p>
-        <div class="feature-grid">
-          <div class="feature-card">
-            <div class="icon">🏠</div>
+        <div class="cap-header">
+          <div class="mono">02 — CAPABILITIES</div>
+          <div class="gold-hairline"></div>
+          <h2>Built for <i>power</i> users.</h2>
+        </div>
+
+        <div class="cap-grid">
+          <div class="cap-card">
+            <div class="num">01</div>
             <h3>Local First</h3>
-            <p>
-              No server, no cloud lock-in. Access via mobile PWA over Tailscale.
-              Your data stays on your Mac.
-            </p>
+            <p>Runs on your Mac. No server, no cloud, no telemetry.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">🤖</div>
-            <h3>Multi-Bot System</h3>
-            <p>
-              Run multiple specialized bots simultaneously. Each with its own
-              personality, skills, model, and memory.
-            </p>
+          <div class="cap-card">
+            <div class="num">02</div>
+            <h3>Multi-Bot</h3>
+            <p>Independent personalities, memories, schedules.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">🧩</div>
+          <div class="cap-card">
+            <div class="num">03</div>
             <h3>Skill Plugins</h3>
-            <p>
-              18+ built-in skills. Create custom ones with markdown or integrate
-              MCP servers, CLIs, and browser tools.
-            </p>
+            <p>Compose Claude with reusable Markdown skills.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">⏰</div>
+          <div class="cap-card">
+            <div class="num">04</div>
             <h3>Cron Automation</h3>
-            <p>
-              Schedule recurring tasks with natural language. Morning briefings,
-              daily reports, periodic checks.
-            </p>
+            <p>Natural-language scheduling with per-job timezone.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">👥</div>
+          <div class="cap-card">
+            <div class="num">05</div>
             <h3>Group Collaboration</h3>
-            <p>
-              Multi-bot orchestration with shared workspace — coming back on
-              top of the mobile PWA.
-            </p>
+            <p>Multiple bots in one shared workspace.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">🖥</div>
+          <div class="cap-card">
+            <div class="num">06</div>
             <h3>Abysscope Dashboard</h3>
-            <p>
-              Web UI with frequency heatmap, cron editor, skill CRUD,
-              session/conversation management, markdown memory viewer, and log
-              tools.
-            </p>
+            <p>Web UI for sessions, memory, settings.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">⚡</div>
+          <div class="cap-card">
+            <div class="num">07</div>
             <h3>SDK Client Pool</h3>
-            <p>
-              Persistent Claude sessions via Python Agent SDK. Fast responses
-              with session reuse, no cold starts.
-            </p>
+            <p>Persistent Claude sessions, no respawn lag.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">💓</div>
+          <div class="cap-card">
+            <div class="num">08</div>
             <h3>Heartbeat</h3>
-            <p>
-              Periodic situation awareness. Bots proactively check tasks,
-              reminders, and deliver updates autonomously.
-            </p>
+            <p>Periodic situation awareness, autonomous nudges.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">📁</div>
-            <h3>File-Based Architecture</h3>
-            <p>
-              No database. Sessions are directories. Conversations are markdown.
-              Everything is inspectable and portable.
-            </p>
+          <div class="cap-card">
+            <div class="num">09</div>
+            <h3>File-Based</h3>
+            <p>Everything is plain text. Inspect, edit, version.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">🔍</div>
+          <div class="cap-card">
+            <div class="num">10</div>
             <h3>Conversation Search</h3>
-            <p>
-              Full-text search across all sessions via SQLite FTS5.
-              Auto-injected as MCP tool. Rebuild anytime with
-              <code style="font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">abyss reindex</code>.
-            </p>
+            <p>SQLite FTS5 over every chat log.</p>
           </div>
-          <div class="feature-card">
-            <div class="icon">🎙️</div>
+          <div class="cap-card">
+            <div class="num">11</div>
             <h3>Voice Chat</h3>
-            <p>
-              Speak to your bot in the dashboard. ElevenLabs Scribe v2 STT,
-              animated Orb visualization, TTS reply — full hands-free loop.
-            </p>
+            <p>ElevenLabs Scribe + TTS streaming, hands-free.</p>
           </div>
+          <div class="cap-card empty"></div>
         </div>
-      </div>
-    </section>
 
-    <section class="skills" id="skills">
-      <div class="container">
-        <h2>17+ Built-in Skills</h2>
-        <p class="subtitle">
-          Install with
-          <code
-            style="
-              background: var(--surface);
-              padding: 0.15rem 0.4rem;
-              border-radius: 4px;
-              font-family: &quot;JetBrains Mono&quot;, monospace;
-              font-size: 0.8rem;
-            "
-            >abyss skills install &lt;name&gt;</code
-          >
-        </p>
-        <div class="skill-list">
-          <span class="skill-tag"><span class="emoji">💬</span> iMessage</span>
-          <span class="skill-tag"><span class="emoji">⏰</span> Reminders</span>
-          <span class="skill-tag"
-            ><span class="emoji">🖼</span> Image Processing</span
-          >
-          <span class="skill-tag"><span class="emoji">🗄</span> Supabase</span>
-          <span class="skill-tag"><span class="emoji">📧</span> Gmail</span>
-          <span class="skill-tag"
-            ><span class="emoji">📅</span> Google Calendar</span
-          >
-          <span class="skill-tag"
-            ><span class="emoji">🐦</span> Twitter / X</span
-          >
-          <span class="skill-tag"><span class="emoji">📋</span> Jira</span>
-          <span class="skill-tag"><span class="emoji">🌐</span> Translate</span>
-          <span class="skill-tag"
-            ><span class="emoji">🧠</span> QMD Knowledge</span
-          >
-          <span class="skill-tag"
-            ><span class="emoji">🔍</span> Conversation Search</span
-          >
-          <span class="skill-tag"
-            ><span class="emoji">📦</span> GitHub Skill Import</span
-          >
-        </div>
-      </div>
-    </section>
-
-    <section class="cli-section">
-      <div class="container">
-        <h2>CLI First</h2>
-        <p class="subtitle">
-          Everything from onboarding to deployment, in the terminal.
-        </p>
-        <div class="cli-block">
-          <pre>
-<span class="comment"># Setup</span>
-<span class="prompt">$</span> <span class="cmd">abyss</span> init
-<span class="prompt">$</span> <span class="cmd">abyss</span> bot add
-
-<span class="comment"># Run — API + dashboard + schedulers in one</span>
-<span class="prompt">$</span> <span class="cmd">abyss</span> start
-<span class="prompt">$</span> <span class="cmd">abyss</span> status
-
-<span class="comment"># Skills</span>
-<span class="prompt">$</span> <span class="cmd">abyss</span> skills install supabase
-<span class="prompt">$</span> <span class="cmd">abyss</span> skills install reminders
-
-<span class="comment"># Automation</span>
-<span class="prompt">$</span> <span class="cmd">abyss</span> cron add my-bot
-<span class="prompt">$</span> <span class="cmd">abyss</span> heartbeat enable my-bot</pre>
-        </div>
-      </div>
-    </section>
-
-    <section class="whats-new" id="changelog">
-      <div class="container">
-        <h2>What's New</h2>
-        <div class="changelog">
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.05.15</span>
-            <span class="changelog-desc"
-              ><strong>One process, fewer dials</strong> — `abyss start` now
-              boots the API server, the dashboard subprocess, and the per-bot
-              schedulers as a single Rich `BuildProgress` checklist; the
-              standalone `abyss dashboard` subcommand and the `--daemon` flag
-              are retired (foreground is the default so the boot
-              checklist is visible; `--daemon` for background). The OpenAI-compatible backends
-              (`openai_compat` / `openrouter` / `minimax`) are removed too —
-              abyss is a Claude Code persona agent toolkit, the simpler
-              surface is the point. Mobile chat picks up
-              <strong>single-slot message queueing</strong> (Send while a reply
-              is still streaming → it fires the moment the turn finishes), a
-              cleaner three-dot streaming indicator with an inline ✕ cancel,
-              and a new <strong>Settings dialog</strong> (gear icon in the
-              sidebar) hosting Light / Dark / System theme — first of more
-              quick toggles to come. Logo / favicon / PWA icon pipeline now
-              flows through a square 600 × 600 source so home-screen tiles
-              and apple-touch render without letterboxing.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.05.14</span>
-            <span class="changelog-desc"
-              ><strong>Mobile PWA as primary surface</strong> — Bot messaging and
-              group collaboration removed. The mobile PWA (
-              <code style="font-family: 'JetBrains Mono', monospace;">/mobile</code>
-              on the abysscope dashboard) is now the primary user-facing
-              interface, accessible over Tailscale. Cron and heartbeat results
-              land in the <strong>Routines</strong> tab and are delivered via
-              <strong>Web Push</strong> notifications. Dashboard chat
-              (abysscope) continues to work for desktop. Multi-bot group
-              collaboration will return on top of the PWA in a future
-              release.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.05.13</span>
-            <span class="changelog-desc"
-              ><strong>Built-in skills slimmed</strong> — bundled set now
-              covers universal tooling only (email, calendar, OS integrations,
-              generic utilities). Removed 6 Korea-specific domain skills;
-              author your own or import via
-              <code style="font-family: 'JetBrains Mono', monospace;">abyss skills import &lt;github-url&gt;</code>.
-              <strong>Skill Authoring Guide</strong> —
-              <code style="font-family: 'JetBrains Mono', monospace;">docs/SKILL_AUTHORING.md</code>
-              walks through directory layout,
-              <code style="font-family: 'JetBrains Mono', monospace;">skill.yaml</code>
-              fields, GitHub sharing, and the untrusted-skill security guard.
-              <strong>Per-session chat stream isolation</strong> — dashboard
-              chat SSE streams no longer cross tokens between concurrent bot
-              sessions. <strong>Repo cleanup</strong> — completed plan docs
-              dropped; dashboard's built-in skill set now correctly includes
-              <code style="font-family: 'JetBrains Mono', monospace;">code_review</code>
-              and
-              <code style="font-family: 'JetBrains Mono', monospace;">conversation_search</code>.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.05.08</span>
-            <span class="changelog-desc"
-              ><strong>Streaming: typing indicator</strong> — shows
-              <em>typing…</em> immediately on message receipt, cancelled when
-              the first draft chunk arrives (covers Claude cold-start gap).
-              <strong>Tool metrics rotation fix</strong> — <code style="font-family: 'JetBrains Mono', monospace;">_rotate()</code>
-              now uses the event timestamp instead of wall clock, preventing
-              test-mode events from being pruned immediately.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.05.05</span>
-            <span class="changelog-desc"
-              ><strong>Voice Chat</strong> — mic button in the dashboard chat
-              opens a right sidebar with an animated ElevenLabs Orb.
-              <strong>ElevenLabs Scribe v2</strong> WebSocket STT transcribes
-              speech in real time; transcript is sent to the bot with a
-              spoken-style instruction so replies sound natural.
-              <strong>TTS streaming</strong> plays the bot reply via Web Audio
-              API. Orb color is theme-aware (white on dark, black on light).
-              Auto-restart loop keeps the mic hot after each reply.
-              Messenger-style timestamps on all chat messages.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.05.03</span>
-            <span class="changelog-desc"
-              ><strong>Dashboard Chat</strong> — top-level
-              <code style="font-family: 'JetBrains Mono', monospace;">/chat</code>
-              page with bot picker, streaming SSE responses, and per-session
-              avatars. Sessions live in
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >chat_web_*</code
-              >
-              under the bot's workspace.
-              <strong>Image + PDF attachments</strong> via paperclip / drag &
-              drop / clipboard paste — files land in
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >workspace/uploads/</code
-              >
-              and Claude opens them through its
-              <code style="font-family: 'JetBrains Mono', monospace;">Read</code>
-              tool. Magic-byte MIME sniff, per-session upload cap,
-              path-traversal guard. New
-              <strong>build progress UI</strong> for
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >abyss restart</code
-              >: replaces the raw
-              <code style="font-family: 'JetBrains Mono', monospace;">next build</code>
-              firehose with a 4-step Rich checklist, captures the build log
-              under
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >~/.abyss/logs/dashboard-build-*.log</code
-              >, surfaces failures with the last 30 lines.
-              <strong>Collapsible sidebar</strong> with persisted state.
-              Test coverage 69 → 71% (+52 cases).</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.04.30</span>
-            <span class="changelog-desc"
-              ><strong>Claude Code 2.1.x Integration</strong> — six-phase
-              hardening + telemetry roll-up. 1-hour prompt cache, forked
-              subagents in non-interactive mode, MCP non-blocking startup +
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >alwaysLoad</code
-              >, hidden cwd. PreCompact hook drives MEMORY/HEARTBEAT compaction
-              from Claude Code's own pressure signal. PostToolUse +
-              PostToolUseFailure hooks record per-tool latency to JSONL — new
-              <strong>Metrics</strong> tab in abysscope shows p50/p95/p99 per
-              tool. Skills can declare conditional hooks via
-              <code style="font-family: 'JetBrains Mono', monospace;">if</code>
-              field. GitHub-imported skills run with
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >disableSkillShellExecution</code
-              >; cloud-metadata endpoints blocked by default via
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >sandbox.network.deniedDomains</code
-              >. New
-              <code style="font-family: 'JetBrains Mono', monospace;"
-                >run_ultrareview</code
-              >
-              wrapper + <strong>code_review</strong> builtin skill, per-bot
-              <code style="font-family: 'JetBrains Mono', monospace;">effort</code>
-              level. Avatar fetch resilience (try/catch + stale cache fallback +
-              IPv4 first).</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.04.29</span>
-            <span class="changelog-desc"
-              ><strong>Frequency Heatmap</strong> — GitHub contribution
-              graph-style activity heatmap on the dashboard. Shows daily
-              conversation count across all bots with per-bot tooltip
-              breakdown. Bot profile photos. Cleaner UI (removed stat
-              cards). Dashboard memory ~200 MB (was 4 GB).</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.04.24</span>
-            <span class="changelog-desc"
-              ><strong>Multi-Provider LLM</strong> — openai_compat backend for
-              MiniMax, OpenRouter, or any OpenAI-compatible endpoint. Per-bot
-              opt-in via <code style="font-family: 'JetBrains Mono', monospace;">bot.yaml</code>.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.04.26</span>
-            <span class="changelog-desc"
-              ><strong>Abysscope Search</strong> — Full-text conversation search
-              tab in the web dashboard, powered by SQLite FTS5.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.04.25</span>
-            <span class="changelog-desc"
-              ><strong>Conversation Search</strong> — Cross-session FTS5 search
-              auto-injected as <code style="font-family: 'JetBrains Mono', monospace;">search_conversations</code>
-              MCP tool. Rebuild index with
-              <code style="font-family: 'JetBrains Mono', monospace;">abyss reindex</code>.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.25</span>
-            <span class="changelog-desc"
-              ><strong>Bot Isolation</strong> — Each bot's CLAUDE.md now
-              explicitly ignores parent configs (~/.claude/CLAUDE.md). Fixed
-              dashboard PID OverflowError crash.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.21</span>
-            <span class="changelog-desc"
-              ><strong>Abysscope v2</strong> — Cron editor (recurring/one-shot),
-              custom skill CRUD, session &amp; conversation delete, markdown
-              memory viewer, <code>/skills</code> bot-scoped view.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.20</span>
-            <span class="changelog-desc"
-              ><strong>Cron Edit</strong> — Edit cron job messages via CLI
-              (<code>abyss cron edit</code> with <code>$EDITOR</code>) or
-              mobile + dashboard (<code>/cron edit</code>). Expanded cron
-              list preview to 80 chars.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.18</span>
-            <span class="changelog-desc"
-              ><strong>GitHub Skill Import</strong> — Import skills directly
-              from GitHub repos via CLI (<code>abyss skills import</code>) or
-              via abysscope dashboard / mobile chat. Compatible with skills.sh
-              packages.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.16</span>
-            <span class="changelog-desc"
-              ><strong>SDK Client Pool</strong> — Persistent Claude sessions via
-              Python Agent SDK. Removed Node.js bridge dependency.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.14</span>
-            <span class="changelog-desc"
-              ><strong>Group Collaboration</strong> — Multi-bot group chat with
-              shared conversations, workspace, and orchestrator routing.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.12</span>
-            <span class="changelog-desc"
-              ><strong>Abysscope Dashboard</strong> — Web UI for managing bots,
-              skills, cron, sessions, memory, and logs.</span
-            >
-          </div>
-          <div class="changelog-item">
-            <span class="changelog-ver">v2026.03.11</span>
-            <span class="changelog-desc"
-              ><strong>Dashboard CLI</strong> — Added start/stop/restart/status
-              subcommands for Abysscope management.</span
-            >
-          </div>
+        <div class="cap-coda">
+          Seventeen built-in skills. One CLI. Your data, your machine.
         </div>
       </div>
     </section>
 
     <footer>
       <div class="container">
-        <div class="footer-links">
-          <a
-            href="https://github.com/heg-wtf/abyss"
-            target="_blank"
-            rel="noopener"
-            >GitHub</a
-          >
-          <a
-            href="https://github.com/heg-wtf/abyss/issues"
-            target="_blank"
-            rel="noopener"
-            >Issues</a
-          >
-          <a
-            href="https://github.com/heg-wtf/abyss/blob/main/README.md"
-            target="_blank"
-            rel="noopener"
-            >Docs</a
-          >
-          <a href="https://heg.wtf" target="_blank" rel="noopener">HEG</a>
+        <div class="row">
+          <div class="serif" style="font-size: 16px; color: var(--muted);">
+            abyss &middot; <span style="font-style: italic;">made by HEG</span>
+          </div>
+          <div class="mono">
+            <a href="https://github.com/heg-wtf/abyss">github</a>
+            <span style="color: var(--hairline); margin: 0 12px;">·</span>
+            <a href="https://github.com/heg-wtf/abyss/issues">issues</a>
+            <span style="color: var(--hairline); margin: 0 12px;">·</span>
+            <a href="https://github.com/heg-wtf/abyss/releases">releases</a>
+          </div>
         </div>
-        <p class="footer-copy">
-          MIT License &middot; Built by <a href="https://heg.wtf">HEG</a>
-        </p>
       </div>
     </footer>
 
@@ -1155,10 +552,15 @@
       function copyInstall() {
         const cmd =
           "curl -sSL https://raw.githubusercontent.com/heg-wtf/abyss/main/install.sh | bash";
+        const box = document.getElementById("installBox");
+        const hint = document.getElementById("copyHint");
         navigator.clipboard.writeText(cmd).then(() => {
-          const toast = document.getElementById("copiedToast");
-          toast.classList.add("show");
-          setTimeout(() => toast.classList.remove("show"), 1500);
+          box.classList.add("copied");
+          hint.textContent = "Copied";
+          setTimeout(() => {
+            box.classList.remove("copied");
+            hint.textContent = "Click to copy";
+          }, 1500);
         });
       }
     </script>
