@@ -222,6 +222,20 @@ function SidebarImpl() {
                   </span>
                 </Link>
               ))}
+              <Link
+                href="/bots/new"
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors",
+                  pathname === "/bots/new"
+                    ? "bg-accent text-accent-foreground font-medium"
+                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                )}
+              >
+                <span className="flex size-5 items-center justify-center rounded-md border text-xs text-muted-foreground">
+                  +
+                </span>
+                <span className="truncate">New bot</span>
+              </Link>
             </div>
           )}
         </div>
