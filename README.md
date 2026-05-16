@@ -6,10 +6,9 @@ Personal AI assistant powered by a PWA + Claude Code.
 A multi-bot, file-based session system that runs locally on Mac and is
 reached from the phone via a Tailscale-hosted dashboard.
 
-> **v2026.05.14** — Telegram was retired. The mobile PWA + dashboard
-> chat (built into `abysscope`) are now the only user-facing surfaces.
-> Group collaboration (orchestrator + member) is gone with it and will
-> return on top of the PWA in a later release.
+The mobile PWA + dashboard chat (built into `abysscope`) are the
+user-facing surfaces. Group collaboration (orchestrator + member) is
+planned for a later release on top of the PWA.
 
 ## Table of Contents
 
