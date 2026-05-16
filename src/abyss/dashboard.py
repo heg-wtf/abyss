@@ -67,7 +67,7 @@ def is_running() -> tuple[bool, int | None]:
             pid = int(lines[0])
             os.kill(pid, 0)
             return True, pid
-        except (ValueError, ProcessLookupError, PermissionError, IndexError, OverflowError):
+        except ValueError, ProcessLookupError, PermissionError, IndexError, OverflowError:
             path.unlink(missing_ok=True)
 
     if is_port_in_use(DEFAULT_PORT):
@@ -83,7 +83,7 @@ def get_port() -> int | None:
     try:
         lines = path.read_text().strip().splitlines()
         return int(lines[1]) if len(lines) > 1 else DEFAULT_PORT
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         return DEFAULT_PORT
 
 
@@ -95,7 +95,7 @@ def stop_running() -> int | None:
         return None
     try:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError, PermissionError:
         try:
             os.kill(pid, signal.SIGTERM)
         except (ProcessLookupError, PermissionError) as fallback_error:
@@ -137,7 +137,7 @@ def _detect_commit_sha(start: Path) -> str:
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
-        except (OSError, subprocess.SubprocessError):
+        except OSError, subprocess.SubprocessError:
             continue
     return ""
 
@@ -297,7 +297,7 @@ def stop_handle(handle: DashboardHandle, *, timeout: float = 5.0) -> None:
         return
     try:
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError, PermissionError:
         try:
             process.terminate()
         except (ProcessLookupError, PermissionError) as terminate_error:
@@ -316,7 +316,7 @@ def stop_handle(handle: DashboardHandle, *, timeout: float = 5.0) -> None:
         logger.warning("dashboard did not exit in %.1fs, sending SIGKILL", timeout)
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError, PermissionError:
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 process.kill()
     finally:

@@ -32,7 +32,7 @@ def resolve_job_timezone(job: dict[str, Any]) -> ZoneInfo | timezone:
     if timezone_name:
         try:
             return ZoneInfo(timezone_name)
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             logger.warning("Invalid timezone '%s' in job, trying config timezone", timezone_name)
 
     # Fall back to config.yaml timezone
@@ -42,7 +42,7 @@ def resolve_job_timezone(job: dict[str, Any]) -> ZoneInfo | timezone:
     if config_timezone and config_timezone != "UTC":
         try:
             return ZoneInfo(config_timezone)
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             logger.warning("Invalid config timezone '%s', falling back to UTC", config_timezone)
 
     return timezone.utc

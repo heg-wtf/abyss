@@ -99,7 +99,7 @@ def is_within_active_hours(active_hours: dict[str, str], now: datetime | None = 
         timezone_name = get_timezone()
         try:
             timezone_info = ZoneInfo(timezone_name)
-        except (KeyError, ValueError):
+        except KeyError, ValueError:
             timezone_info = None
         now = datetime.now(timezone_info)
 
@@ -109,7 +109,7 @@ def is_within_active_hours(active_hours: dict[str, str], now: datetime | None = 
     try:
         start_hour, start_minute = map(int, start_str.split(":"))
         end_hour, end_minute = map(int, end_str.split(":"))
-    except (ValueError, AttributeError):
+    except ValueError, AttributeError:
         # Malformed config (e.g. "9am" or ``None``) used to crash the
         # scheduler loop. Treat it as "always active" so the run still
         # happens and the broken config is visible in the logs.

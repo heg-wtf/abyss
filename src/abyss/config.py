@@ -379,7 +379,7 @@ def detect_local_timezone() -> str:
             candidate = localtime.split("zoneinfo/", 1)[1]
             ZoneInfo(candidate)  # validate
             return candidate
-    except (OSError, KeyError, ValueError):
+    except OSError, KeyError, ValueError:
         pass
 
     return "UTC"
@@ -399,7 +399,7 @@ def get_timezone() -> str:
     try:
         ZoneInfo(timezone_name)
         return timezone_name
-    except (KeyError, ValueError):
+    except KeyError, ValueError:
         return "UTC"
 
 

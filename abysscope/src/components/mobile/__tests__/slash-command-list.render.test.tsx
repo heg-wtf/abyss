@@ -4,7 +4,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { SlashCommandList } from "../mobile-chat-slash-command-list";
 import type { SlashCommandSpec } from "@/lib/abyss-api";
 
-function spec(name: string, description: string, usage?: string): SlashCommandSpec {
+function spec(name: string, description: string, usage = ""): SlashCommandSpec {
   return { name, description, usage };
 }
 
