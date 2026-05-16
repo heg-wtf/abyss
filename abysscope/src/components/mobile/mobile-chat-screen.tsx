@@ -2,9 +2,6 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import {
   ArrowUp,
   Command,
@@ -12,10 +9,8 @@ import {
   Menu as MenuIcon,
   Mic,
   Paperclip,
-  X,
 } from "lucide-react";
 import { BotAvatar } from "@/components/bot-avatar";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +33,6 @@ import {
   type ChatMessage,
   type ChatSession,
   type SlashCommandSpec,
-  type UploadedAttachment,
 } from "@/lib/abyss-api";
 import {
   getSessionStream,
@@ -46,6 +40,17 @@ import {
 } from "@/components/chat/use-chat-stream";
 import { useVoiceMode, type VoiceState } from "@/components/chat/use-voice-mode";
 import { VoiceScreen } from "@/components/chat/voice-screen";
+import { useIsTouchDevice } from "@/hooks/use-is-touch-device";
+import type {
+  ConversationMessage,
+  PendingAttachment,
+} from "./mobile-chat-types";
+import { newId, sessionLabel } from "./mobile-chat-helpers";
+import { MarkdownBody } from "./mobile-chat-markdown-body";
+import { MessageBubble } from "./mobile-chat-message-bubble";
+import { PendingAttachmentChip } from "./mobile-chat-attachment-chip";
+import { SlashCommandList } from "./mobile-chat-slash-command-list";
+import { StreamProgress } from "./mobile-chat-streaming";
 
 interface Props {
   bots: BotSummary[];
@@ -53,52 +58,7 @@ interface Props {
   initialMessages: ChatMessage[];
 }
 
-interface ConversationMessage extends ChatMessage {
-  id: string;
-  streaming?: boolean;
-  /**
-   * Slash commands like ``/send`` return a downloadable file
-   * alongside (or instead of) text. Mirrors the desktop chat-view
-   * field so we render a download chip on the assistant bubble.
-   */
-  commandFile?: {
-    name: string;
-    path: string;
-    url: string;
-  } | null;
-}
-
-interface PendingAttachment {
-  localId: string;
-  file: File;
-  uploaded?: UploadedAttachment;
-  uploading: boolean;
-  error?: string;
-}
-
 const ALLOWED_SET = new Set<string>(ALLOWED_UPLOAD_MIME_TYPES);
-
-function newId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function sessionLabel(session: ChatSession): string {
-  return (
-    session.custom_name?.trim() ||
-    session.bot_display_name ||
-    session.bot
-  );
-}
-
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // Screen
@@ -890,365 +850,3 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Pieces
-// ---------------------------------------------------------------------------
-
-/**
- * In-flight reply indicator — three bouncing dots + adaptive elapsed time.
- *
- * UX rules:
- *   - Dots bounce in sequence regardless of elapsed time (always alive).
- *   - The "Ns" counter stays hidden for the first 3s so fast responses
- *     don't flash a stale number.
- *   - After 30s, the label changes to "Still thinking · Ns" so the user
- *     knows a long task is still progressing instead of silently stuck.
- *
- * The counter refreshes every 500ms (the cheap path) to keep the
- * sub-second feel without burning re-renders.
- */
-function StreamingDots({ inline = false }: { inline?: boolean }) {
-  return (
-    <span
-      role="presentation"
-      aria-hidden
-      className={inline ? "inline-flex items-center gap-1" : "flex items-center gap-1"}
-    >
-      <span
-        className="block h-1.5 w-1.5 rounded-full bg-current"
-        style={{ animation: "stream-dot 1.2s ease-in-out infinite", animationDelay: "0ms" }}
-      />
-      <span
-        className="block h-1.5 w-1.5 rounded-full bg-current"
-        style={{ animation: "stream-dot 1.2s ease-in-out infinite", animationDelay: "160ms" }}
-      />
-      <span
-        className="block h-1.5 w-1.5 rounded-full bg-current"
-        style={{ animation: "stream-dot 1.2s ease-in-out infinite", animationDelay: "320ms" }}
-      />
-    </span>
-  );
-}
-
-/**
- * Inline "✕" cancel button. Visually small (20 px) but a 44 px tap
- * region is provided via ``-m-3 p-3`` to meet the Apple HIG touch
- * target without bloating the layout.
- */
-function CancelStreamButton({ onCancel }: { onCancel: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onCancel}
-      aria-label="Stop generating reply"
-      className="-m-3 inline-flex items-center justify-center rounded-full p-3 text-muted-foreground transition-colors hover:text-foreground active:text-foreground"
-    >
-      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current">
-        <X className="h-3 w-3" aria-hidden />
-      </span>
-    </button>
-  );
-}
-
-/**
- * Detect touch-only input devices via the standard CSS media query.
- *
- * ``(hover: none) and (pointer: coarse)`` matches phones / tablets but
- * not a laptop with a touchscreen + keyboard (which reports
- * ``hover: hover``). The result starts ``false`` so SSR stays
- * deterministic; the actual value lands on first paint via the
- * ``useEffect`` below. ``addEventListener('change', ...)`` keeps the
- * value live if the user docks an external keyboard mid-session.
- */
-function useIsTouchDevice() {
-  const [isTouch, setIsTouch] = React.useState(false);
-  React.useEffect(() => {
-    const query = window.matchMedia("(hover: none) and (pointer: coarse)");
-    const update = () => setIsTouch(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return isTouch;
-}
-
-function StreamProgress({
-  streaming,
-  hasText,
-  onCancel,
-}: {
-  streaming: boolean;
-  hasText: boolean;
-  onCancel?: () => void;
-}) {
-  const [elapsed, setElapsed] = React.useState(0);
-  React.useEffect(() => {
-    if (!streaming) {
-      setElapsed(0);
-      return;
-    }
-    const startedAt = Date.now();
-    setElapsed(0);
-    const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-    }, 500);
-    return () => clearInterval(id);
-  }, [streaming]);
-
-  if (!streaming) return null;
-
-  // Empty bubble — dots carry the whole indicator and serve as the
-  // placeholder for "reply on the way".
-  if (!hasText) {
-    const showLong = elapsed >= 30;
-    return (
-      <div className="flex items-center gap-2 py-0.5 text-muted-foreground">
-        <StreamingDots inline />
-        {showLong && (
-          <span className="tabular-nums text-[11px]">Still thinking · {elapsed}s</span>
-        )}
-        {onCancel && <CancelStreamButton onCancel={onCancel} />}
-      </div>
-    );
-  }
-
-  // Streaming text is already rendering — show a subtle bottom-row
-  // indicator that fades the counter in after a few seconds.
-  const showElapsed = elapsed >= 3;
-  const longRunning = elapsed >= 30;
-  return (
-    <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-      <StreamingDots inline />
-      <span
-        className={`tabular-nums transition-opacity duration-300 ${
-          showElapsed ? "opacity-100" : "opacity-0"
-        }`}
-      >
-        {longRunning ? `Still thinking · ${elapsed}s` : `${elapsed}s`}
-      </span>
-      {onCancel && <CancelStreamButton onCancel={onCancel} />}
-    </div>
-  );
-}
-
-function MessageBubble({
-  message,
-  queued = false,
-  onCancelQueue,
-}: {
-  message: ConversationMessage;
-  queued?: boolean;
-  onCancelQueue?: () => void;
-}) {
-  const isUser = message.role === "user";
-  return (
-    <li className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
-      <div
-        className={`flex max-w-[85%] flex-col gap-1 ${
-          isUser ? "items-end" : "items-start"
-        }`}
-      >
-        <div
-          className={`min-w-0 overflow-hidden rounded-2xl px-3 py-2 text-sm ${
-            isUser
-              ? `bg-primary text-primary-foreground ${queued ? "opacity-70" : ""}`
-              : "bg-muted text-foreground"
-          }`}
-        >
-        {isUser ? (
-          <div className="whitespace-pre-wrap">{message.content}</div>
-        ) : (
-          <MarkdownBody content={message.content} />
-        )}
-        {message.attachments?.length ? (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {message.attachments.map((att) => (
-              <a
-                key={att.real_name}
-                href={att.url}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-md border bg-background/30 px-2 py-1 text-xs text-current underline-offset-2 hover:underline"
-              >
-                📎 {att.display_name}
-              </a>
-            ))}
-          </div>
-        ) : null}
-        {message.commandFile ? (
-          <div className="mt-2">
-            <a
-              href={message.commandFile.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              download={message.commandFile.name}
-              className="inline-flex items-center gap-2 rounded-md border bg-background/30 px-2 py-1 text-xs text-current underline-offset-2 hover:underline"
-            >
-              ⬇️ {message.commandFile.name}
-            </a>
-          </div>
-        ) : null}
-          <div className="mt-1 text-right text-[10px] opacity-60">
-            {formatTime(message.timestamp)}
-          </div>
-        </div>
-        {queued && (
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            <StreamingDots inline />
-            <span>응답 완료 후 전송</span>
-            {onCancelQueue && (
-              <button
-                type="button"
-                onClick={onCancelQueue}
-                aria-label="Cancel queued message"
-                className="-m-2 inline-flex items-center justify-center rounded-full p-2 hover:text-foreground"
-              >
-                <span className="flex h-4 w-4 items-center justify-center rounded-full border border-current">
-                  <X className="h-2.5 w-2.5" aria-hidden />
-                </span>
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </li>
-  );
-}
-
-/**
- * Assistant messages may contain GitHub-flavored markdown (headings,
- * fenced code, lists, links). We share the desktop chat's
- * ``prose prose-sm`` tailwind-typography setup so the typography
- * looks the same on both surfaces. ``break-words`` +
- * ``[overflow-wrap:anywhere]`` keep long URLs / Korean text from
- * blowing past the bubble width on narrow phones.
- */
-const MarkdownBody = React.memo(function MarkdownBody({
-  content,
-}: {
-  content: string;
-}) {
-  // ``min-w-0`` lets this flex/grid child actually shrink below its
-  // content's intrinsic width. ``break-words`` +
-  // ``[overflow-wrap:anywhere]`` break long unbreakable strings
-  // (URLs, Korean blobs without spaces) instead of pushing the
-  // bubble wider. ``<pre>`` blocks get their own ``overflow-x-auto``
-  // so a wide code line scrolls within the bubble — never the
-  // whole page. Tables get the same treatment.
-  return (
-    <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-em:text-foreground prose-li:text-foreground prose-blockquote:text-foreground prose-code:text-foreground prose-a:text-foreground prose-pre:my-2 prose-pre:max-w-full prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:bg-background/40 prose-pre:p-2 prose-code:break-words prose-img:max-w-full prose-table:block prose-table:max-w-full prose-table:overflow-x-auto prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
-      {/* ``remarkBreaks`` turns single ``\n`` into ``<br>`` — without
-          it CommonMark collapses single newlines to a space, which
-          made schedule bullets and short status replies render as
-          one giant run-on paragraph on the phone. ``remarkGfm`` adds
-          tables / strikethrough / autolinks so assistant replies
-          render the same as on GitHub. */}
-      <ReactMarkdown remarkPlugins={[remarkBreaks, remarkGfm]}>
-        {content || ""}
-      </ReactMarkdown>
-    </div>
-  );
-});
-
-function PendingAttachmentChip({
-  attachment,
-  onRemove,
-}: {
-  attachment: PendingAttachment;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="relative flex items-center gap-2 rounded-md border bg-background px-2 py-1 text-xs">
-      <span className="max-w-[120px] truncate">{attachment.file.name}</span>
-      {attachment.uploading && (
-        <span className="text-muted-foreground">…</span>
-      )}
-      {attachment.error && (
-        <span className="text-destructive">!</span>
-      )}
-      <button
-        type="button"
-        onClick={onRemove}
-        className="ml-1 text-muted-foreground hover:text-foreground"
-        aria-label="Remove attachment"
-      >
-        <X className="size-3" />
-      </button>
-    </div>
-  );
-}
-
-function SlashCommandList({
-  commands,
-  onPick,
-  onClose,
-}: {
-  commands: SlashCommandSpec[] | null;
-  onPick: (spec: SlashCommandSpec) => void;
-  onClose: () => void;
-}) {
-  const [query, setQuery] = React.useState("");
-  const filtered = React.useMemo(() => {
-    if (!commands) return [];
-    const needle = query.trim().toLowerCase();
-    if (!needle) return commands;
-    return commands.filter(
-      (cmd) =>
-        cmd.name.toLowerCase().includes(needle) ||
-        cmd.description.toLowerCase().includes(needle)
-    );
-  }, [commands, query]);
-
-  if (commands === null) {
-    return (
-      <p className="px-1 py-4 text-sm text-muted-foreground">Loading…</p>
-    );
-  }
-
-  if (commands.length === 0) {
-    return (
-      <p className="px-1 py-4 text-sm text-muted-foreground">
-        No commands available.
-      </p>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <input
-        type="text"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search commands…"
-        className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-        autoFocus
-      />
-      <ul className="max-h-[50vh] overflow-y-auto divide-y rounded-md border">
-        {filtered.map((cmd) => (
-          <li key={cmd.name}>
-            <button
-              type="button"
-              className="w-full px-3 py-2 text-left hover:bg-muted"
-              onClick={() => onPick(cmd)}
-            >
-              <div className="font-mono text-sm">/{cmd.name}</div>
-              <div className="text-xs text-muted-foreground">
-                {cmd.description}
-              </div>
-              {cmd.usage && (
-                <div className="font-mono text-[11px] text-muted-foreground">
-                  {cmd.usage}
-                </div>
-              )}
-            </button>
-          </li>
-        ))}
-      </ul>
-      <Button variant="ghost" onClick={onClose}>
-        Close
-      </Button>
-    </div>
-  );
-}
-

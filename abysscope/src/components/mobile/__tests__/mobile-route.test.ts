@@ -323,16 +323,22 @@ describe("/mobile route skeleton", () => {
   });
 
   it("chat screen renders assistant replies through ReactMarkdown", () => {
-    const source = read("components/mobile/mobile-chat-screen.tsx");
-    // Markdown rendering shares the desktop `prose prose-sm`
-    // typography setup so headings / lists / links / code blocks
-    // render the same on both surfaces.
-    expect(source).toMatch(/import ReactMarkdown from "react-markdown"/);
-    expect(source).toMatch(/function MarkdownBody/);
-    expect(source).toMatch(/prose prose-sm/);
+    // MarkdownBody and MessageBubble live in their own files now —
+    // assert the markdown stack is wired up in those modules and that
+    // the screen still wires assistant replies through MarkdownBody.
+    const markdown = read("components/mobile/mobile-chat-markdown-body.tsx");
+    expect(markdown).toMatch(/import ReactMarkdown from "react-markdown"/);
+    expect(markdown).toMatch(/MarkdownBody/);
+    expect(markdown).toMatch(/prose prose-sm/);
+
+    const bubble = read("components/mobile/mobile-chat-message-bubble.tsx");
     // User bubbles stay as plain pre-wrap text — only the assistant
     // side parses markdown.
-    expect(source).toMatch(/isUser \? \(\s*<div className="whitespace-pre-wrap">/);
+    expect(bubble).toMatch(/isUser \? \(\s*<div className="whitespace-pre-wrap">/);
+
+    const screen = read("components/mobile/mobile-chat-screen.tsx");
+    expect(screen).toMatch(/MarkdownBody/);
+    expect(screen).toMatch(/MessageBubble/);
   });
 
   it("chat screen hides the textarea scrollbar across browser engines", () => {
@@ -375,7 +381,7 @@ describe("/mobile route skeleton", () => {
   });
 
   it("mobile chat renders a download chip for /send command_file payloads", () => {
-    const source = read("components/mobile/mobile-chat-screen.tsx");
+    const source = read("components/mobile/mobile-chat-message-bubble.tsx");
     expect(source).toMatch(/message\.commandFile/);
     expect(source).toMatch(/href=\{message\.commandFile\.url\}/);
   });
