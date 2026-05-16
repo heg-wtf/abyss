@@ -75,11 +75,12 @@ export function truncateDaemonLogs(): number {
   let truncated = 0;
   for (const name of DAEMON_LOG_FILES) {
     const logPath = abyssPath("logs", name);
+    if (!fs.existsSync(logPath)) continue;
     try {
       fs.writeFileSync(logPath, "");
       truncated++;
     } catch {
-      // file doesn't exist
+      // permission denied or similar
     }
   }
   return truncated;
