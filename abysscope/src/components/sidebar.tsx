@@ -8,19 +8,9 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BotAvatar } from "@/components/bot-avatar";
 
-/**
- * Minimal bot shape needed by the sidebar. The ``/api/bots`` proxy
- * applies the ``display_name`` ← ``telegram_botname`` ← slug
- * fallback chain server-side, so the client always receives a
- * resolved ``display_name``.
- */
 interface BotSummary {
   name: string;
   display_name: string;
-  /** Legacy field; older bots store their friendly Korean name here
-   * with ``display_name`` set to ``""``. The fallback chain below
-   * picks it up so the sidebar doesn't fall through to the raw slug. */
-  telegram_botname?: string;
 }
 
 const STORAGE_KEY = "abysscope.sidebar.collapsed";
@@ -210,11 +200,11 @@ function SidebarImpl() {
                 >
                   <BotAvatar
                     botName={bot.name}
-                    displayName={bot.display_name || bot.telegram_botname || bot.name}
+                    displayName={bot.display_name || bot.name}
                     size="xs"
                   />
                   <span className="truncate">
-                    {bot.display_name || bot.telegram_botname || bot.name}
+                    {bot.display_name || bot.name}
                   </span>
                 </Link>
               ))}

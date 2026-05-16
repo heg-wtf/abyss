@@ -6,15 +6,10 @@ import { getBot, getAbyssHome } from "@/lib/abyss";
 /**
  * Bot avatar — file-backed at ``~/.abyss/bots/<name>/avatar.jpg``.
  *
- * Earlier revisions fetched a fallback from Telegram via the bot's
- * ``telegram_token``. That dependency is gone — the dashboard now
- * owns avatar lifecycle directly via the edit page's upload field.
- *
  * GET serves the cached file (or 404 → the ``BotAvatar`` component
  * falls back to the colored initial). POST accepts a multipart
  * upload to replace the file. DELETE removes it. The on-disk filename
- * stays ``avatar.jpg`` regardless of source mime so older code that
- * points at that path keeps working.
+ * stays ``avatar.jpg`` regardless of source mime.
  */
 
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);

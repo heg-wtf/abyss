@@ -461,9 +461,7 @@ async def execute_cron_job(
         preview = response.replace("\n", " ").strip()
         if len(preview) > 120:
             preview = preview[:117] + "…"
-        display_name = (
-            bot_config.get("display_name") or bot_config.get("telegram_botname") or bot_name
-        )
+        display_name = bot_config.get("display_name") or bot_name
         await _send_push(
             title=f"⏰ {display_name}: {job_name}",
             body=preview or f"Cron job '{job_name}' finished.",

@@ -22,9 +22,6 @@ function setupBot(): { workspace: string } {
     settings: { command_timeout: 120, log_level: "INFO" },
   });
   writeYamlFile(path.join(testHome, "bots", "testbot", "bot.yaml"), {
-    telegram_token: "1:2",
-    telegram_username: "x",
-    telegram_botname: "testbot",
     display_name: "Test",
     personality: "p",
     role: "r",

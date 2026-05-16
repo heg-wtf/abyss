@@ -24,7 +24,6 @@ export async function GET(
 
   return NextResponse.json({
     ...bot,
-    telegram_token: "***",
     cronJobs,
     sessions,
     memory,

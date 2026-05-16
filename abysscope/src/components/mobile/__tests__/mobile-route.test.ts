@@ -271,20 +271,18 @@ describe("/mobile route skeleton", () => {
     expect(route).not.toMatch(/fetchTelegramAvatar/);
   });
 
-  it("display_name fallback chain is display_name → telegram_botname → name everywhere it's shown", () => {
-    // Bots created before display_name existed have ``display_name:
-    // ''`` in their yaml, with the friendly name only in the legacy
-    // ``telegram_botname`` field. Skipping that fallback shows the
-    // raw slug (e.g. ``cclawnotifybot``) instead of the Korean name.
+  it("display_name fallback chain is display_name → name everywhere it's shown", () => {
     // Pin every surface that renders a bot label so the fallback
-    // stays consistent.
+    // stays consistent. The legacy ``telegram_botname`` step was
+    // removed once all bot.yaml files were migrated to carry a
+    // populated ``display_name``.
     const sidebar = read("components/sidebar.tsx");
-    expect(sidebar).toMatch(/bot\.display_name \|\| bot\.telegram_botname \|\| bot\.name/);
-    expect(sidebar).not.toMatch(/bot\.display_name \|\| bot\.name\b/);
+    expect(sidebar).toMatch(/bot\.display_name \|\| bot\.name/);
+    expect(sidebar).not.toMatch(/telegram_botname/);
 
     const lib = read("lib/abyss/metrics.ts");
-    expect(lib).toMatch(/bot\.display_name \|\| bot\.telegram_botname \|\| bot\.name/);
-    expect(lib).not.toMatch(/bot\.display_name \|\| bot\.name\b/);
+    expect(lib).toMatch(/bot\.display_name \|\| bot\.name/);
+    expect(lib).not.toMatch(/telegram_botname/);
   });
 
   it("root layout paints the document background dark before CSS loads", () => {

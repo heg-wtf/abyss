@@ -116,7 +116,7 @@ describe("/api/bots", () => {
     expect(body).toEqual([]);
   });
 
-  it("masks the telegram token and enriches each bot with counts", async () => {
+  it("enriches each bot with cron, session, and activity counts", async () => {
     setupBasicConfig(handle.home);
     writeYamlFile(path.join(handle.home, "bots", "testbot", "cron.yaml"), {
       jobs: [
@@ -127,7 +127,6 @@ describe("/api/bots", () => {
     const body = await res.json();
     expect(body).toHaveLength(1);
     expect(body[0].name).toBe("testbot");
-    expect(body[0].telegram_token).toBe("***");
     expect(body[0].cronJobCount).toBe(1);
     expect(body[0].sessionCount).toBe(0);
     expect(body[0].lastActivity).toBeNull();
