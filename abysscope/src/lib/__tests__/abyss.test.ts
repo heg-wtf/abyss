@@ -18,6 +18,7 @@ import {
   getSkill,
   getBotSessions,
   getConversation,
+  getConversationFrequency,
   getGlobalMemory,
   updateGlobalMemory,
   listLogFiles,
@@ -33,6 +34,8 @@ import {
   deleteSkill,
   getToolMetrics,
   readToolMetricEvents,
+  getDaemonLogInfo,
+  truncateDaemonLogs,
 } from "../abyss";
 
 let testHome: string;
@@ -875,5 +878,191 @@ describe("getSkillUsageByBots", () => {
     expect(usage["reminders"]).toEqual(["testbot"]);
     expect(usage["translate"]).toEqual(["otherbot"]);
     expect(usage["custom-skill"]).toEqual(["testbot"]);
+  });
+});
+
+// --- Daemon Logs ---
+
+describe("getDaemonLogInfo", () => {
+  it("reports both files as missing when nothing exists", () => {
+    const info = getDaemonLogInfo();
+    expect(info).toHaveLength(2);
+    for (const entry of info) {
+      expect(entry.exists).toBe(false);
+      expect(entry.size).toBe(0);
+    }
+    expect(info.map((entry) => entry.name)).toEqual([
+      "daemon-stdout.log",
+      "daemon-stderr.log",
+    ]);
+  });
+
+  it("reports actual byte size when files exist", () => {
+    writeFile(path.join(testHome, "logs", "daemon-stdout.log"), "hello");
+    writeFile(
+      path.join(testHome, "logs", "daemon-stderr.log"),
+      "error log line",
+    );
+    const info = getDaemonLogInfo();
+    const byName = Object.fromEntries(info.map((entry) => [entry.name, entry]));
+    expect(byName["daemon-stdout.log"]).toEqual({
+      name: "daemon-stdout.log",
+      size: 5,
+      exists: true,
+    });
+    expect(byName["daemon-stderr.log"].exists).toBe(true);
+    expect(byName["daemon-stderr.log"].size).toBe("error log line".length);
+  });
+
+  it("mixes present and missing files independently", () => {
+    writeFile(path.join(testHome, "logs", "daemon-stdout.log"), "x");
+    const info = getDaemonLogInfo();
+    const byName = Object.fromEntries(info.map((entry) => [entry.name, entry]));
+    expect(byName["daemon-stdout.log"].exists).toBe(true);
+    expect(byName["daemon-stderr.log"].exists).toBe(false);
+  });
+});
+
+describe("truncateDaemonLogs", () => {
+  it("returns 0 and is a no-op when neither file exists", () => {
+    expect(truncateDaemonLogs()).toBe(0);
+  });
+
+  it("truncates an existing daemon log in place", () => {
+    const logPath = path.join(testHome, "logs", "daemon-stdout.log");
+    writeFile(logPath, "old content with bytes");
+    expect(fs.statSync(logPath).size).toBeGreaterThan(0);
+
+    expect(truncateDaemonLogs()).toBe(1);
+
+    expect(fs.existsSync(logPath)).toBe(true);
+    expect(fs.statSync(logPath).size).toBe(0);
+  });
+
+  it("truncates both daemon files and reports the count", () => {
+    writeFile(path.join(testHome, "logs", "daemon-stdout.log"), "stdout");
+    writeFile(path.join(testHome, "logs", "daemon-stderr.log"), "stderr");
+
+    expect(truncateDaemonLogs()).toBe(2);
+
+    for (const name of ["daemon-stdout.log", "daemon-stderr.log"]) {
+      expect(fs.statSync(path.join(testHome, "logs", name)).size).toBe(0);
+    }
+  });
+});
+
+// --- Conversation Frequency ---
+
+function yymmddOf(date: Date): string {
+  const yy = String(date.getFullYear() % 100).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yy}${mm}${dd}`;
+}
+
+function isoOf(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function writeConversation(
+  botName: string,
+  chatId: string,
+  date: Date,
+  content: string,
+): void {
+  writeFile(
+    path.join(
+      testHome,
+      "bots",
+      botName,
+      "sessions",
+      `chat_${chatId}`,
+      `conversation-${yymmddOf(date)}.md`,
+    ),
+    content,
+  );
+}
+
+describe("getConversationFrequency", () => {
+  it("returns empty data per bot when no sessions directory exists", () => {
+    setupBasicConfig();
+    const stats = getConversationFrequency();
+    expect(stats).toHaveLength(2);
+    for (const entry of stats) {
+      expect(entry.data).toEqual({});
+      expect(entry.total).toBe(0);
+    }
+  });
+
+  it("counts each `## user` heading in conversation markdown", () => {
+    setupBasicConfig();
+    const today = new Date();
+    writeConversation(
+      "testbot",
+      "abc",
+      today,
+      "## user\nhello\n## assistant\nhi\n## user\nthanks\n",
+    );
+
+    const stats = getConversationFrequency();
+    const testStats = stats.find((entry) => entry.botName === "testbot")!;
+    expect(testStats.total).toBe(2);
+    expect(testStats.data[isoOf(today)]).toBe(2);
+  });
+
+  it("aggregates counts across multiple chat sessions on the same day", () => {
+    setupBasicConfig();
+    const today = new Date();
+    writeConversation("testbot", "chat-a", today, "## user\nA\n");
+    writeConversation("testbot", "chat-b", today, "## user\nB1\n## user\nB2\n");
+
+    const stats = getConversationFrequency();
+    const testStats = stats.find((entry) => entry.botName === "testbot")!;
+    expect(testStats.data[isoOf(today)]).toBe(3);
+    expect(testStats.total).toBe(3);
+  });
+
+  it("ignores files older than the 1-year cutoff", () => {
+    setupBasicConfig();
+    const oldDate = new Date();
+    oldDate.setFullYear(oldDate.getFullYear() - 2);
+    writeConversation("testbot", "old", oldDate, "## user\nignored\n");
+
+    const stats = getConversationFrequency();
+    const testStats = stats.find((entry) => entry.botName === "testbot")!;
+    expect(testStats.total).toBe(0);
+    expect(testStats.data).toEqual({});
+  });
+
+  it("does not double-count assistant or other section markers", () => {
+    setupBasicConfig();
+    const today = new Date();
+    writeConversation(
+      "testbot",
+      "mix",
+      today,
+      "## assistant\nreply\n## tool\ndetail\n## user\nonly one user\n",
+    );
+
+    const stats = getConversationFrequency();
+    const testStats = stats.find((entry) => entry.botName === "testbot")!;
+    expect(testStats.total).toBe(1);
+  });
+
+  it("uses display_name first, falling back through telegram_botname to bot name", () => {
+    setupBasicConfig();
+    const stats = getConversationFrequency();
+    const testStats = stats.find((entry) => entry.botName === "testbot")!;
+    expect(testStats.displayName).toBe("Test Bot");
+
+    // Override testbot's display_name to empty; expect telegram_botname fallback.
+    updateBot("testbot", { display_name: "" });
+    const afterEmpty = getConversationFrequency();
+    expect(
+      afterEmpty.find((entry) => entry.botName === "testbot")!.displayName,
+    ).toBe("testbot");
   });
 });
