@@ -8,7 +8,7 @@ import {
   getSessionStream,
   useMultiSessionChatStream,
 } from "@/components/chat/use-chat-stream";
-import { setUnreadBadge } from "@/lib/abyss-api";
+import { formatBotLabel, setUnreadBadge } from "@/lib/abyss-api";
 import type {
   BotSummary,
   ChatSession,
@@ -241,7 +241,12 @@ export function SessionsDrawerPanel({
                   displayName={bot.display_name}
                   size="sm"
                 />
-                <span className="truncate text-sm">{bot.display_name}</span>
+                <span className="truncate text-sm">
+                  {formatBotLabel({
+                    display_name: bot.display_name,
+                    alias: bot.alias,
+                  })}
+                </span>
               </button>
             </li>
           ))}
@@ -346,10 +351,16 @@ export function SessionsDrawerPanel({
             const key = `${sess.bot}:${sess.id}`;
             const isActive =
               sess.bot === activeBot && sess.id === activeSessionId;
+            // ``custom_name`` (user-assigned label) wins — once the
+            // user has named the session that becomes the canonical
+            // label. Otherwise fall back to the bot display name with
+            // the optional alias appended via ``formatBotLabel``.
             const label =
               sess.custom_name?.trim() ||
-              sess.bot_display_name ||
-              sess.bot;
+              formatBotLabel({
+                display_name: sess.bot_display_name || sess.bot,
+                alias: sess.bot_alias,
+              });
             const isStreaming = getSessionStream(stream.streams, sess.id).streaming;
             const isUnread = sess.unread === true && !isActive;
             const menuOpen = menuAnchor?.session.id === sess.id;

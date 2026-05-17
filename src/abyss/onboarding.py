@@ -149,6 +149,9 @@ def prompt_bot_profile() -> dict:
         break
 
     display_name = prompt_input("Display name (what you call this bot):")
+    alias = prompt_input(
+        "Alias / role label shown after the name, e.g. '집사' (optional, Enter to skip):"
+    )
     personality = prompt_multiline("Bot personality:")
     role = prompt_multiline("Bot role (what it does):")
     goal = prompt_multiline("Bot goal (why it exists):")
@@ -156,6 +159,7 @@ def prompt_bot_profile() -> dict:
     return {
         "name": name,
         "display_name": display_name.strip(),
+        "alias": alias.strip(),
         "personality": personality,
         "role": role,
         "goal": goal,
@@ -299,6 +303,11 @@ def create_bot(
             },
         },
     }
+    # Optional role/job label rendered next to ``display_name`` in
+    # list surfaces. Skipped when blank so YAML stays clean.
+    alias = profile.get("alias", "")
+    if isinstance(alias, str) and alias.strip():
+        bot_config["alias"] = alias.strip()
     if backend_block is not None:
         bot_config["backend"] = backend_block
 

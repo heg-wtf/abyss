@@ -20,6 +20,11 @@ import {
 
 interface BotFormData {
   display_name: string;
+  /**
+   * Optional role / job label rendered next to the display name in
+   * list surfaces ("앤 (집사)"). Empty string ⇒ no alias.
+   */
+  alias: string;
   personality: string;
   role: string;
   goal: string;
@@ -54,6 +59,7 @@ export default function BotEditPage() {
     ]).then(([bot, skills]) => {
       setForm({
         display_name: bot.display_name || "",
+        alias: bot.alias || "",
         personality: bot.personality || "",
         role: bot.role || "",
         goal: bot.goal || "",
@@ -74,10 +80,18 @@ export default function BotEditPage() {
   const handleSave = async () => {
     if (!form) return;
     setSaving(true);
+    // Blank alias → ``null`` sentinel so ``updateBot`` removes the
+    // key from bot.yaml entirely. Non-empty trimmed string is
+    // persisted as-is.
+    const aliasTrimmed = form.alias.trim();
+    const payload = {
+      ...form,
+      alias: aliasTrimmed ? aliasTrimmed : null,
+    };
     await fetch(`/api/bots/${name}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
     setSaving(false);
     setSaved(true);
@@ -134,6 +148,15 @@ export default function BotEditPage() {
                 onChange={(e) =>
                   setForm({ ...form, display_name: e.target.value })
                 }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Alias (optional)</Label>
+              <Input
+                value={form.alias}
+                maxLength={30}
+                placeholder="e.g. 집사 — shown as '앤 (집사)' in lists"
+                onChange={(e) => setForm({ ...form, alias: e.target.value })}
               />
             </div>
             <div className="space-y-2">

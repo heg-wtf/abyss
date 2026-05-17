@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ModelBadge } from "@/components/status-badge";
+import { formatBotLabel } from "@/lib/abyss-api";
 import { SessionList } from "@/components/session-list";
 import { MemoryEditor } from "@/components/memory-editor";
 import { SearchPanel } from "@/components/search-panel";
@@ -53,7 +54,10 @@ export default async function BotDetailPage({
           size="sm"
         />
         <h1 className="text-2xl font-bold">
-          {bot.display_name || bot.name}
+          {formatBotLabel({
+            display_name: bot.display_name || bot.name,
+            alias: bot.alias,
+          })}
         </h1>
         <ModelBadge model={bot.model} />
         <Link href={`/bots/${name}/edit`} className="ml-auto">

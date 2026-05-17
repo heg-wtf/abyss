@@ -7,10 +7,12 @@ import { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BotAvatar } from "@/components/bot-avatar";
+import { formatBotLabel } from "@/lib/abyss-api";
 
 interface BotSummary {
   name: string;
   display_name: string;
+  alias?: string | null;
 }
 
 const STORAGE_KEY = "abysscope.sidebar.collapsed";
@@ -204,7 +206,10 @@ function SidebarImpl() {
                     size="xs"
                   />
                   <span className="truncate">
-                    {bot.display_name || bot.name}
+                    {formatBotLabel({
+                      display_name: bot.display_name || bot.name,
+                      alias: bot.alias,
+                    })}
                   </span>
                 </Link>
               ))}

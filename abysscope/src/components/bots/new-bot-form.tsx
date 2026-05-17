@@ -35,6 +35,7 @@ export function NewBotForm() {
   const router = useRouter();
   const [name, setName] = React.useState("");
   const [displayName, setDisplayName] = React.useState("");
+  const [alias, setAlias] = React.useState("");
   const [personality, setPersonality] = React.useState("");
   const [role, setRole] = React.useState("");
   const [goal, setGoal] = React.useState("");
@@ -69,6 +70,7 @@ export function NewBotForm() {
         body: JSON.stringify({
           name,
           display_name: displayName,
+          alias: alias.trim(),
           personality,
           role,
           goal,
@@ -133,6 +135,17 @@ export function NewBotForm() {
         {errors.display_name && (
           <p className="text-xs text-destructive">{errors.display_name}</p>
         )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="bot-alias">Alias (optional)</Label>
+        <Input
+          id="bot-alias"
+          value={alias}
+          maxLength={30}
+          onChange={(event) => setAlias(event.target.value)}
+          placeholder="e.g. 집사 — shown as '앤 (집사)' in lists"
+        />
       </div>
 
       <div className="space-y-1.5">

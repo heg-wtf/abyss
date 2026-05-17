@@ -1728,6 +1728,123 @@ async def test_mark_routine_read_unknown_kind_404(client):
 
 
 @pytest.mark.asyncio
+async def test_bots_list_includes_alias_when_set(client, abyss_home):
+    """``/chat/bots`` surfaces ``alias`` when bot.yaml sets it so the
+    sidebar / drawer / picker can render ``"앤 (집사)"``."""
+    bot_yaml = abyss_home / "bots" / "alpha" / "bot.yaml"
+    cfg = yaml.safe_load(bot_yaml.read_text())
+    cfg["alias"] = "집사"
+    bot_yaml.write_text(yaml.safe_dump(cfg, allow_unicode=True))
+
+    resp = await client.get("/chat/bots")
+    body = await resp.json()
+    entry = next(b for b in body["bots"] if b["name"] == "alpha")
+    assert entry["alias"] == "집사"
+
+
+@pytest.mark.asyncio
+async def test_bots_list_alias_null_when_absent_or_blank(client, abyss_home):
+    """Missing / whitespace-only alias normalises to ``null`` so the
+    UI fallback (bare display_name) kicks in cleanly."""
+    bot_yaml = abyss_home / "bots" / "alpha" / "bot.yaml"
+    cfg = yaml.safe_load(bot_yaml.read_text())
+    cfg["alias"] = "   "
+    bot_yaml.write_text(yaml.safe_dump(cfg, allow_unicode=True))
+
+    resp = await client.get("/chat/bots")
+    body = await resp.json()
+    entry = next(b for b in body["bots"] if b["name"] == "alpha")
+    assert entry["alias"] is None
+
+
+@pytest.mark.asyncio
+async def test_session_metadata_includes_bot_alias(client, abyss_home):
+    """The session list piggybacks ``bot_alias`` so the drawer renders
+    the labelled row without an extra ``/chat/bots`` round-trip."""
+    bot_yaml = abyss_home / "bots" / "alpha" / "bot.yaml"
+    cfg = yaml.safe_load(bot_yaml.read_text())
+    cfg["alias"] = "집사"
+    bot_yaml.write_text(yaml.safe_dump(cfg, allow_unicode=True))
+
+    sid = "chat_web_alias1"
+    (abyss_home / "bots" / "alpha" / "sessions" / sid).mkdir(parents=True)
+
+    resp = await client.get("/chat/sessions", params={"bot": "alpha"})
+    body = await resp.json()
+    entry = next(s for s in body["sessions"] if s["id"] == sid)
+    assert entry["bot_alias"] == "집사"
+
+
+@pytest.mark.asyncio
+async def test_routine_metadata_includes_bot_alias(client, abyss_home):
+    """Same contract on the routine list — drawer Routines tab needs
+    ``bot_alias`` per row without a second round-trip."""
+    bot_yaml = abyss_home / "bots" / "alpha" / "bot.yaml"
+    cfg = yaml.safe_load(bot_yaml.read_text())
+    cfg["alias"] = "집사"
+    bot_yaml.write_text(yaml.safe_dump(cfg, allow_unicode=True))
+
+    cron_dir = abyss_home / "bots" / "alpha" / "cron_sessions" / "morning"
+    cron_dir.mkdir(parents=True)
+    (cron_dir / "conversation-260518.md").write_text(
+        "## user (2026-05-18 05:00:00 UTC)\n\nrun\n\n"
+        "## assistant (2026-05-18 05:00:01 UTC)\n\ndone\n"
+    )
+
+    resp = await client.get("/chat/routines")
+    body = await resp.json()
+    entry = next(r for r in body["routines"] if r["kind"] == "cron" and r["job_name"] == "morning")
+    assert entry["bot_alias"] == "집사"
+
+
+@pytest.mark.asyncio
+async def test_create_bot_accepts_alias(client, abyss_home):
+    """``POST /chat/bots`` with ``alias`` persists into bot.yaml and
+    surfaces on the next list."""
+    resp = await client.post(
+        "/chat/bots",
+        json={
+            "name": "beta",
+            "display_name": "Beta",
+            "personality": "neutral",
+            "role": "tester",
+            "alias": "  도우미  ",
+        },
+    )
+    assert resp.status == 201
+
+    bot_yaml = abyss_home / "bots" / "beta" / "bot.yaml"
+    cfg = yaml.safe_load(bot_yaml.read_text())
+    assert cfg["alias"] == "도우미"  # trimmed
+
+    listing = await client.get("/chat/bots")
+    body = await listing.json()
+    entry = next(b for b in body["bots"] if b["name"] == "beta")
+    assert entry["alias"] == "도우미"
+
+
+@pytest.mark.asyncio
+async def test_create_bot_alias_length_capped(client, abyss_home):
+    """Over-long alias is truncated to ``MAX_BOT_ALIAS_LENGTH`` rather
+    than rejected outright so a copy-paste from a verbose source still
+    lands a usable label."""
+    resp = await client.post(
+        "/chat/bots",
+        json={
+            "name": "gamma",
+            "display_name": "Gamma",
+            "personality": "neutral",
+            "role": "tester",
+            "alias": "x" * 100,
+        },
+    )
+    assert resp.status == 201
+    bot_yaml = abyss_home / "bots" / "gamma" / "bot.yaml"
+    cfg = yaml.safe_load(bot_yaml.read_text())
+    assert len(cfg["alias"]) == 30
+
+
+@pytest.mark.asyncio
 async def test_mark_session_read_corrupt_meta_recovers(client, abyss_home):
     """Pre-existing garbage in ``.session_meta.json`` is overwritten
     cleanly on the next mark-read — no exception bubbles up."""
