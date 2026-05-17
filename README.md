@@ -38,7 +38,7 @@ planned for a later release on top of the PWA.
 
 ## Requirements
 
-- Python >= 3.14
+- Python >= 3.12
 - [Claude Code CLI](https://www.npmjs.com/package/@anthropic-ai/claude-code)
 - [uv](https://docs.astral.sh/uv/)
 

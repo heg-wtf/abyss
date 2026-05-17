@@ -109,7 +109,7 @@ def append_event(
                 continue
             try:
                 json.dumps(value)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 continue
             record[key] = value
 
@@ -186,7 +186,7 @@ def aggregate(bot_name: str) -> list[ToolMetricsRow]:
             continue
         try:
             value = float(duration)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         buckets.setdefault(tool, []).append(value)
 
