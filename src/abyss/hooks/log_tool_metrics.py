@@ -62,7 +62,7 @@ def _extract_duration_ms(payload: dict[str, Any]) -> float | None:
         return None
     try:
         return float(raw)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 

@@ -53,7 +53,7 @@ def check_claude_code() -> EnvironmentCheckResult:
     try:
         result = subprocess.run(["claude", "--version"], capture_output=True, text=True, timeout=10)
         version = result.stdout.strip() or result.stderr.strip()
-    except subprocess.TimeoutExpired, OSError:
+    except (subprocess.TimeoutExpired, OSError):
         version = "unknown"
 
     return EnvironmentCheckResult(name="Claude Code", available=True, version=version, message="")
@@ -72,7 +72,7 @@ def check_node() -> EnvironmentCheckResult:
     try:
         result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
         version = result.stdout.strip()
-    except subprocess.TimeoutExpired, OSError:
+    except (subprocess.TimeoutExpired, OSError):
         version = "unknown"
 
     return EnvironmentCheckResult(name="Node.js", available=True, version=version, message="")
@@ -182,7 +182,7 @@ def prompt_timezone() -> str:
 
     try:
         ZoneInfo(timezone_input)
-    except KeyError, ValueError:
+    except (KeyError, ValueError):
         console.print(f"[red]Invalid timezone: {timezone_input}. Using {detected}.[/red]")
         timezone_input = detected
 
@@ -397,7 +397,7 @@ def _display_qmd_status() -> None:
         else:
             # Fallback: non-JSON status
             console.print(f"  [green]OK[/green] QMD CLI: {qmd_path}")
-    except subprocess.TimeoutExpired, OSError, ValueError:
+    except (subprocess.TimeoutExpired, OSError, ValueError):
         console.print(f"  [green]OK[/green] QMD CLI: {qmd_path}")
 
     # Daemon status

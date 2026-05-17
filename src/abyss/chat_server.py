@@ -425,7 +425,7 @@ def _load_session_meta(session_dir: Path) -> dict[str, Any]:
         return {}
     try:
         return json.loads(meta_path.read_text(encoding="utf-8"))
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return {}
 
 
