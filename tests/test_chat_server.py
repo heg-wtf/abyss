@@ -1605,3 +1605,142 @@ async def test_routine_messages_rejects_unknown_kind(client, abyss_home):
     assert resp.status == 200
     body = await resp.json()
     assert body["messages"] == []
+
+
+# ---------------------------------------------------------------------------
+# Read-state (last_read_at / unread)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_list_defaults_to_read_when_no_meta(client, abyss_home):
+    """No ``.session_meta.json`` → ``unread=False`` so existing
+    sessions do not all light up bold at upgrade time."""
+    sid = "chat_web_abc111"
+    (abyss_home / "bots" / "alpha" / "sessions" / sid).mkdir(parents=True)
+    listing = await client.get("/chat/sessions", params={"bot": "alpha"})
+    body = await listing.json()
+    entry = next(s for s in body["sessions"] if s["id"] == sid)
+    assert entry["last_read_at"] is None
+    assert entry["unread"] is False
+
+
+@pytest.mark.asyncio
+async def test_mark_session_read_flips_unread_false(client, abyss_home):
+    """After ``POST /read`` the next list shows ``unread=False`` even
+    though the conversation file is newer than the read mark — the
+    strict ``>`` comparison anchors on the freshly stamped time."""
+    import os as _os
+    import time
+
+    sid = "chat_web_abc222"
+    session_dir = abyss_home / "bots" / "alpha" / "sessions" / sid
+    session_dir.mkdir(parents=True)
+    (session_dir / "conversation-260518.md").write_text(
+        "## user (2026-05-18 05:00:00 UTC)\n\nhi\n\n"
+        "## assistant (2026-05-18 05:00:01 UTC)\n\nhello\n"
+    )
+
+    old = time.time() - 5
+    _os.utime(session_dir, (old, old))
+
+    resp = await client.post(f"/chat/sessions/alpha/{sid}/read")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["last_read_at"]
+
+    listing = await client.get("/chat/sessions", params={"bot": "alpha"})
+    listing_body = await listing.json()
+    entry = next(s for s in listing_body["sessions"] if s["id"] == sid)
+    assert entry["unread"] is False
+    assert entry["last_read_at"] == body["last_read_at"]
+
+
+@pytest.mark.asyncio
+async def test_session_unread_true_when_activity_newer_than_read(client, abyss_home):
+    """Stamp a read mark, then touch the session dir to a later mtime
+    — the next list response must flip ``unread`` back to True."""
+    import os as _os
+    import time
+
+    sid = "chat_web_abc333"
+    session_dir = abyss_home / "bots" / "alpha" / "sessions" / sid
+    session_dir.mkdir(parents=True)
+
+    await client.post(f"/chat/sessions/alpha/{sid}/read")
+    future = time.time() + 60
+    _os.utime(session_dir, (future, future))
+
+    listing = await client.get("/chat/sessions", params={"bot": "alpha"})
+    body = await listing.json()
+    entry = next(s for s in body["sessions"] if s["id"] == sid)
+    assert entry["unread"] is True
+
+
+@pytest.mark.asyncio
+async def test_mark_session_read_unknown_session_404(client):
+    """Mark-read on a missing session dir returns 404 rather than
+    silently creating a hidden meta file outside any real session."""
+    resp = await client.post("/chat/sessions/alpha/chat_web_999999/read")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_mark_routine_read_writes_meta(client, abyss_home):
+    """Routine mark-read uses the same meta filename as sessions and
+    is visible on the routines list endpoint."""
+    import os as _os
+    import time
+
+    cron_dir = abyss_home / "bots" / "alpha" / "cron_sessions" / "daily-brief"
+    cron_dir.mkdir(parents=True)
+    (cron_dir / "conversation-260518.md").write_text(
+        "## user (2026-05-18 05:00:00 UTC)\n\ntrigger\n\n"
+        "## assistant (2026-05-18 05:00:01 UTC)\n\nbrief output\n"
+    )
+    old = time.time() - 5
+    _os.utime(cron_dir, (old, old))
+
+    resp = await client.post("/chat/routines/alpha/cron/daily-brief/read")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["last_read_at"]
+
+    meta_path = cron_dir / ".session_meta.json"
+    assert meta_path.exists()
+
+    listing = await client.get("/chat/routines")
+    listing_body = await listing.json()
+    entry = next(
+        r
+        for r in listing_body["routines"]
+        if r["kind"] == "cron" and r["job_name"] == "daily-brief"
+    )
+    assert entry["unread"] is False
+    assert entry["last_read_at"] == body["last_read_at"]
+
+
+@pytest.mark.asyncio
+async def test_mark_routine_read_unknown_kind_404(client):
+    """Path-traversal guard — only ``cron`` / ``heartbeat`` resolve."""
+    resp = await client.post("/chat/routines/alpha/escape/x/read")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_mark_session_read_corrupt_meta_recovers(client, abyss_home):
+    """Pre-existing garbage in ``.session_meta.json`` is overwritten
+    cleanly on the next mark-read — no exception bubbles up."""
+    sid = "chat_web_abcdef"
+    session_dir = abyss_home / "bots" / "alpha" / "sessions" / sid
+    session_dir.mkdir(parents=True)
+    (session_dir / ".session_meta.json").write_text("{not valid json")
+
+    resp = await client.post(f"/chat/sessions/alpha/{sid}/read")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["last_read_at"]
+
+    meta_text = (session_dir / ".session_meta.json").read_text()
+    parsed = json.loads(meta_text)
+    assert parsed["last_read_at"] == body["last_read_at"]

@@ -307,6 +307,8 @@ async def execute_heartbeat(
             title=f"💓 {display_name}",
             body=preview or "Heartbeat check ran.",
             bot=bot_name,
+            kind="heartbeat",
+            job_name="heartbeat",
         )
 
     # Telegram fan-out is gone. The markdown log + Web Push above

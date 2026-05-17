@@ -197,6 +197,43 @@ class TestSendPush:
         assert body["session_id"] == "chat_web_abc"
 
     @pytest.mark.asyncio
+    async def test_routine_payload_carries_kind_and_job_name(self, abyss_home, fake_subscription):
+        """cron / heartbeat pushes ship ``kind`` + ``job_name`` so the
+        Service Worker can route the notification tap into
+        ``/mobile/routine/<bot>/<kind>/<job>`` instead of falling back
+        to the chat URL. The chat-push case (no ``kind``) keeps the
+        payload free of the new fields so the existing notification
+        UI is unaffected."""
+        await web_push.add_subscription(fake_subscription)
+        with patch("abyss.web_push.webpush") as mock:
+            await web_push.send_push(
+                title="⏰ Alpha: brief",
+                body="done",
+                bot="alpha",
+                kind="cron",
+                job_name="brief",
+                skip_visible=False,
+            )
+        body = json.loads(mock.call_args.kwargs["data"])
+        assert body["kind"] == "cron"
+        assert body["job_name"] == "brief"
+        assert "session_id" not in body
+
+        with patch("abyss.web_push.webpush") as mock:
+            await web_push.send_push(
+                title="Alpha",
+                body="hi",
+                bot="alpha",
+                session_id="chat_web_abc",
+                kind="chat",
+                skip_visible=False,
+            )
+        body = json.loads(mock.call_args.kwargs["data"])
+        assert body["kind"] == "chat"
+        assert body["session_id"] == "chat_web_abc"
+        assert "job_name" not in body
+
+    @pytest.mark.asyncio
     async def test_skips_visible_device_by_default(self, abyss_home, fake_subscription):
         await web_push.add_subscription(fake_subscription)
         web_push.mark_device_visible(fake_subscription["device_id"])

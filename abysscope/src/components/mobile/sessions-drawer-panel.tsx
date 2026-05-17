@@ -8,6 +8,7 @@ import {
   getSessionStream,
   useMultiSessionChatStream,
 } from "@/components/chat/use-chat-stream";
+import { setUnreadBadge } from "@/lib/abyss-api";
 import type {
   BotSummary,
   ChatSession,
@@ -138,6 +139,16 @@ export function SessionsDrawerPanel({
     };
   }, []);
 
+  // App-icon badge — sum of unread sessions + unread routines.
+  // Recomputes whenever either list shifts (initial fetch, optimistic
+  // tap, refresh). The helper itself no-ops in browsers that lack
+  // ``setAppBadge`` so this is safe to call unconditionally.
+  React.useEffect(() => {
+    const unreadSessions = sessions.filter((s) => s.unread === true).length;
+    const unreadRoutines = routines.filter((r) => r.unread === true).length;
+    setUnreadBadge(unreadSessions + unreadRoutines);
+  }, [sessions, routines]);
+
   // Routines (cron + heartbeat) fetch lazily — only when the tab is
   // opened — so cold-loading the drawer for normal chat use doesn't
   // do an extra network round-trip on phones over Tailscale.
@@ -260,34 +271,69 @@ export function SessionsDrawerPanel({
               No routines yet
             </li>
           ) : (
-            routines.map((routine) => (
-              <li key={`${routine.bot}:${routine.kind}:${routine.job_name}`}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    router.push(
-                      `/mobile/routine/${routine.bot}/${routine.kind}/${routine.job_name}`,
-                    );
-                  }}
-                  className="flex w-full min-w-0 items-center gap-3 border-b px-4 py-3 text-left active:bg-muted"
-                >
-                  <BotAvatar
-                    botName={routine.bot}
-                    displayName={routine.bot_display_name}
-                    size="md"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <RoutineKindIcon kind={routine.kind} />
-                      <span className="truncate">{routine.job_name}</span>
+            routines.map((routine) => {
+              const isUnread = routine.unread === true;
+              return (
+                <li key={`${routine.bot}:${routine.kind}:${routine.job_name}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isUnread) {
+                        setRoutines((prev) =>
+                          prev.map((r) =>
+                            r.bot === routine.bot &&
+                            r.kind === routine.kind &&
+                            r.job_name === routine.job_name
+                              ? { ...r, unread: false }
+                              : r,
+                          ),
+                        );
+                      }
+                      router.push(
+                        `/mobile/routine/${routine.bot}/${routine.kind}/${routine.job_name}`,
+                      );
+                    }}
+                    className="flex w-full min-w-0 items-center gap-3 border-b px-4 py-3 text-left active:bg-muted"
+                  >
+                    <BotAvatar
+                      botName={routine.bot}
+                      displayName={routine.bot_display_name}
+                      size="md"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 text-sm">
+                        {isUnread && (
+                          <span
+                            aria-label="새 실행 결과"
+                            title="새 실행 결과"
+                            className="inline-block size-2 shrink-0 rounded-full bg-emerald-500"
+                          />
+                        )}
+                        <RoutineKindIcon kind={routine.kind} />
+                        <span
+                          className={`truncate ${
+                            isUnread
+                              ? "font-semibold text-foreground"
+                              : "font-medium"
+                          }`}
+                        >
+                          {routine.job_name}
+                        </span>
+                      </div>
+                      <div
+                        className={`truncate text-xs ${
+                          isUnread
+                            ? "font-medium text-foreground"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        {routine.preview || "(no runs yet)"}
+                      </div>
                     </div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {routine.preview || "(no runs yet)"}
-                    </div>
-                  </div>
-                </button>
-              </li>
-            ))
+                  </button>
+                </li>
+              );
+            })
           )
         ) : loading && sessions.length === 0 ? (
           <li className="px-4 py-3 text-sm text-muted-foreground">Loading…</li>
@@ -305,6 +351,7 @@ export function SessionsDrawerPanel({
               sess.bot_display_name ||
               sess.bot;
             const isStreaming = getSessionStream(stream.streams, sess.id).streaming;
+            const isUnread = sess.unread === true && !isActive;
             const menuOpen = menuAnchor?.session.id === sess.id;
             return (
               <li key={key}>
@@ -326,6 +373,17 @@ export function SessionsDrawerPanel({
                     type="button"
                     onClick={() => {
                       setMenuAnchor(null);
+                      // Optimistic: hide unread dot immediately on
+                      // tap. Server mark happens on detail mount.
+                      if (sess.unread) {
+                        setSessions((prev) =>
+                          prev.map((s) =>
+                            s.bot === sess.bot && s.id === sess.id
+                              ? { ...s, unread: false }
+                              : s,
+                          ),
+                        );
+                      }
                       onSelect({ bot: sess.bot, id: sess.id });
                     }}
                     className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left active:bg-muted"
@@ -337,7 +395,7 @@ export function SessionsDrawerPanel({
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-1.5">
-                        {isStreaming && (
+                        {isStreaming ? (
                           <span
                             aria-label="진행중"
                             title="진행중"
@@ -347,12 +405,30 @@ export function SessionsDrawerPanel({
                                 "stream-pulse 1.4s ease-in-out infinite",
                             }}
                           />
-                        )}
-                        <div className="truncate text-sm font-medium">
+                        ) : isUnread ? (
+                          <span
+                            aria-label="새 메시지"
+                            title="새 메시지"
+                            className="inline-block size-2 shrink-0 rounded-full bg-emerald-500"
+                          />
+                        ) : null}
+                        <div
+                          className={`truncate text-sm ${
+                            isUnread
+                              ? "font-semibold text-foreground"
+                              : "font-medium"
+                          }`}
+                        >
                           {label}
                         </div>
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">
+                      <div
+                        className={`truncate text-xs ${
+                          isUnread
+                            ? "font-medium text-foreground"
+                            : "text-muted-foreground"
+                        }`}
+                      >
                         {isStreaming
                           ? "응답 생성 중…"
                           : sess.preview || "(no messages yet)"}

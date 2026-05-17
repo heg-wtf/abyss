@@ -466,6 +466,8 @@ async def execute_cron_job(
             title=f"⏰ {display_name}: {job_name}",
             body=preview or f"Cron job '{job_name}' finished.",
             bot=bot_name,
+            kind="cron",
+            job_name=job_name,
         )
 
     # Telegram delivery is gone — the markdown log + Web Push above

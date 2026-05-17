@@ -51,6 +51,7 @@ import { MessageBubble } from "./mobile-chat-message-bubble";
 import { PendingAttachmentChip } from "./mobile-chat-attachment-chip";
 import { SlashCommandList } from "./mobile-chat-slash-command-list";
 import { StreamProgress } from "./mobile-chat-streaming";
+import { UnreadDivider } from "./unread-divider";
 
 interface Props {
   bots: BotSummary[];
@@ -65,6 +66,16 @@ const ALLOWED_SET = new Set<string>(ALLOWED_UPLOAD_MIME_TYPES);
 // ---------------------------------------------------------------------------
 
 export function MobileChatScreen({ bots, session, initialMessages }: Props) {
+  // Snapshot of ``last_read_at`` at mount. ``markSessionRead`` will
+  // bump the server value below, but the divider position is
+  // anchored to the value the user had when they opened the screen
+  // so the "you read up to here" marker does not shift while they
+  // scroll. Subsequent SSE arrivals are inherently read. A
+  // ``useState`` initializer (rather than a ref) keeps the value
+  // accessible during render without violating react-hooks/refs.
+  const [initialLastReadAt] = React.useState<string | null>(
+    () => session.last_read_at ?? null,
+  );
   const [messages, setMessages] = React.useState<ConversationMessage[]>(
     () => initialMessages.map((m) => ({ ...m, id: newId() }))
   );
@@ -130,6 +141,44 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     },
     [siblingSessions, session.id, session.bot, router],
   );
+
+  // Mount-time mark-read. Fire-and-forget — failures are silent so
+  // a flaky sidecar never blocks the chat from opening. The fetch
+  // goes through the Next.js proxy so it works from a phone over
+  // Tailscale (where direct sidecar URLs are unreachable). The
+  // proxy also broadcasts a ``dismiss-notification`` to the Service
+  // Worker so any pending tray entry for this session is closed.
+  React.useEffect(() => {
+    const tag = `session:${session.bot}:${session.id}`;
+    fetch(
+      `/api/chat/sessions/${encodeURIComponent(session.bot)}/${encodeURIComponent(session.id)}/read`,
+      { method: "POST" },
+    ).catch(() => {});
+    if (typeof navigator !== "undefined") {
+      try {
+        navigator.serviceWorker?.controller?.postMessage({
+          type: "dismiss-notification",
+          tag,
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }, [session.bot, session.id]);
+
+  // Index of the first unread assistant message in the initial
+  // transcript — anchors the ``여기까지 읽음`` divider. ``null`` ==
+  // no divider (either ``last_read_at`` absent → all read by policy,
+  // or every message predates the read mark).
+  const unreadDividerIndex = React.useMemo(() => {
+    if (!initialLastReadAt) return null;
+    for (let i = 0; i < initialMessages.length; i++) {
+      const m = initialMessages[i];
+      if (m.role !== "assistant") continue;
+      if (m.timestamp && m.timestamp > initialLastReadAt) return i;
+    }
+    return null;
+  }, [initialMessages, initialLastReadAt]);
 
   const swipeStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const onMessagesTouchStart = (event: React.TouchEvent<HTMLElement>) => {
@@ -628,13 +677,15 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
           </p>
         )}
         <ul className="space-y-3">
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              queued={queued?.userMessageId === message.id}
-              onCancelQueue={cancelQueued}
-            />
+          {messages.map((message, index) => (
+            <React.Fragment key={message.id}>
+              {index === unreadDividerIndex && <UnreadDivider />}
+              <MessageBubble
+                message={message}
+                queued={queued?.userMessageId === message.id}
+                onCancelQueue={cancelQueued}
+              />
+            </React.Fragment>
           ))}
           {activeStream.streaming && (
             <li

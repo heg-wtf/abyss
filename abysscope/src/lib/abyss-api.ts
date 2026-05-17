@@ -29,6 +29,14 @@ export interface ChatSession {
    * ``<session_dir>/.session_meta.json`` on the backend.
    */
   custom_name?: string | null;
+  /**
+   * ISO timestamp of the last time the user opened this session.
+   * ``null`` until first read; server stamps it via
+   * ``POST /chat/sessions/{bot}/{id}/read``.
+   */
+  last_read_at?: string | null;
+  /** Server-computed: ``updated_at > last_read_at``. */
+  unread?: boolean;
 }
 
 export interface ChatAttachmentRef {
@@ -189,6 +197,28 @@ export async function getChatMessages(
 }
 
 /**
+ * Stamp ``last_read_at = now()`` for a chat session.
+ *
+ * Throws on sidecar errors; callers from page mount should wrap in a
+ * silent ``.catch`` so a flaky network never blocks the detail view
+ * from opening. The Next.js proxy maps thrown errors to 503.
+ *
+ * Also fires a ``dismiss-notification`` message to the Service
+ * Worker so any pending notification for the same session falls out
+ * of the tray. Best-effort — never throws on the SW path.
+ */
+export async function markSessionRead(
+  bot: string,
+  sessionId: string
+): Promise<void> {
+  await jsonFetch(
+    `/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}/read`,
+    { method: "POST" }
+  );
+  dismissNotification(`session:${bot}:${sessionId}`);
+}
+
+/**
  * A scheduled-run surface: cron job or heartbeat session. Shares the
  * core "bot + last-run + preview" shape with ``ChatSession`` so the
  * mobile Routines tab can use the same row component, with two extra
@@ -201,6 +231,8 @@ export interface RoutineSummary {
   job_name: string;
   updated_at: string;
   preview: string;
+  last_read_at?: string | null;
+  unread?: boolean;
 }
 
 export async function listRoutines(): Promise<RoutineSummary[]> {
@@ -219,6 +251,61 @@ export async function getRoutineMessages(
     `/chat/routines/${encodeURIComponent(bot)}/${encodeURIComponent(kind)}/${encodeURIComponent(jobName)}/messages`
   );
   return data.messages;
+}
+
+/** Routine mark-read — see ``markSessionRead``. */
+export async function markRoutineRead(
+  bot: string,
+  kind: RoutineSummary["kind"],
+  jobName: string
+): Promise<void> {
+  await jsonFetch(
+    `/chat/routines/${encodeURIComponent(bot)}/${encodeURIComponent(kind)}/${encodeURIComponent(jobName)}/read`,
+    { method: "POST" }
+  );
+  dismissNotification(`routine:${bot}:${kind}:${jobName}`);
+}
+
+/**
+ * Tell the active Service Worker to close any notification with the
+ * given tag. No-op on the server (SSR), in browsers without a
+ * controller (PWA not yet activated), and on the Next.js proxy path
+ * where ``navigator`` does not exist. Failure is fine — the worst
+ * case is a stale notification in the tray.
+ */
+function dismissNotification(tag: string): void {
+  if (typeof navigator === "undefined") return;
+  const controller = navigator.serviceWorker?.controller;
+  if (!controller) return;
+  try {
+    controller.postMessage({ type: "dismiss-notification", tag });
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Reflect the unread count on the PWA app icon (iOS 16.4+, modern
+ * Chromium). ``count<=0`` clears the badge. Silently no-ops on
+ * browsers that lack ``setAppBadge`` — the in-app dot already covers
+ * the unread signal there.
+ */
+export function setUnreadBadge(count: number): void {
+  if (typeof navigator === "undefined") return;
+  type BadgeNav = Navigator & {
+    setAppBadge?: (count?: number) => Promise<void>;
+    clearAppBadge?: () => Promise<void>;
+  };
+  const nav = navigator as BadgeNav;
+  try {
+    if (count > 0 && nav.setAppBadge) {
+      void nav.setAppBadge(count).catch(() => {});
+    } else if (nav.clearAppBadge) {
+      void nav.clearAppBadge().catch(() => {});
+    }
+  } catch {
+    // ignore
+  }
 }
 
 export async function cancelChat(bot: string, sessionId: string): Promise<void> {

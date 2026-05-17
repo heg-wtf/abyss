@@ -272,12 +272,19 @@ class PushPayload:
     message. Anything heavier (full transcripts, attachments) stays
     on the server; the click handler navigates the user to the live
     dashboard where the data is already available.
+
+    ``kind`` discriminates the surface so the SW can pick a unique
+    notification tag per (bot, session/routine). Without it, multiple
+    cron runs and chat replies collapse onto the same default tag and
+    the user only sees the latest.
     """
 
     title: str
     body: str
     bot: str | None = None
     session_id: str | None = None
+    kind: str | None = None  # "chat" | "cron" | "heartbeat"
+    job_name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"title": self.title, "body": self.body}
@@ -285,6 +292,10 @@ class PushPayload:
             out["bot"] = self.bot
         if self.session_id:
             out["session_id"] = self.session_id
+        if self.kind:
+            out["kind"] = self.kind
+        if self.job_name:
+            out["job_name"] = self.job_name
         return out
 
 
@@ -320,6 +331,8 @@ async def send_push(
     body: str,
     bot: str | None = None,
     session_id: str | None = None,
+    kind: str | None = None,
+    job_name: str | None = None,
     skip_visible: bool = True,
 ) -> int:
     """Send a push to every stored subscription.
@@ -342,7 +355,14 @@ async def send_push(
     vapid_private = _vapid_private_b64url(keys.private_pem)
     vapid_claims = {"sub": VAPID_CONTACT}
     payload = json.dumps(
-        PushPayload(title=title, body=body, bot=bot, session_id=session_id).to_dict(),
+        PushPayload(
+            title=title,
+            body=body,
+            bot=bot,
+            session_id=session_id,
+            kind=kind,
+            job_name=job_name,
+        ).to_dict(),
         ensure_ascii=False,
     )
 
