@@ -15,7 +15,7 @@ import {
 import { BotAvatar } from "@/components/bot-avatar";
 import { SlideDrawer } from "@/components/mobile/slide-drawer";
 import { SessionsDrawerPanel } from "@/components/mobile/sessions-drawer-panel";
-import { parseChatEvents } from "@/lib/abyss-api";
+import { formatBotLabel, parseChatEvents } from "@/lib/abyss-api";
 import type { ChatMessage, RoutineSummary } from "@/lib/abyss-api";
 import { UnreadDivider } from "@/components/mobile/unread-divider";
 
@@ -194,7 +194,11 @@ export function MobileRoutineScreen({ routine, initialMessages }: Props) {
             <span className="truncate">{routine.job_name}</span>
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            {routine.bot_display_name} · {routine.kind}
+            {formatBotLabel({
+              display_name: routine.bot_display_name,
+              alias: routine.bot_alias,
+            })}{" "}
+            · {routine.kind}
           </div>
         </div>
         <button

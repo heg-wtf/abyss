@@ -11,16 +11,47 @@ export function getApiBase(): string {
   return process.env.ABYSS_CHAT_API_URL ?? DEFAULT_BASE;
 }
 
+/**
+ * Render a bot's display label.
+ *
+ * Returns ``"<display_name> (<alias>)"`` when ``alias`` is a
+ * non-blank string, otherwise the bare ``display_name``. The single
+ * helper keeps formatting consistent across every list / picker / row
+ * surface — change the format here once and the whole UI follows.
+ *
+ * Intentionally NOT used by chat message bubble author labels or Web
+ * Push notification titles (per product decision — see plan doc).
+ */
+export function formatBotLabel(input: {
+  display_name?: string | null;
+  alias?: string | null;
+}): string {
+  const name = (input.display_name ?? "").trim();
+  const alias = (input.alias ?? "").trim();
+  if (!name) return alias;
+  if (!alias) return name;
+  return `${name} (${alias})`;
+}
+
 export interface BotSummary {
   name: string;
   display_name: string;
   type: string;
+  /**
+   * Optional role / job label. The dashboard renders it as
+   * ``"<display_name> (<alias>)"`` in list surfaces (sidebar, drawer,
+   * picker) via ``formatBotLabel``. Chat message bubbles and Web
+   * Push titles intentionally skip the alias.
+   */
+  alias?: string | null;
 }
 
 export interface ChatSession {
   id: string;
   bot: string;
   bot_display_name?: string;
+  /** Optional bot alias — see ``BotSummary.alias`` for semantics. */
+  bot_alias?: string | null;
   updated_at: string;
   preview: string;
   /**
@@ -227,6 +258,8 @@ export async function markSessionRead(
 export interface RoutineSummary {
   bot: string;
   bot_display_name: string;
+  /** Optional bot alias — see ``BotSummary.alias`` for semantics. */
+  bot_alias?: string | null;
   kind: "cron" | "heartbeat";
   job_name: string;
   updated_at: string;

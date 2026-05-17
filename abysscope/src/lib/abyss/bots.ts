@@ -6,6 +6,12 @@ import { getConfig } from "./config";
 export interface BotConfig {
   name: string;
   display_name: string;
+  /**
+   * Optional role / job label. Rendered as
+   * ``"<display_name> (<alias>)"`` in list surfaces via
+   * ``formatBotLabel``.
+   */
+  alias?: string | null;
   personality: string;
   role: string;
   goal: string;
@@ -73,6 +79,14 @@ export function updateBot(name: string, updates: Partial<BotConfig>): void {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { name: _name, ...rest } = updates;
-  const merged = { ...current, ...rest };
+  const merged = { ...current, ...rest } as Record<string, unknown>;
+  // ``null`` is the explicit "delete this field" sentinel — used
+  // by optional UI fields (e.g. alias) when the user clears them
+  // so the YAML stays clean rather than carrying ``alias: null``.
+  for (const [key, value] of Object.entries(rest)) {
+    if (value === null) {
+      delete merged[key];
+    }
+  }
   writeYaml(botYamlPath, merged);
 }

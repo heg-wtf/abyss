@@ -46,6 +46,7 @@ import type {
   PendingAttachment,
 } from "./mobile-chat-types";
 import { newId, sessionLabel } from "./mobile-chat-helpers";
+import { formatBotLabel } from "@/lib/abyss-api";
 import { MarkdownBody } from "./mobile-chat-markdown-body";
 import { MessageBubble } from "./mobile-chat-message-bubble";
 import { PendingAttachmentChip } from "./mobile-chat-attachment-chip";
@@ -651,7 +652,10 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             {sessionLabel(session)}
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            {botSummary.display_name}
+            {formatBotLabel({
+              display_name: botSummary.display_name,
+              alias: botSummary.alias,
+            })}
           </div>
         </div>
         <button

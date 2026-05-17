@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachmentUrl,
+  formatBotLabel,
   markRoutineRead,
   markSessionRead,
   parseChatEvents,
@@ -176,6 +177,28 @@ describe("markSessionRead / markRoutineRead", () => {
       /\/chat\/routines\/alpha\/cron\/daily%20brief\/read$/,
     );
     expect(call[1]?.method).toBe("POST");
+  });
+});
+
+describe("formatBotLabel", () => {
+  it("appends alias in parens when present", () => {
+    expect(formatBotLabel({ display_name: "앤", alias: "집사" })).toBe(
+      "앤 (집사)",
+    );
+  });
+
+  it("returns the bare display name when alias is null", () => {
+    expect(formatBotLabel({ display_name: "앤", alias: null })).toBe("앤");
+  });
+
+  it("treats whitespace-only alias as absent", () => {
+    expect(formatBotLabel({ display_name: "앤", alias: "   " })).toBe("앤");
+  });
+
+  it("trims both fields", () => {
+    expect(
+      formatBotLabel({ display_name: "  앤  ", alias: "  집사  " }),
+    ).toBe("앤 (집사)");
   });
 });
 

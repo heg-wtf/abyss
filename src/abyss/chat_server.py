@@ -401,12 +401,43 @@ def _bot_display_name(bot_name: str) -> str:
     return cfg.get("display_name") or bot_name
 
 
+def _bot_alias(bot_name: str) -> str | None:
+    """Resolve a bot's optional alias (role / job label).
+
+    Returns ``None`` when the bot has no alias configured or the
+    stored value is empty/whitespace-only. The UI uses this to render
+    ``"<display_name> (<alias>)"`` everywhere except the chat message
+    bubble + push notification title — those keep the bare display
+    name to avoid label noise / iOS truncation.
+    """
+    cfg = load_bot_config(bot_name) or {}
+    raw = cfg.get("alias")
+    if not isinstance(raw, str):
+        return None
+    cleaned = raw.strip()
+    return cleaned or None
+
+
 # ---------------------------------------------------------------------------
 # Per-session user metadata (custom name, …)
 # ---------------------------------------------------------------------------
 
 _SESSION_META_FILENAME = ".session_meta.json"
 MAX_CUSTOM_NAME_LENGTH = 64
+MAX_BOT_ALIAS_LENGTH = 30
+
+
+def _sanitise_bot_alias(raw: str) -> str:
+    """Trim + cap + strip control chars from a bot alias.
+
+    Empty result means "remove the alias". Caller decides whether to
+    delete the field or reject the request.
+    """
+    cleaned = "".join(ch for ch in raw if ch == " " or ch.isprintable())
+    cleaned = cleaned.strip()
+    if len(cleaned) > MAX_BOT_ALIAS_LENGTH:
+        cleaned = cleaned[:MAX_BOT_ALIAS_LENGTH].rstrip()
+    return cleaned
 
 
 def _session_meta_path(session_dir: Path) -> Path:
@@ -503,6 +534,7 @@ def _routine_metadata(
     return {
         "bot": bot_name,
         "bot_display_name": bot_display_name,
+        "bot_alias": _bot_alias(bot_name),
         "kind": kind,
         "job_name": job_name,
         "updated_at": updated_at,
@@ -592,6 +624,7 @@ def _session_metadata(
         "id": session_dir.name,
         "bot": bot_name,
         "bot_display_name": bot_display_name or _bot_display_name(bot_name),
+        "bot_alias": _bot_alias(bot_name),
         "updated_at": updated_at,
         "preview": preview,
         "custom_name": meta.get("custom_name") or None,
@@ -807,11 +840,14 @@ class ChatServer:
                 continue
             cfg = load_bot_config(name) or {}
             backend_cfg = cfg.get("backend") or {}
+            alias_raw = cfg.get("alias")
+            alias = alias_raw.strip() if isinstance(alias_raw, str) and alias_raw.strip() else None
             out.append(
                 {
                     "name": name,
                     "display_name": cfg.get("display_name") or name,
                     "type": backend_cfg.get("type", "claude_code"),
+                    "alias": alias,
                 }
             )
         return web.json_response({"bots": out})
@@ -857,6 +893,8 @@ class ChatServer:
         personality = str(body.get("personality") or "").strip()
         role = str(body.get("role") or "").strip()
         goal = str(body.get("goal") or "").strip()
+        alias_raw = str(body.get("alias") or "")
+        alias = _sanitise_bot_alias(alias_raw)
 
         if not display_name:
             return web.json_response({"error": "display_name required"}, status=400)
@@ -864,6 +902,11 @@ class ChatServer:
             return web.json_response({"error": "personality required"}, status=400)
         if not role:
             return web.json_response({"error": "role required"}, status=400)
+        if alias_raw and not alias:
+            return web.json_response(
+                {"error": f"alias must be 1-{MAX_BOT_ALIAS_LENGTH} printable chars"},
+                status=400,
+            )
 
         profile = {
             "name": raw_name,
@@ -872,6 +915,8 @@ class ChatServer:
             "role": role,
             "goal": goal,
         }
+        if alias:
+            profile["alias"] = alias
 
         try:
             await asyncio.to_thread(create_bot, profile, None)
