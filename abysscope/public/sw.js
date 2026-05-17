@@ -25,18 +25,35 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+function tagFor(data) {
+  // Chat replies are keyed by session; cron / heartbeat are keyed by
+  // (kind, job_name). A unique tag per surface keeps repeated runs
+  // collapsing onto a single notification rather than pushing the
+  // previous payload off-screen across unrelated bots.
+  if (data.kind === "cron" || data.kind === "heartbeat") {
+    return `routine:${data.bot || "abyss"}:${data.kind}:${data.job_name || "default"}`;
+  }
+  if (data.session_id) {
+    return `session:${data.bot || "abyss"}:${data.session_id}`;
+  }
+  return undefined;
+}
+
 self.addEventListener("push", (event) => {
   const data = event.data?.json() ?? {};
   const title = data.title || "Abyss";
+  const tag = tagFor(data);
   const options = {
     body: data.body || "",
     icon: "/android-chrome-192x192.png",
     badge: "/favicon-32x32.png",
-    tag: data.session_id ? `session:${data.bot || "abyss"}:${data.session_id}` : undefined,
-    renotify: !!data.session_id,
+    tag,
+    renotify: !!tag,
     data: {
       bot: data.bot || null,
       session_id: data.session_id || null,
+      kind: data.kind || null,
+      job_name: data.job_name || null,
     },
   };
   event.waitUntil(self.registration.showNotification(title, options));
@@ -45,10 +62,25 @@ self.addEventListener("push", (event) => {
 const PUSH_NAV_CACHE = "push-nav";
 const PUSH_NAV_KEY = "/_push-pending";
 
+function targetPath({ bot, sessionId, kind, jobName }) {
+  if (bot && (kind === "cron" || kind === "heartbeat") && jobName) {
+    return `/mobile/routine/${bot}/${kind}/${jobName}`;
+  }
+  if (bot && sessionId) {
+    return `/mobile/chat/${bot}/${sessionId}`;
+  }
+  return "/mobile";
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const { bot, session_id: sessionId } = event.notification.data || {};
-  const nav = { bot, sessionId };
+  const {
+    bot,
+    session_id: sessionId,
+    kind,
+    job_name: jobName,
+  } = event.notification.data || {};
+  const nav = { bot, sessionId, kind, jobName };
 
   event.waitUntil(
     caches
@@ -64,8 +96,7 @@ self.addEventListener("notificationclick", (event) => {
             return client.focus();
           }
         }
-        const target = bot && sessionId ? `/mobile/chat/${bot}/${sessionId}` : "/mobile";
-        return self.clients.openWindow(target);
+        return self.clients.openWindow(targetPath(nav));
       }),
   );
 });
@@ -77,6 +108,20 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "clear-notifications") {
     event.waitUntil(
       self.registration.getNotifications().then((notifications) => {
+        notifications.forEach((n) => n.close());
+      }),
+    );
+    return;
+  }
+
+  // Selective dismiss — fires from ``markSessionRead`` /
+  // ``markRoutineRead`` so only the just-read tag clears. The
+  // ``clear-notifications`` path above remains for the visibility
+  // catch-up sweep when the page returns to foreground.
+  if (event.data?.type === "dismiss-notification" && event.data.tag) {
+    const tag = event.data.tag;
+    event.waitUntil(
+      self.registration.getNotifications({ tag }).then((notifications) => {
         notifications.forEach((n) => n.close());
       }),
     );

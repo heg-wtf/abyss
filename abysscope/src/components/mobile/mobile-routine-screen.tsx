@@ -17,6 +17,7 @@ import { SlideDrawer } from "@/components/mobile/slide-drawer";
 import { SessionsDrawerPanel } from "@/components/mobile/sessions-drawer-panel";
 import { parseChatEvents } from "@/lib/abyss-api";
 import type { ChatMessage, RoutineSummary } from "@/lib/abyss-api";
+import { UnreadDivider } from "@/components/mobile/unread-divider";
 
 interface Props {
   routine: RoutineSummary;
@@ -35,11 +36,50 @@ interface Props {
  */
 export function MobileRoutineScreen({ routine, initialMessages }: Props) {
   const router = useRouter();
+  const [initialLastReadAt] = React.useState<string | null>(
+    () => routine.last_read_at ?? null,
+  );
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [refreshing, setRefreshing] = React.useState(false);
   const [sessionsOpen, setSessionsOpen] = React.useState(false);
   const [draft, setDraft] = React.useState("");
   const [sending, setSending] = React.useState(false);
+
+  // Mount-time mark-read. Goes through the Next.js proxy so it works
+  // from a phone over Tailscale; failures are silent so a flaky
+  // network never blocks the view from opening. SW dismiss runs in
+  // parallel so the routine notification clears from the tray.
+  React.useEffect(() => {
+    const { bot, kind, job_name: jobName } = routine;
+    const tag = `routine:${bot}:${kind}:${jobName}`;
+    fetch(
+      `/api/chat/routines/${encodeURIComponent(bot)}/${encodeURIComponent(kind)}/${encodeURIComponent(jobName)}/read`,
+      { method: "POST" },
+    ).catch(() => {});
+    if (typeof navigator !== "undefined") {
+      try {
+        navigator.serviceWorker?.controller?.postMessage({
+          type: "dismiss-notification",
+          tag,
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }, [routine]);
+
+  // Snapshot-anchored divider position. See ``MobileChatScreen`` for
+  // rationale — initialMessages only, ignores refreshed batches so
+  // the marker does not jump while the user reads.
+  const unreadDividerIndex = React.useMemo(() => {
+    if (!initialLastReadAt) return null;
+    for (let i = 0; i < initialMessages.length; i++) {
+      const m = initialMessages[i];
+      if (m.role !== "assistant") continue;
+      if (m.timestamp && m.timestamp > initialLastReadAt) return i;
+    }
+    return null;
+  }, [initialMessages, initialLastReadAt]);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -178,10 +218,10 @@ export function MobileRoutineScreen({ routine, initialMessages }: Props) {
           </li>
         ) : (
           messages.map((message, index) => (
-            <RoutineMessageBubble
-              key={`${index}:${message.timestamp ?? ""}`}
-              message={message}
-            />
+            <React.Fragment key={`${index}:${message.timestamp ?? ""}`}>
+              {index === unreadDividerIndex && <UnreadDivider />}
+              <RoutineMessageBubble message={message} />
+            </React.Fragment>
           ))
         )}
       </ul>

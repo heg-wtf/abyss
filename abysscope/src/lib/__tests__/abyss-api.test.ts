@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachmentUrl,
+  markRoutineRead,
+  markSessionRead,
   parseChatEvents,
+  setUnreadBadge,
   uploadAttachment,
   UpstreamError,
   type ChatEvent,
@@ -133,5 +136,82 @@ describe("attachmentUrl", () => {
     expect(attachmentUrl("alpha bot", "chat_web_abc", "a/b.png")).toBe(
       "/api/chat/sessions/alpha%20bot/chat_web_abc/file/a%2Fb.png"
     );
+  });
+});
+
+describe("markSessionRead / markRoutineRead", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn() as typeof globalThis.fetch;
+  });
+
+  it("posts to the per-session read endpoint", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      json: () => Promise.resolve({ last_read_at: "2026-05-18T05:00:00Z" }),
+    });
+
+    await markSessionRead("alpha bot", "chat_web_abc");
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(call[0])).toMatch(
+      /\/chat\/sessions\/alpha%20bot\/chat_web_abc\/read$/,
+    );
+    expect(call[1]?.method).toBe("POST");
+  });
+
+  it("posts to the per-routine read endpoint with kind segment", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ "Content-Type": "application/json" }),
+      json: () => Promise.resolve({ last_read_at: "2026-05-18T05:00:00Z" }),
+    });
+
+    await markRoutineRead("alpha", "cron", "daily brief");
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(String(call[0])).toMatch(
+      /\/chat\/routines\/alpha\/cron\/daily%20brief\/read$/,
+    );
+    expect(call[1]?.method).toBe("POST");
+  });
+});
+
+describe("setUnreadBadge", () => {
+  type BadgeNav = Navigator & {
+    setAppBadge?: ReturnType<typeof vi.fn>;
+    clearAppBadge?: ReturnType<typeof vi.fn>;
+  };
+  let originalSet: BadgeNav["setAppBadge"];
+  let originalClear: BadgeNav["clearAppBadge"];
+
+  beforeEach(() => {
+    const nav = navigator as BadgeNav;
+    originalSet = nav.setAppBadge;
+    originalClear = nav.clearAppBadge;
+    nav.setAppBadge = vi.fn().mockResolvedValue(undefined);
+    nav.clearAppBadge = vi.fn().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    const nav = navigator as BadgeNav;
+    nav.setAppBadge = originalSet;
+    nav.clearAppBadge = originalClear;
+  });
+
+  it("calls setAppBadge with the count when positive", () => {
+    setUnreadBadge(3);
+    const nav = navigator as BadgeNav;
+    expect(nav.setAppBadge).toHaveBeenCalledWith(3);
+    expect(nav.clearAppBadge).not.toHaveBeenCalled();
+  });
+
+  it("clears the badge when count is zero", () => {
+    setUnreadBadge(0);
+    const nav = navigator as BadgeNav;
+    expect(nav.clearAppBadge).toHaveBeenCalled();
+    expect(nav.setAppBadge).not.toHaveBeenCalled();
   });
 });

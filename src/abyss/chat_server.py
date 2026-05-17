@@ -425,7 +425,7 @@ def _load_session_meta(session_dir: Path) -> dict[str, Any]:
         return {}
     try:
         return json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return {}
 
 
@@ -497,14 +497,34 @@ def _routine_metadata(
     except OSError:
         mtime = 0.0
 
+    meta = _load_session_meta(session_dir)
+    updated_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    last_read_at = meta.get("last_read_at") or None
     return {
         "bot": bot_name,
         "bot_display_name": bot_display_name,
         "kind": kind,
         "job_name": job_name,
-        "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+        "updated_at": updated_at,
         "preview": preview,
+        "last_read_at": last_read_at,
+        "unread": _is_unread(updated_at, last_read_at),
     }
+
+
+def _is_unread(updated_at: str, last_read_at: str | None) -> bool:
+    """Return True iff the session has activity newer than the last read mark.
+
+    ``last_read_at`` absent → ``False``: existing sessions (which
+    never had a read mark) stay quiet at upgrade time. New activity
+    after a mark flips this to True only when ``updated_at`` strictly
+    exceeds ``last_read_at`` — strict ``>`` so the marker stamped at
+    mount time does not loop into an immediate re-unread when the
+    next list fetch arrives in the same second.
+    """
+    if not last_read_at:
+        return False
+    return updated_at > last_read_at
 
 
 def _resolve_routine_dir(bot_name: str, kind: str, job_name: str) -> Path | None:
@@ -553,19 +573,30 @@ def _session_metadata(
         except OSError:
             pass
 
+    # Prefer conversation-file mtimes over the session-dir mtime so
+    # writes to ``.session_meta.json`` (e.g. mark-read) don't get
+    # interpreted as "new activity" and immediately re-flip the
+    # session back to unread.
     try:
-        mtime = session_dir.stat().st_mtime
+        if files:
+            mtime = max(f.stat().st_mtime for f in files)
+        else:
+            mtime = session_dir.stat().st_mtime
     except OSError:
         mtime = 0.0
 
     meta = _load_session_meta(session_dir)
+    updated_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+    last_read_at = meta.get("last_read_at") or None
     return {
         "id": session_dir.name,
         "bot": bot_name,
         "bot_display_name": bot_display_name or _bot_display_name(bot_name),
-        "updated_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+        "updated_at": updated_at,
         "preview": preview,
         "custom_name": meta.get("custom_name") or None,
+        "last_read_at": last_read_at,
+        "unread": _is_unread(updated_at, last_read_at),
     }
 
 
@@ -621,6 +652,10 @@ class ChatServer:
             self._handle_rename_session,
         )
         router.add_get("/chat/sessions/{bot}/{session_id}/messages", self._handle_get_messages)
+        router.add_post(
+            "/chat/sessions/{bot}/{session_id}/read",
+            self._handle_mark_session_read,
+        )
         router.add_get("/chat/routines", self._handle_list_routines)
         router.add_get(
             "/chat/routines/{bot}/{kind}/{job}/messages",
@@ -629,6 +664,10 @@ class ChatServer:
         router.add_post(
             "/chat/routines/{bot}/{kind}/{job}/chat",
             self._handle_routine_chat,
+        )
+        router.add_post(
+            "/chat/routines/{bot}/{kind}/{job}/read",
+            self._handle_mark_routine_read,
         )
         router.add_post("/chat/upload", self._handle_upload)
         router.add_get("/chat/sessions/{bot}/{session_id}/file/{name}", self._handle_get_file)
@@ -949,6 +988,43 @@ class ChatServer:
             return web.json_response({"messages": []})
         messages = _parse_conversation_messages(session_dir, bot_name, session_id)
         return web.json_response({"messages": messages})
+
+    async def _handle_mark_session_read(self, request: web.Request) -> web.Response:
+        """Stamp ``last_read_at = now()`` on a chat session.
+
+        Idempotent. Mobile detail screens call this on mount so the
+        list re-fetched after backing out shows ``unread=false`` for
+        the session that was just viewed.
+        """
+        bot_name = request.match_info["bot"]
+        session_id = request.match_info["session_id"]
+        session_dir = _resolve_session_dir(bot_name, session_id)
+        if not session_dir.exists():
+            return web.json_response({"error": "session not found"}, status=404)
+        now = datetime.now(tz=timezone.utc).isoformat()
+        meta = _load_session_meta(session_dir)
+        meta["last_read_at"] = now
+        _save_session_meta(session_dir, meta)
+        return web.json_response({"last_read_at": now})
+
+    async def _handle_mark_routine_read(self, request: web.Request) -> web.Response:
+        """Stamp ``last_read_at = now()`` on a routine session dir.
+
+        Reuses ``_resolve_routine_dir`` so cron / heartbeat regex
+        validation + path-traversal guard apply uniformly with the
+        existing routine GET endpoints.
+        """
+        bot_name = request.match_info["bot"]
+        kind = request.match_info["kind"]
+        job_name = request.match_info["job"]
+        session_dir = _resolve_routine_dir(bot_name, kind, job_name)
+        if session_dir is None or not session_dir.exists():
+            return web.json_response({"error": "routine not found"}, status=404)
+        now = datetime.now(tz=timezone.utc).isoformat()
+        meta = _load_session_meta(session_dir)
+        meta["last_read_at"] = now
+        _save_session_meta(session_dir, meta)
+        return web.json_response({"last_read_at": now})
 
     async def _handle_list_routines(self, _request: web.Request) -> web.Response:
         """List every cron job + heartbeat session across all bots.
@@ -1284,6 +1360,7 @@ class ChatServer:
             body=preview,
             bot=bot_name,
             session_id=session_id,
+            kind="chat",
         )
 
     # ------------------------------------------------------------------
