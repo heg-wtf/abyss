@@ -1861,3 +1861,82 @@ async def test_mark_session_read_corrupt_meta_recovers(client, abyss_home):
     meta_text = (session_dir / ".session_meta.json").read_text()
     parsed = json.loads(meta_text)
     assert parsed["last_read_at"] == body["last_read_at"]
+
+
+@pytest.mark.asyncio
+async def test_routine_reply_triggers_push(client, abyss_home, patch_backend):
+    """A completed routine reply pings ``web_push.send_push`` with
+    ``kind`` + ``job_name`` so the service worker routes the click to
+    ``/mobile/routine/...`` and the tag collapses with the original
+    cron / heartbeat notification."""
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch as patch_fn
+
+    cron_dir = abyss_home / "bots" / "alpha" / "cron_sessions" / "daily-brief"
+    cron_dir.mkdir(parents=True)
+    (cron_dir / "conversation-260514.md").write_text(
+        "## user (2026-05-14 06:00:00 UTC)\n\nMorning summary\n\n"
+        "## assistant (2026-05-14 06:00:01 UTC)\n\nHere's your brief.\n"
+    )
+
+    with patch_fn("abyss.chat_server.web_push.send_push", new_callable=AsyncMock) as sender:
+        sse = await client.post(
+            "/chat/routines/alpha/cron/daily-brief/chat",
+            json={"message": "Tell me more"},
+        )
+        async for _ in sse.content.iter_any():
+            pass
+
+    sender.assert_awaited_once()
+    kwargs = sender.call_args.kwargs
+    assert kwargs["bot"] == "alpha"
+    assert kwargs["kind"] == "cron"
+    assert kwargs["job_name"] == "daily-brief"
+    assert kwargs["title"] == "Alpha"
+    assert "hi there" in kwargs["body"]
+    # Chat-style session_id MUST NOT leak into routine payload — the
+    # SW routes off (kind, job_name), and a stray session_id would
+    # short-circuit ``targetPath`` to the chat URL instead.
+    assert "session_id" not in kwargs or kwargs["session_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_routine_reply_empty_body_skips_push(client, abyss_home, patch_backend):
+    """Empty assistant replies should not page the user — same guard
+    as ``_notify_chat_reply``."""
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch as patch_fn
+
+    cron_dir = abyss_home / "bots" / "alpha" / "cron_sessions" / "silent-job"
+    cron_dir.mkdir(parents=True)
+    (cron_dir / "conversation-260514.md").write_text(
+        "## assistant (2026-05-14 06:00:01 UTC)\n\nHi.\n"
+    )
+
+    class _EmptyBackend:
+        async def run(self, request):
+            return LLMResult(text="", session_id="s1")
+
+        async def run_streaming(self, request, on_chunk):
+            return LLMResult(text="", session_id="s1")
+
+        async def cancel(self, _key):
+            return True
+
+        async def close(self):
+            return None
+
+    empty = _EmptyBackend()
+    with (
+        patch_fn("abyss.chat_core.get_or_create", lambda *a, **kw: empty),
+        patch_fn("abyss.chat_server.get_or_create", lambda *a, **kw: empty),
+        patch_fn("abyss.chat_server.web_push.send_push", new_callable=AsyncMock) as sender,
+    ):
+        sse = await client.post(
+            "/chat/routines/alpha/cron/silent-job/chat",
+            json={"message": "Hello"},
+        )
+        async for _ in sse.content.iter_any():
+            pass
+
+    sender.assert_not_called()
