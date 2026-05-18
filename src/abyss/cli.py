@@ -51,6 +51,8 @@ heartbeat_app = typer.Typer(help="Heartbeat management")
 app.add_typer(heartbeat_app, name="heartbeat")
 feedback_app = typer.Typer(help="Numeric feedback (1/2/3) statistics")
 app.add_typer(feedback_app, name="feedback")
+about_me_app = typer.Typer(help="Shared user knowledge base (ABOUT_ME/)")
+app.add_typer(about_me_app, name="about-me")
 
 
 @app.command()
@@ -1466,6 +1468,200 @@ def feedback_show(
                 note = note[:37] + "..."
             recent.add_row(ts, session_id, str(signal), note)
         console.print(recent)
+
+
+# --- About Me subcommands ---
+
+
+@about_me_app.command("init")
+def about_me_init() -> None:
+    """Create the ABOUT_ME/ scaffold and INDEX.md (idempotent)."""
+    from rich.console import Console
+
+    from abyss.about_me import ensure_about_me_scaffold
+
+    console = Console()
+    directory = ensure_about_me_scaffold()
+    console.print(f"[green]ABOUT_ME ready at {directory}[/green]")
+
+
+@about_me_app.command("show")
+def about_me_show(
+    category: str | None = typer.Argument(
+        None,
+        help="Category name (omit for full dump including INDEX).",
+    ),
+) -> None:
+    """Render ABOUT_ME contents as Markdown."""
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    from abyss.about_me import (
+        ABOUT_ME_CATEGORIES,
+        about_me_file,
+        index_file,
+        load_index,
+    )
+
+    console = Console()
+
+    if category is None:
+        index_content = load_index()
+        if not index_content.strip():
+            console.print("[yellow]ABOUT_ME is empty. Run `abyss about-me init` first.[/yellow]")
+            raise typer.Exit(0)
+        console.print(Markdown(index_content))
+        console.print(f"\n[dim]Index file: {index_file()}[/dim]")
+        return
+
+    if category not in ABOUT_ME_CATEGORIES:
+        console.print(
+            f"[red]Unknown category '{category}'. Valid: {', '.join(ABOUT_ME_CATEGORIES)}.[/red]"
+        )
+        raise typer.Exit(1)
+
+    path = about_me_file(category)
+    if not path.exists():
+        console.print(f"[yellow]No data for '{category}'. Run `abyss about-me init`.[/yellow]")
+        raise typer.Exit(0)
+    console.print(Markdown(path.read_text(encoding="utf-8")))
+    console.print(f"\n[dim]File: {path}[/dim]")
+
+
+@about_me_app.command("list")
+def about_me_list() -> None:
+    """List every entry key across categories in a table."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.about_me import ABOUT_ME_CATEGORIES, list_entries
+
+    console = Console()
+    grouped = list_entries()
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Category")
+    table.add_column("Key")
+    table.add_column("Value")
+    table.add_column("Status")
+    table.add_column("Confirmed")
+
+    total = 0
+    for category in ABOUT_ME_CATEGORIES:
+        for entry in grouped.get(category, []):
+            value = entry.value
+            if len(value) > 50:
+                value = value[:47] + "..."
+            table.add_row(
+                category,
+                entry.key,
+                value,
+                entry.status,
+                entry.last_confirmed or "-",
+            )
+            total += 1
+
+    if total == 0:
+        console.print(
+            "[yellow]No ABOUT_ME entries yet. Run `abyss about-me init` to scaffold.[/yellow]"
+        )
+        return
+    console.print(table)
+    console.print(f"\n[dim]Total: {total} entries.[/dim]")
+
+
+@about_me_app.command("migrate")
+def about_me_migrate(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Classify GLOBAL_MEMORY.md without writing ABOUT_ME files.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Skip confirmation prompt.",
+    ),
+    model: str = typer.Option(
+        "haiku",
+        "--model",
+        help="Claude model for classification (default haiku).",
+    ),
+) -> None:
+    """Classify GLOBAL_MEMORY.md into ABOUT_ME category files."""
+    import asyncio
+    import json
+
+    from rich.console import Console
+
+    from abyss.about_me import migrate_from_global_memory
+
+    console = Console()
+
+    if not dry_run and not yes:
+        confirm = typer.confirm(
+            "GLOBAL_MEMORY.md will be classified and written into ABOUT_ME/. Proceed?",
+            default=False,
+        )
+        if not confirm:
+            console.print("[yellow]Migration cancelled.[/yellow]")
+            raise typer.Exit(0)
+
+    try:
+        result = asyncio.run(migrate_from_global_memory(dry_run=dry_run, model=model))
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if dry_run:
+        console.print("[bold]Dry-run classification:[/bold]")
+        console.print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    counts = {category: len(items) for category, items in result.items()}
+    total = sum(counts.values())
+    console.print(f"[green]Migrated {total} entries.[/green]")
+    for category, count in counts.items():
+        if count:
+            console.print(f"  - {category}: {count}")
+    console.print(
+        "\n[dim]GLOBAL_MEMORY.md was left intact — clear it manually if you "
+        "no longer want both sources injected.[/dim]"
+    )
+
+
+@about_me_app.command("edit")
+def about_me_edit(
+    category: str = typer.Argument(help="Category to edit."),
+) -> None:
+    """Open a category file in $EDITOR and rebuild INDEX on save."""
+    import os
+    import subprocess
+
+    from rich.console import Console
+
+    from abyss.about_me import (
+        ABOUT_ME_CATEGORIES,
+        about_me_file,
+        ensure_about_me_scaffold,
+        rebuild_index,
+    )
+
+    console = Console()
+
+    if category not in ABOUT_ME_CATEGORIES:
+        console.print(
+            f"[red]Unknown category '{category}'. Valid: {', '.join(ABOUT_ME_CATEGORIES)}.[/red]"
+        )
+        raise typer.Exit(1)
+
+    ensure_about_me_scaffold()
+    path = about_me_file(category)
+    editor = os.environ.get("EDITOR", "vi")
+    subprocess.run([editor, str(path)])
+    rebuild_index()
+    console.print(f"[green]INDEX rebuilt after editing {path}.[/green]")
 
 
 # --- Heartbeat subcommands ---

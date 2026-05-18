@@ -366,7 +366,21 @@ def compose_claude_md(
         ]
     )
 
+    from abyss.about_me import about_me_directory, has_any_entries, load_index
     from abyss.session import load_global_memory
+
+    about_me_index = load_index().strip()
+    if about_me_index and has_any_entries():
+        sections.append("")
+        sections.append("## About Me (Shared, Read-Only)")
+        sections.append(
+            "- 아래는 모든 봇이 공유하는 사용자 정보 인덱스이다. 참고만 하고 수정하지 마라."
+        )
+        sections.append(
+            f"- 자세한 내용이 필요하면 `{about_me_directory()}/<category>.md` 를 읽을 수 있다."
+        )
+        sections.append("")
+        sections.append(about_me_index)
 
     global_memory = load_global_memory()
     if global_memory:
