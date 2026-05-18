@@ -49,6 +49,8 @@ global_memory_app = typer.Typer(help="Global memory management (shared across al
 app.add_typer(global_memory_app, name="global-memory")
 heartbeat_app = typer.Typer(help="Heartbeat management")
 app.add_typer(heartbeat_app, name="heartbeat")
+feedback_app = typer.Typer(help="Numeric feedback (1/2/3) statistics")
+app.add_typer(feedback_app, name="feedback")
 
 
 @app.command()
@@ -1402,6 +1404,68 @@ def global_memory_clear() -> None:
     clear_global_memory()
     _regenerate_all_bots_claude_md()
     console.print("[green]Global memory cleared. All bots' CLAUDE.md regenerated.[/green]")
+
+
+# --- Feedback subcommands ---
+
+
+@feedback_app.command("show")
+def feedback_show(
+    bot: str = typer.Argument(help="Bot name"),
+    last_n: int = typer.Option(10, "--last", "-n", help="How many recent entries"),
+) -> None:
+    """Show numeric feedback (1/2/3) statistics for a bot."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.config import load_bot_config
+    from abyss.feedback import SIGNAL_LABELS, aggregate
+
+    console = Console()
+
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+
+    summary = aggregate(bot, last_n=last_n)
+    total = summary["total"]
+
+    if total == 0:
+        console.print(f"[yellow]No feedback yet for '{bot}'.[/yellow]")
+        return
+
+    console.print(f"\n[bold]Feedback for:[/bold] {bot}")
+    console.print(f"[bold]Total:[/bold] {total}\n")
+
+    counts = summary["count_by_signal"]
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Signal")
+    table.add_column("Label")
+    table.add_column("Count", justify="right")
+    table.add_column("Pct", justify="right")
+    for signal, label in SIGNAL_LABELS.items():
+        count = counts.get(signal, 0)
+        pct = (count / total) * 100 if total else 0.0
+        table.add_row(str(signal), label, str(count), f"{pct:.1f}%")
+    console.print(table)
+
+    entries = summary["last_entries"]
+    if entries:
+        console.print(f"\n[bold]Last {len(entries)} entries:[/bold]")
+        recent = Table(show_header=True, header_style="bold")
+        recent.add_column("Timestamp (UTC)")
+        recent.add_column("Session")
+        recent.add_column("Signal", justify="right")
+        recent.add_column("Note")
+        for entry in entries:
+            ts = entry.get("ts", "")
+            session_id = entry.get("session_id", "")
+            signal = entry.get("signal", "")
+            note = entry.get("note", "") or ""
+            if len(note) > 40:
+                note = note[:37] + "..."
+            recent.add_row(ts, session_id, str(signal), note)
+        console.print(recent)
 
 
 # --- Heartbeat subcommands ---

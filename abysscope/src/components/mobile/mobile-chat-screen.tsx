@@ -688,6 +688,8 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
                 message={message}
                 queued={queued?.userMessageId === message.id}
                 onCancelQueue={cancelQueued}
+                bot={session.bot}
+                sessionId={session.id}
               />
             </React.Fragment>
           ))}

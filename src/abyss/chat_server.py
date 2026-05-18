@@ -689,6 +689,10 @@ class ChatServer:
             "/chat/sessions/{bot}/{session_id}/read",
             self._handle_mark_session_read,
         )
+        router.add_post(
+            "/chat/sessions/{bot}/{session_id}/feedback",
+            self._handle_log_feedback,
+        )
         router.add_get("/chat/routines", self._handle_list_routines)
         router.add_get(
             "/chat/routines/{bot}/{kind}/{job}/messages",
@@ -1051,6 +1055,55 @@ class ChatServer:
         meta["last_read_at"] = now
         _save_session_meta(session_dir, meta)
         return web.json_response({"last_read_at": now})
+
+    async def _handle_log_feedback(self, request: web.Request) -> web.Response:
+        """Record a numeric feedback signal (1/2/3) for an assistant turn.
+
+        Body: ``{"turn_id": "<assistant timestamp>", "signal": 1|2|3,
+        "note"?: "..."}``. Records append to
+        ``bots/<bot>/feedback.jsonl``. Same ``turn_id`` may be rated
+        multiple times — aggregation uses latest-wins.
+        """
+        from abyss.feedback import (
+            MAX_NOTE_LENGTH,
+            VALID_SIGNALS,
+            append_feedback,
+        )
+
+        bot_name = request.match_info["bot"]
+        session_id = request.match_info["session_id"]
+        session_dir = _resolve_session_dir(bot_name, session_id)
+        if not session_dir.exists():
+            return web.json_response({"error": "session not found"}, status=404)
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        turn_id = body.get("turn_id")
+        if not isinstance(turn_id, str) or not turn_id.strip():
+            return web.json_response({"error": "turn_id required"}, status=400)
+        turn_id = turn_id.strip()
+
+        signal = body.get("signal")
+        if not isinstance(signal, int) or signal not in VALID_SIGNALS:
+            return web.json_response({"error": "signal must be 1, 2, or 3"}, status=400)
+
+        note = body.get("note") or ""
+        if not isinstance(note, str):
+            return web.json_response({"error": "note must be a string"}, status=400)
+        if len(note) > MAX_NOTE_LENGTH:
+            return web.json_response({"error": "note too long"}, status=400)
+
+        record = append_feedback(
+            bot=bot_name,
+            session_id=session_id,
+            turn_id=turn_id,
+            signal=signal,
+            note=note,
+        )
+        return web.json_response({"ok": True, "ts": record["ts"]})
 
     async def _handle_mark_routine_read(self, request: web.Request) -> web.Response:
         """Stamp ``last_read_at = now()`` on a routine session dir.

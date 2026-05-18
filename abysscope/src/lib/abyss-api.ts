@@ -250,6 +250,37 @@ export async function markSessionRead(
 }
 
 /**
+ * Numeric feedback signal (1=good, 2=meh, 3=wrong) for a single
+ * assistant turn. Phase 1 of the co-evolution roadmap — see
+ * ``docs/plan-coevolution-2026-05-19.md``.
+ *
+ * ``turnId`` is the assistant message's timestamp string from the
+ * conversation log header (``YYYY-MM-DD HH:MM:SS UTC``), already
+ * present on ``ChatMessage.timestamp``.
+ */
+export type FeedbackSignal = 1 | 2 | 3;
+
+export async function postFeedback(
+  bot: string,
+  sessionId: string,
+  turnId: string,
+  signal: FeedbackSignal,
+  note?: string,
+): Promise<void> {
+  await jsonFetch(
+    `/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}/feedback`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        turn_id: turnId,
+        signal,
+        note: note ?? "",
+      }),
+    },
+  );
+}
+
+/**
  * A scheduled-run surface: cron job or heartbeat session. Shares the
  * core "bot + last-run + preview" shape with ``ChatSession`` so the
  * mobile Routines tab can use the same row component, with two extra
