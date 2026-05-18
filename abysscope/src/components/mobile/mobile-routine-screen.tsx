@@ -96,6 +96,31 @@ export function MobileRoutineScreen({ routine, initialMessages }: Props) {
   };
 
   const abortRef = React.useRef<AbortController | null>(null);
+  const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll the transcript to the latest message. Mirrors the
+  // chat screen pattern (mobile-chat-screen.tsx) — the first paint
+  // jumps instantly so the user lands on the newest run instead of
+  // watching a long animation through history, and subsequent
+  // updates (refresh / reply send) animate smoothly. Without this,
+  // opening a routine with many runs leaves the user staring at the
+  // oldest entry at the top of the screen.
+  const firstScrollRef = React.useRef(true);
+  React.useLayoutEffect(() => {
+    if (!messagesEndRef.current) return;
+    if (firstScrollRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: "instant" as ScrollBehavior,
+        block: "end",
+      });
+      firstScrollRef.current = false;
+      return;
+    }
+    messagesEndRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
+  }, [messages]);
 
   // Cancel any in-flight reply on unmount so a setMessages on a dead
   // component (and the orphan optimistic bubble) never happens.
@@ -228,6 +253,7 @@ export function MobileRoutineScreen({ routine, initialMessages }: Props) {
             </React.Fragment>
           ))
         )}
+        <div ref={messagesEndRef} />
       </ul>
 
       <footer className="shrink-0 border-t bg-background">
