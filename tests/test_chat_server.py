@@ -1686,6 +1686,86 @@ async def test_mark_session_read_unknown_session_404(client):
 
 
 @pytest.mark.asyncio
+async def test_feedback_signal_appends_jsonl(client, abyss_home):
+    """``POST /feedback`` with a valid signal appends one JSONL line."""
+    sid = "chat_web_fb0001"
+    session_dir = abyss_home / "bots" / "alpha" / "sessions" / sid
+    session_dir.mkdir(parents=True)
+
+    resp = await client.post(
+        f"/chat/sessions/alpha/{sid}/feedback",
+        json={"turn_id": "2026-05-19 08:00:00 UTC", "signal": 1},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["ok"] is True
+    assert body["ts"]
+
+    jsonl = abyss_home / "bots" / "alpha" / "feedback.jsonl"
+    lines = jsonl.read_text().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["signal"] == 1
+    assert record["session_id"] == sid
+    assert record["turn_id"] == "2026-05-19 08:00:00 UTC"
+
+
+@pytest.mark.asyncio
+async def test_feedback_invalid_signal_400(client, abyss_home):
+    sid = "chat_web_fb0002"
+    (abyss_home / "bots" / "alpha" / "sessions" / sid).mkdir(parents=True)
+
+    for bad in (0, 4, "x", None):
+        resp = await client.post(
+            f"/chat/sessions/alpha/{sid}/feedback",
+            json={"turn_id": "t1", "signal": bad},
+        )
+        assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_feedback_missing_turn_id_400(client, abyss_home):
+    sid = "chat_web_fb0003"
+    (abyss_home / "bots" / "alpha" / "sessions" / sid).mkdir(parents=True)
+
+    resp = await client.post(
+        f"/chat/sessions/alpha/{sid}/feedback",
+        json={"signal": 1},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_feedback_unknown_session_404(client):
+    resp = await client.post(
+        "/chat/sessions/alpha/chat_web_404404/feedback",
+        json={"turn_id": "t1", "signal": 1},
+    )
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_feedback_note_too_long_400(client, abyss_home):
+    sid = "chat_web_fb0004"
+    (abyss_home / "bots" / "alpha" / "sessions" / sid).mkdir(parents=True)
+
+    resp = await client.post(
+        f"/chat/sessions/alpha/{sid}/feedback",
+        json={"turn_id": "t1", "signal": 2, "note": "x" * 2001},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_feedback_path_traversal_blocked(client):
+    resp = await client.post(
+        "/chat/sessions/..%2Fevil/chat_web_x/feedback",
+        json={"turn_id": "t1", "signal": 1},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
 async def test_mark_routine_read_writes_meta(client, abyss_home):
     """Routine mark-read uses the same meta filename as sessions and
     is visible on the routines list endpoint."""
