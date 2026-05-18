@@ -465,6 +465,51 @@ def test_compose_claude_md_no_global_memory(temp_abyss_home):
     assert "Global Memory" not in result
 
 
+def test_compose_claude_md_with_about_me(temp_abyss_home):
+    """compose_claude_md injects the ABOUT_ME index when entries exist."""
+    from abyss.about_me import AboutEntry, upsert_entry
+
+    upsert_entry("identity", AboutEntry(key="name", value="ash84"))
+
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "## About Me (Shared, Read-Only)" in result
+    assert "name=ash84" in result
+
+
+def test_compose_claude_md_no_about_me_section_when_empty(temp_abyss_home):
+    """compose_claude_md does not inject ABOUT_ME when there are no entries."""
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "About Me (Shared" not in result
+
+
+def test_compose_claude_md_about_me_before_global_memory(temp_abyss_home):
+    """ABOUT_ME index appears before the Global Memory section."""
+    from abyss.about_me import AboutEntry, upsert_entry
+    from abyss.session import save_global_memory
+
+    upsert_entry("identity", AboutEntry(key="name", value="ash84"))
+    save_global_memory("- Global setting")
+
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    about_me_index = result.find("About Me (Shared")
+    global_memory_index = result.find("Global Memory (Read-Only)")
+    assert about_me_index != -1
+    assert global_memory_index != -1
+    assert about_me_index < global_memory_index
+
+
 def test_compose_claude_md_global_memory_before_bot_memory(temp_abyss_home):
     """compose_claude_md places global memory before bot memory."""
     from abyss.session import save_global_memory

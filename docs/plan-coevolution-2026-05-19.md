@@ -140,13 +140,22 @@ Personal AI 가 사람과 함께 시간에 따라 **진화**하려면 양방향 
 - [ ] 5연속 `3` → push notification "persona 점검 필요" (다음 PR)
 - [x] 테스트: 단위(8) + 통합(6) + CLI(4) + 프론트엔드(6)
 
-### Phase 2 — USER_MODEL/ + AI write
-- [ ] `USER_MODEL/` 디렉토리 schema 정의
-- [ ] `user_model.py` 모듈 (load/propose/confirm/get)
-- [ ] MCP tool `user_model.get(category)` 노출
-- [ ] `compose_claude_md` 에 INDEX 주입
-- [ ] dashboard 에 propose 승인 UI
-- [ ] 충돌 감지 + 봇 확인 prompt
+### Phase 2 — ABOUT_ME/ + AI write
+
+#### Phase 2a (이번 PR) — foundation
+- [x] `ABOUT_ME/` 디렉토리 schema (7 카테고리 + INDEX.md)
+- [x] `about_me.py` 모듈 (frontmatter parse / upsert / list / rebuild_index)
+- [x] `compose_claude_md` 에 INDEX 주입 (read-only)
+- [x] CLI: `abyss about-me init | show | list | edit | migrate`
+- [x] GLOBAL_MEMORY.md → ABOUT_ME/ 마이그레이션 (claude haiku 분류)
+- [x] 테스트: 단위 15 + CLI 11 + compose 회귀 3
+
+#### Phase 2b (다음 PR) — AI write
+- [ ] MCP server `about_me` — 봇이 `propose(category, key, value)` 호출
+- [ ] Auto-confirm: 같은 key 2회 propose → 승격
+- [ ] 충돌 감지: `confirmed` 와 모순 → 봇이 사용자 확인 질문
+- [ ] Dashboard `/about-me` propose 승인 UI + chat-side notification
+- [ ] 봇별 SELF.md 와 연계 — reject 된 propose 가 자기반성에 누적
 
 ### Phase 3 — SELF.md + reflection cron
 - [ ] `bots/<name>/SELF.md` 템플릿
