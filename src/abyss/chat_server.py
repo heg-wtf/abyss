@@ -1229,6 +1229,17 @@ class ChatServer:
                 user_role="human",
             )
             await _sse_write(sse, {"type": "done", "text": full_text})
+            # Web Push for routine replies — parity with chat. The SW
+            # tag collapses by (kind, job_name) so a reply notification
+            # replaces the cron run's notification instead of stacking.
+            with suppress(Exception):
+                await self._notify_routine_reply(
+                    bot_name=bot_name,
+                    bot_config=bot_config,
+                    kind=kind,
+                    job_name=job_name,
+                    reply_text=full_text,
+                )
         except Exception as error:  # noqa: BLE001
             logger.error(
                 "routine chat failed bot=%s %s/%s: %s",
@@ -1406,6 +1417,36 @@ class ChatServer:
             bot=bot_name,
             session_id=session_id,
             kind="chat",
+        )
+
+    async def _notify_routine_reply(
+        self,
+        *,
+        bot_name: str,
+        bot_config: dict[str, Any],
+        kind: str,
+        job_name: str,
+        reply_text: str,
+    ) -> None:
+        """Send a Web Push notification for a completed routine reply.
+
+        Same shape as ``_notify_chat_reply`` but keyed by
+        ``(kind, job_name)`` so the service worker routes the click to
+        ``/mobile/routine/<bot>/<kind>/<job>`` and the tag collapses
+        with the original cron / heartbeat notification.
+        """
+        if not reply_text:
+            return
+        display_name = bot_config.get("display_name") or bot_name
+        preview = reply_text.replace("\n", " ").strip()
+        if len(preview) > 120:
+            preview = preview[:117] + "…"
+        await web_push.send_push(
+            title=display_name,
+            body=preview,
+            bot=bot_name,
+            kind=kind,
+            job_name=job_name,
         )
 
     # ------------------------------------------------------------------
