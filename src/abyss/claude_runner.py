@@ -532,6 +532,13 @@ CONVERSATION_SEARCH_ALLOWED_TOOLS = [
     "mcp__conversation_search__search_conversations",
 ]
 
+ABOUT_ME_ALLOWED_TOOLS = [
+    "mcp__about_me__about_me_propose",
+    "mcp__about_me__about_me_get",
+    "mcp__about_me__about_me_list_categories",
+    "mcp__about_me__about_me_search",
+]
+
 
 def _resolve_bot_dir_from_working_directory(working_directory: str) -> Path | None:
     """Walk parents of ``working_directory`` to find the bot root.
@@ -549,6 +556,30 @@ def _resolve_bot_dir_from_working_directory(working_directory: str) -> Path | No
         if parent.name == "bots":
             return candidate
     return None
+
+
+def _about_me_mcp_server() -> dict | None:
+    """Build the about_me MCP entry.
+
+    The server only needs ``ABYSS_HOME`` from the parent environment to
+    locate ``ABYSS_HOME/ABOUT_ME``. Returns ``None`` when ``ABYSS_HOME``
+    is not set in the environment so callers can skip the entry
+    (effectively, the subprocess inherits the same env, so passing the
+    value through explicitly keeps test isolation predictable).
+    """
+    import sys
+
+    from abyss.config import abyss_home, is_mcp_always_load_enabled
+
+    home = abyss_home()
+    entry: dict = {
+        "command": sys.executable,
+        "args": ["-m", "abyss.mcp_servers.about_me"],
+        "env": {"ABYSS_HOME": str(home)},
+    }
+    if is_mcp_always_load_enabled():
+        entry["alwaysLoad"] = True
+    return {"about_me": entry}
 
 
 def _conversation_search_mcp_server(working_directory: str) -> dict | None:
@@ -661,6 +692,23 @@ def _prepare_skill_config(
             else:
                 mcp_config = {"mcpServers": dict(cs_server)}
             for tool in CONVERSATION_SEARCH_ALLOWED_TOOLS:
+                if tool not in allowed_tools:
+                    allowed_tools.append(tool)
+
+    # Auto-inject about_me MCP only when the ABOUT_ME directory exists.
+    # Mirrors the SKILL.md injection gate in ``skill.compose_claude_md``
+    # so a fresh install with no opt-in keeps its previous behaviour
+    # and old tests that don't touch ABOUT_ME stay green.
+    from abyss.about_me import about_me_directory as _about_me_directory
+
+    if _about_me_directory().exists():
+        am_server = _about_me_mcp_server()
+        if am_server is not None:
+            if mcp_config:
+                mcp_config["mcpServers"].update(am_server)
+            else:
+                mcp_config = {"mcpServers": dict(am_server)}
+            for tool in ABOUT_ME_ALLOWED_TOOLS:
                 if tool not in allowed_tools:
                     allowed_tools.append(tool)
 

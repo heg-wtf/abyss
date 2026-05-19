@@ -1766,6 +1766,128 @@ async def test_feedback_path_traversal_blocked(client):
 
 
 @pytest.mark.asyncio
+async def test_about_me_categories_empty(client, abyss_home):
+    resp = await client.get("/about-me/categories")
+    assert resp.status == 200
+    body = await resp.json()
+    assert "identity" in body["categories"]
+    assert body["pending_proposals"] == 0
+
+
+@pytest.mark.asyncio
+async def test_about_me_categories_counts_after_propose(client, abyss_home):
+    from abyss.about_me import propose_entry
+
+    propose_entry("preferences", "lang", "ko")
+    resp = await client.get("/about-me/categories")
+    body = await resp.json()
+    assert body["categories"]["preferences"]["propose"] == 1
+    assert body["pending_proposals"] == 1
+
+
+@pytest.mark.asyncio
+async def test_about_me_list_entries_filter_status(client, abyss_home):
+    from abyss.about_me import AboutEntry, propose_entry, upsert_entry
+
+    upsert_entry("identity", AboutEntry(key="name", value="ash84"))
+    propose_entry("identity", "city", "Seoul")
+
+    resp = await client.get("/about-me/entries/identity?status=propose")
+    body = await resp.json()
+    keys = [entry["key"] for entry in body["entries"]]
+    assert "city" in keys
+    assert "name" not in keys
+
+
+@pytest.mark.asyncio
+async def test_about_me_list_entries_invalid_category_400(client):
+    resp = await client.get("/about-me/entries/career")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_about_me_approve_promotes(client, abyss_home):
+    from abyss.about_me import load_category, propose_entry
+
+    propose_entry("identity", "name", "ash84")
+    resp = await client.post("/about-me/entries/identity/name/approve")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["status"] == "confirmed"
+    assert load_category("identity")[0].status == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_about_me_reject_removes(client, abyss_home):
+    from abyss.about_me import load_category, propose_entry
+
+    propose_entry("identity", "name", "ash84")
+    resp = await client.post("/about-me/entries/identity/name/reject")
+    assert resp.status == 200
+    assert load_category("identity") == []
+
+
+@pytest.mark.asyncio
+async def test_about_me_approve_unknown_404(client):
+    resp = await client.post("/about-me/entries/identity/ghost/approve")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_about_me_create_entry(client, abyss_home):
+    from abyss.about_me import load_category
+
+    resp = await client.post(
+        "/about-me/entries/identity",
+        json={"key": "name", "value": "ash84"},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["key"] == "name"
+    assert load_category("identity")[0].value == "ash84"
+
+
+@pytest.mark.asyncio
+async def test_about_me_create_entry_requires_value(client, abyss_home):
+    resp = await client.post(
+        "/about-me/entries/identity",
+        json={"key": "name", "value": ""},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_about_me_create_entry_rejects_invalid_key(client, abyss_home):
+    resp = await client.post(
+        "/about-me/entries/identity",
+        json={"key": "../etc", "value": "x"},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_about_me_update_entry(client, abyss_home):
+    from abyss.about_me import AboutEntry, load_category, upsert_entry
+
+    upsert_entry("identity", AboutEntry(key="job", value="engineer"))
+    resp = await client.patch(
+        "/about-me/entries/identity/job",
+        json={"value": "cto"},
+    )
+    assert resp.status == 200
+    assert load_category("identity")[0].value == "cto"
+
+
+@pytest.mark.asyncio
+async def test_about_me_update_unknown_404(client, abyss_home):
+    resp = await client.patch(
+        "/about-me/entries/identity/ghost",
+        json={"value": "x"},
+    )
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
 async def test_mark_routine_read_writes_meta(client, abyss_home):
     """Routine mark-read uses the same meta filename as sessions and
     is visible on the routines list endpoint."""

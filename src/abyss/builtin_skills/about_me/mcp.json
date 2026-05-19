@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "about_me": {
+      "command": "python",
+      "args": ["-m", "abyss.mcp_servers.about_me"],
+      "env": {
+        "ABYSS_HOME": "${ABYSS_HOME}"
+      }
+    }
+  }
+}

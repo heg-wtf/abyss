@@ -716,6 +716,18 @@ class ChatServer:
         router.add_post("/chat/push/subscribe", self._handle_push_subscribe)
         router.add_delete("/chat/push/subscribe", self._handle_push_unsubscribe)
         router.add_post("/chat/push/visibility", self._handle_push_visibility)
+        router.add_get("/about-me/categories", self._handle_about_me_categories)
+        router.add_get("/about-me/entries/{category}", self._handle_about_me_list_entries)
+        router.add_post("/about-me/entries/{category}", self._handle_about_me_create_entry)
+        router.add_patch("/about-me/entries/{category}/{key}", self._handle_about_me_update_entry)
+        router.add_post(
+            "/about-me/entries/{category}/{key}/approve",
+            self._handle_about_me_approve,
+        )
+        router.add_post(
+            "/about-me/entries/{category}/{key}/reject",
+            self._handle_about_me_reject,
+        )
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -1055,6 +1067,147 @@ class ChatServer:
         meta["last_read_at"] = now
         _save_session_meta(session_dir, meta)
         return web.json_response({"last_read_at": now})
+
+    # ---- ABOUT_ME endpoints -------------------------------------------
+
+    @staticmethod
+    def _validate_about_me_category(category: str) -> str:
+        from abyss.about_me import ABOUT_ME_CATEGORIES
+
+        if category not in ABOUT_ME_CATEGORIES:
+            raise web.HTTPBadRequest(reason="invalid category")
+        return category
+
+    @staticmethod
+    def _validate_about_me_key(key: str) -> str:
+        if not key or len(key) > 128:
+            raise web.HTTPBadRequest(reason="invalid key")
+        # Allow kebab-case + underscores + ``__conflict_N`` suffix.
+        import re as _re
+
+        if not _re.match(r"^[A-Za-z0-9_\-]+$", key):
+            raise web.HTTPBadRequest(reason="invalid key")
+        return key
+
+    @staticmethod
+    def _serialize_about_entry(entry: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "key": entry.key,
+            "value": entry.value,
+            "confidence": entry.confidence,
+            "source": entry.source,
+            "added": entry.added,
+            "last_confirmed": entry.last_confirmed,
+            "status": entry.status,
+            "body": entry.body,
+        }
+        for key, value in entry.extra.items():
+            payload.setdefault(key, value)
+        return payload
+
+    async def _handle_about_me_categories(self, _request: web.Request) -> web.Response:
+        from abyss.about_me import category_counts, count_proposals
+
+        return web.json_response(
+            {
+                "categories": category_counts(),
+                "pending_proposals": count_proposals(),
+            }
+        )
+
+    async def _handle_about_me_list_entries(self, request: web.Request) -> web.Response:
+        from abyss.about_me import load_category
+
+        category = self._validate_about_me_category(request.match_info["category"])
+        status_filter = request.query.get("status")
+        entries = load_category(category)
+        if status_filter in ("confirmed", "propose"):
+            entries = [entry for entry in entries if entry.status == status_filter]
+        return web.json_response(
+            {
+                "category": category,
+                "entries": [self._serialize_about_entry(entry) for entry in entries],
+            }
+        )
+
+    async def _handle_about_me_create_entry(self, request: web.Request) -> web.Response:
+        from abyss.about_me import AboutEntry, upsert_entry
+
+        category = self._validate_about_me_category(request.match_info["category"])
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        key = self._validate_about_me_key(str(body.get("key", "")).strip())
+        value = str(body.get("value", "")).strip()
+        if not value:
+            return web.json_response({"error": "value required"}, status=400)
+        status = str(body.get("status", "confirmed"))
+        confidence = str(body.get("confidence", "high"))
+        markdown_body = str(body.get("body", "")).strip()
+
+        try:
+            entry = AboutEntry(
+                key=key,
+                value=value,
+                body=markdown_body,
+                confidence=confidence,
+                source="dashboard",
+                status=status,
+            )
+            upsert_entry(category, entry)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        return web.json_response({"ok": True, "key": key, "status": status})
+
+    async def _handle_about_me_update_entry(self, request: web.Request) -> web.Response:
+        from abyss.about_me import update_entry
+
+        category = self._validate_about_me_category(request.match_info["category"])
+        key = self._validate_about_me_key(request.match_info["key"])
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+
+        value = body.get("value")
+        markdown_body = body.get("body")
+        confidence = body.get("confidence")
+
+        try:
+            ok = update_entry(
+                category,
+                key,
+                value=str(value) if value is not None else None,
+                body=str(markdown_body) if markdown_body is not None else None,
+                confidence=str(confidence) if confidence is not None else None,
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        if not ok:
+            return web.json_response({"error": "entry not found"}, status=404)
+        return web.json_response({"ok": True})
+
+    async def _handle_about_me_approve(self, request: web.Request) -> web.Response:
+        from abyss.about_me import approve_entry
+
+        category = self._validate_about_me_category(request.match_info["category"])
+        key = self._validate_about_me_key(request.match_info["key"])
+        if not approve_entry(category, key):
+            return web.json_response({"error": "entry not found"}, status=404)
+        return web.json_response({"ok": True, "status": "confirmed"})
+
+    async def _handle_about_me_reject(self, request: web.Request) -> web.Response:
+        from abyss.about_me import reject_entry
+
+        category = self._validate_about_me_category(request.match_info["category"])
+        key = self._validate_about_me_key(request.match_info["key"])
+        if not reject_entry(category, key):
+            return web.json_response({"error": "entry not found"}, status=404)
+        return web.json_response({"ok": True})
 
     async def _handle_log_feedback(self, request: web.Request) -> web.Response:
         """Record a numeric feedback signal (1/2/3) for an assistant turn.

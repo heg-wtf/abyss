@@ -3,7 +3,7 @@
 - date: 2026-05-19
 - status: in-progress
 - author: claude
-- approved-by: ash84 (Phase 2a 진행 승인)
+- approved-by: ash84 (Phase 2a + 2b 진행 승인)
 
 ## 목적 및 배경
 
@@ -28,13 +28,17 @@
 - `abyss about-me` CLI: `init` / `show` / `list` / `edit` / `migrate`
 - 마이그레이션 — 기존 `GLOBAL_MEMORY.md` 를 카테고리별 분할 (사용자 명시 invoke, 자동 X)
 
-### Phase 2b (다음 PR)
+### Phase 2b (완료)
 **AI write — propose / confirm 양방향**
 
-- MCP server `mcp_servers/about_me.py` — 봇이 새 사실 propose
-- Auto-confirm: 같은 key 가 2회 propose → 승격
-- 충돌 감지: `confirmed` 와 모순 → 봇이 사용자 확인 질문
-- Dashboard 승인 UI — `/about-me` 페이지 + chat-side notification
+- ✅ MCP server `mcp_servers/about_me.py` — 봇이 새 사실 propose, get,
+  list_categories, search 의 4 tool. Auto-injected when ABOUT_ME/ 존재
+- ✅ Auto-confirm: 같은 value 가 2회 propose → 승격 (`auto_confirmed` action)
+- ✅ 충돌 감지: `confirmed` 와 모순 → `<key>__conflict_<n>` 으로 큐잉,
+  `conflicts_with` metadata 기록
+- ✅ Dashboard 승인 UI — `/about-me` 페이지: 카테고리 타일 + status 필터
+  + approve/reject/edit per entry + 사이드바 nav (👤)
+- 다음: chat-side notification badge (작은 후속 PR)
 
 ## 데이터 모델 (Phase 2a)
 
