@@ -150,12 +150,21 @@ Personal AI 가 사람과 함께 시간에 따라 **진화**하려면 양방향 
 - [x] GLOBAL_MEMORY.md → ABOUT_ME/ 마이그레이션 (claude haiku 분류)
 - [x] 테스트: 단위 15 + CLI 11 + compose 회귀 3
 
-#### Phase 2b (다음 PR) — AI write
-- [ ] MCP server `about_me` — 봇이 `propose(category, key, value)` 호출
-- [ ] Auto-confirm: 같은 key 2회 propose → 승격
-- [ ] 충돌 감지: `confirmed` 와 모순 → 봇이 사용자 확인 질문
-- [ ] Dashboard `/about-me` propose 승인 UI + chat-side notification
-- [ ] 봇별 SELF.md 와 연계 — reject 된 propose 가 자기반성에 누적
+#### Phase 2b (이번 PR) — AI write
+- [x] MCP server `about_me` (`mcp_servers/about_me.py`) with 4 tools:
+      `about_me_propose`, `about_me_get`, `about_me_list_categories`,
+      `about_me_search`. Auto-injected when `ABOUT_ME/` exists.
+- [x] Builtin skill `builtin_skills/about_me/` (SKILL.md + skill.yaml + mcp.json)
+- [x] Auto-confirm: same value re-proposed → promoted to `confirmed`
+- [x] Conflict detection: different value vs existing `confirmed`
+      adds a `<key>__conflict_<n>` propose with `conflicts_with` metadata
+- [x] chat_server REST API: `/about-me/categories`, `/about-me/entries/{cat}`,
+      `POST .../approve`, `POST .../reject`, `PATCH .../entries/{cat}/{key}`
+- [x] Dashboard `/about-me` page (Next.js) — category tiles + status filter
+      + approve/reject/edit per entry
+- [x] Sidebar nav link with 👤 icon
+- [ ] Chat-side notification badge → next PR (small follow-up)
+- [ ] 봇별 SELF.md 와 연계 — reject 된 propose 가 자기반성에 누적 → Phase 3
 
 ### Phase 3 — SELF.md + reflection cron
 - [ ] `bots/<name>/SELF.md` 템플릿

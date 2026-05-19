@@ -260,6 +260,114 @@ export async function markSessionRead(
  */
 export type FeedbackSignal = 1 | 2 | 3;
 
+// ---------------------------------------------------------------------------
+// ABOUT_ME — shared user knowledge base
+// ---------------------------------------------------------------------------
+
+export type AboutEntryStatus = "confirmed" | "propose";
+export type AboutEntryConfidence = "high" | "medium" | "low";
+
+export interface AboutEntry {
+  key: string;
+  value: string;
+  body: string;
+  confidence: AboutEntryConfidence;
+  source: string;
+  added: string;
+  last_confirmed: string;
+  status: AboutEntryStatus;
+  propose_count?: number;
+  conflicts_with?: string;
+}
+
+export interface AboutCategoryCounts {
+  confirmed: number;
+  propose: number;
+  total: number;
+}
+
+export interface AboutMeCategoriesResponse {
+  categories: Record<string, AboutCategoryCounts>;
+  pending_proposals: number;
+}
+
+export const ABOUT_ME_CATEGORIES = [
+  "identity",
+  "relationships",
+  "preferences",
+  "routines",
+  "current_focus",
+  "health",
+  "values",
+] as const;
+
+export type AboutMeCategory = (typeof ABOUT_ME_CATEGORIES)[number];
+
+export async function fetchAboutMeCategories(): Promise<AboutMeCategoriesResponse> {
+  return jsonFetch<AboutMeCategoriesResponse>("/about-me/categories");
+}
+
+export async function fetchAboutMeEntries(
+  category: AboutMeCategory,
+  status?: AboutEntryStatus,
+): Promise<AboutEntry[]> {
+  const params = status ? `?status=${encodeURIComponent(status)}` : "";
+  const data = await jsonFetch<{ entries: AboutEntry[] }>(
+    `/about-me/entries/${encodeURIComponent(category)}${params}`,
+  );
+  return data.entries;
+}
+
+export async function approveAboutMeEntry(
+  category: AboutMeCategory,
+  key: string,
+): Promise<void> {
+  await jsonFetch(
+    `/about-me/entries/${encodeURIComponent(category)}/${encodeURIComponent(key)}/approve`,
+    { method: "POST" },
+  );
+}
+
+export async function rejectAboutMeEntry(
+  category: AboutMeCategory,
+  key: string,
+): Promise<void> {
+  await jsonFetch(
+    `/about-me/entries/${encodeURIComponent(category)}/${encodeURIComponent(key)}/reject`,
+    { method: "POST" },
+  );
+}
+
+export async function updateAboutMeEntry(
+  category: AboutMeCategory,
+  key: string,
+  patch: { value?: string; body?: string; confidence?: AboutEntryConfidence },
+): Promise<void> {
+  await jsonFetch(
+    `/about-me/entries/${encodeURIComponent(category)}/${encodeURIComponent(key)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export async function createAboutMeEntry(
+  category: AboutMeCategory,
+  payload: {
+    key: string;
+    value: string;
+    body?: string;
+    confidence?: AboutEntryConfidence;
+    status?: AboutEntryStatus;
+  },
+): Promise<void> {
+  await jsonFetch(`/about-me/entries/${encodeURIComponent(category)}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function postFeedback(
   bot: string,
   sessionId: string,

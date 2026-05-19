@@ -490,6 +490,30 @@ def test_compose_claude_md_no_about_me_section_when_empty(temp_abyss_home):
     assert "About Me (Shared" not in result
 
 
+def test_compose_claude_md_injects_about_me_skill_markdown(temp_abyss_home):
+    """When ABOUT_ME directory exists the bot gets the propose SKILL.md."""
+    from abyss.about_me import ensure_about_me_scaffold
+
+    ensure_about_me_scaffold()
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "## about_me" in result
+    assert "about_me_propose" in result
+
+
+def test_compose_claude_md_skips_about_me_skill_when_no_dir(temp_abyss_home):
+    """No ABOUT_ME directory → no skill markdown injected."""
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "## about_me" not in result
+
+
 def test_compose_claude_md_about_me_before_global_memory(temp_abyss_home):
     """ABOUT_ME index appears before the Global Memory section."""
     from abyss.about_me import AboutEntry, upsert_entry

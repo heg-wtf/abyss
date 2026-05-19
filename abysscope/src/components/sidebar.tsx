@@ -104,6 +104,12 @@ function SidebarImpl() {
             active={skillsActive}
           />
           <CollapsedLink
+            href="/about-me"
+            label="About Me"
+            icon="👤"
+            active={pathname === "/about-me" || pathname.startsWith("/about-me/")}
+          />
+          <CollapsedLink
             href="/settings"
             label="Settings"
             icon="⚙️"
@@ -281,6 +287,19 @@ function SidebarImpl() {
             </div>
           )}
         </div>
+
+        <Link
+          href="/about-me"
+          className={cn(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            pathname === "/about-me" || pathname.startsWith("/about-me/")
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+        >
+          <span>👤</span>
+          <span>About Me</span>
+        </Link>
 
         <Link
           href="/settings"

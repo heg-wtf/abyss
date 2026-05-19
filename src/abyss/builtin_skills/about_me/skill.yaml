@@ -1,0 +1,11 @@
+name: about_me
+emoji: "👤"
+description: "Shared user knowledge base — bots propose facts; user confirms (auto-injected)"
+type: mcp
+status: builtin
+required_commands: []
+allowed_tools:
+  - "mcp__about_me__about_me_propose"
+  - "mcp__about_me__about_me_get"
+  - "mcp__about_me__about_me_list_categories"
+  - "mcp__about_me__about_me_search"

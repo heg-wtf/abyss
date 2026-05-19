@@ -370,6 +370,236 @@ def has_any_entries() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Propose / approve / reject (Phase 2b)
+# ---------------------------------------------------------------------------
+
+
+AUTO_CONFIRM_THRESHOLD = 2
+
+
+def _find_entry(entries: list[AboutEntry], key: str) -> AboutEntry | None:
+    for entry in entries:
+        if entry.key == key:
+            return entry
+    return None
+
+
+def _allocate_conflict_key(entries: list[AboutEntry], base_key: str) -> str:
+    """Return ``<base_key>__conflict_<n>`` where ``n`` is unique."""
+    existing_keys = {entry.key for entry in entries}
+    index = 1
+    while True:
+        candidate = f"{base_key}__conflict_{index}"
+        if candidate not in existing_keys:
+            return candidate
+        index += 1
+
+
+@dataclass
+class ProposeResult:
+    """Outcome of a ``propose_entry`` call.
+
+    ``action`` is one of:
+      - ``"created"`` — new propose entry added
+      - ``"updated"`` — existing propose value replaced
+      - ``"reinforced"`` — same value proposed again, count incremented
+      - ``"auto_confirmed"`` — count reached threshold, promoted to confirmed
+      - ``"already_confirmed"`` — same value matches existing confirmed entry
+      - ``"conflict"`` — different value vs an existing confirmed entry
+    """
+
+    action: str
+    category: str
+    key: str
+    propose_count: int = 1
+    conflict_with: str | None = None
+
+
+def propose_entry(
+    category: str,
+    key: str,
+    value: str,
+    *,
+    body: str = "",
+    confidence: str = "high",
+    source: str = "conversation",
+) -> ProposeResult:
+    """Propose a new fact about the user.
+
+    Behaviour:
+    - First propose for ``key`` → status ``propose``, count 1
+    - Same value re-proposed → count +=1, auto-confirm at threshold
+    - Different value while still ``propose`` → replace value, reset count
+    - Same value as existing ``confirmed`` → bump ``last_confirmed``
+    - Different value vs ``confirmed`` → add a new ``__conflict_N`` entry,
+      record ``conflicts_with`` so the user can resolve it
+    """
+    _validate_category(category)
+    if not key.strip():
+        raise ValueError("key required")
+    if confidence not in VALID_CONFIDENCE:
+        raise ValueError(f"invalid confidence: {confidence!r}")
+
+    today = date.today().isoformat()
+    entries = load_category(category)
+    existing = _find_entry(entries, key)
+
+    if existing is None:
+        entry = AboutEntry(
+            key=key,
+            value=value,
+            body=body,
+            confidence=confidence,
+            source=source,
+            added=today,
+            last_confirmed="",
+            status="propose",
+            extra={"propose_count": 1},
+        )
+        entries.append(entry)
+        save_category(category, entries)
+        return ProposeResult(action="created", category=category, key=key, propose_count=1)
+
+    if existing.status == "propose":
+        if existing.value.strip() == value.strip():
+            count = int(existing.extra.get("propose_count", 1)) + 1
+            existing.extra["propose_count"] = count
+            existing.source = source
+            if count >= AUTO_CONFIRM_THRESHOLD:
+                existing.status = "confirmed"
+                existing.last_confirmed = today
+                existing.extra.pop("propose_count", None)
+                save_category(category, entries)
+                return ProposeResult(
+                    action="auto_confirmed",
+                    category=category,
+                    key=key,
+                    propose_count=count,
+                )
+            save_category(category, entries)
+            return ProposeResult(
+                action="reinforced",
+                category=category,
+                key=key,
+                propose_count=count,
+            )
+        # value differs — replace propose with the newest assertion
+        existing.value = value
+        existing.body = body
+        existing.confidence = confidence
+        existing.source = source
+        existing.extra["propose_count"] = 1
+        save_category(category, entries)
+        return ProposeResult(action="updated", category=category, key=key, propose_count=1)
+
+    # existing.status == "confirmed"
+    if existing.value.strip() == value.strip():
+        existing.last_confirmed = today
+        save_category(category, entries)
+        return ProposeResult(action="already_confirmed", category=category, key=key)
+
+    conflict_key = _allocate_conflict_key(entries, key)
+    entries.append(
+        AboutEntry(
+            key=conflict_key,
+            value=value,
+            body=body,
+            confidence=confidence,
+            source=source,
+            added=today,
+            last_confirmed="",
+            status="propose",
+            extra={"propose_count": 1, "conflicts_with": key},
+        )
+    )
+    save_category(category, entries)
+    return ProposeResult(
+        action="conflict",
+        category=category,
+        key=conflict_key,
+        propose_count=1,
+        conflict_with=key,
+    )
+
+
+def approve_entry(category: str, key: str) -> bool:
+    """Promote a propose entry to confirmed. Returns False when not found."""
+    _validate_category(category)
+    entries = load_category(category)
+    for entry in entries:
+        if entry.key == key:
+            entry.status = "confirmed"
+            entry.last_confirmed = date.today().isoformat()
+            entry.extra.pop("propose_count", None)
+            save_category(category, entries)
+            return True
+    return False
+
+
+def reject_entry(category: str, key: str) -> bool:
+    """Remove an entry (typically a propose) from a category."""
+    _validate_category(category)
+    entries = load_category(category)
+    new_entries = [entry for entry in entries if entry.key != key]
+    if len(new_entries) == len(entries):
+        return False
+    save_category(category, new_entries)
+    return True
+
+
+def update_entry(
+    category: str,
+    key: str,
+    *,
+    value: str | None = None,
+    body: str | None = None,
+    confidence: str | None = None,
+) -> bool:
+    """Patch an existing entry's value / body / confidence in place."""
+    _validate_category(category)
+    if confidence is not None and confidence not in VALID_CONFIDENCE:
+        raise ValueError(f"invalid confidence: {confidence!r}")
+
+    entries = load_category(category)
+    for entry in entries:
+        if entry.key == key:
+            if value is not None:
+                entry.value = value
+            if body is not None:
+                entry.body = body
+            if confidence is not None:
+                entry.confidence = confidence
+            save_category(category, entries)
+            return True
+    return False
+
+
+def count_proposals() -> int:
+    """Total entries across all categories with status == 'propose'."""
+    total = 0
+    for category in ABOUT_ME_CATEGORIES:
+        for entry in load_category(category):
+            if entry.status == "propose":
+                total += 1
+    return total
+
+
+def category_counts() -> dict[str, dict[str, int]]:
+    """Return ``{category: {"confirmed": n, "propose": m, "total": k}}``."""
+    counts: dict[str, dict[str, int]] = {}
+    for category in ABOUT_ME_CATEGORIES:
+        entries = load_category(category)
+        confirmed = sum(1 for entry in entries if entry.status == "confirmed")
+        propose = sum(1 for entry in entries if entry.status == "propose")
+        counts[category] = {
+            "confirmed": confirmed,
+            "propose": propose,
+            "total": confirmed + propose,
+        }
+    return counts
+
+
+# ---------------------------------------------------------------------------
 # Migration from GLOBAL_MEMORY.md
 # ---------------------------------------------------------------------------
 

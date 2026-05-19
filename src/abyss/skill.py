@@ -308,6 +308,21 @@ def _load_conversation_search_builtin_markdown() -> str | None:
     return skill_md.read_text(encoding="utf-8")
 
 
+def _load_about_me_builtin_markdown() -> str | None:
+    """Load the about_me built-in SKILL.md, if present."""
+    from abyss.builtin_skills import get_builtin_skill_path
+
+    builtin_path = get_builtin_skill_path("about_me")
+    if builtin_path is None:
+        return None
+
+    skill_md = builtin_path / "SKILL.md"
+    if not skill_md.exists():
+        return None
+
+    return skill_md.read_text(encoding="utf-8")
+
+
 # The group context helper was removed alongside ``group.py``. A
 # new multi-bot room model is planned on top of the PWA / dashboard
 # chat; until then, ``compose_claude_md`` skips group injection.
@@ -429,6 +444,19 @@ def compose_claude_md(
             cs_markdown = _load_conversation_search_builtin_markdown()
             if cs_markdown:
                 active_skills.append(("conversation_search", cs_markdown))
+
+    # Auto-inject about_me instructions when the directory exists.
+    # The directory is created by ``abyss about-me init`` or by any
+    # CLI write — so a fresh install with no opt-in stays clean, and
+    # tests that don't touch ABOUT_ME keep their previous output.
+    from abyss.about_me import about_me_directory as _about_me_directory
+
+    if _about_me_directory().exists():
+        about_me_already_included = any(name == "about_me" for name, _ in active_skills)
+        if not about_me_already_included:
+            about_me_markdown = _load_about_me_builtin_markdown()
+            if about_me_markdown:
+                active_skills.append(("about_me", about_me_markdown))
 
     if active_skills:
         sections.append("")
