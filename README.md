@@ -129,13 +129,18 @@ If your `bot.yaml` still has a `backend.type` set to one of the removed values, 
 
 ## Memory & Recall
 
-abyss layers three memory surfaces on top of the per-session markdown logs:
+abyss layers four memory surfaces on top of the per-session markdown logs:
 
 - **`MEMORY.md`** — per-bot long-term notes the bot reads and writes. Injected into the system prompt.
-- **`GLOBAL_MEMORY.md`** — read-only shared memory injected into every bot's system prompt. CLI-managed.
+- **`ABOUT_ME/`** — structured user knowledge base every bot reads. Seven category files (`identity / relationships / preferences / routines / current_focus / health / values`) with YAML-frontmatter entries (`key / value / confidence / source / added / last_confirmed / status`). Bots **propose** new facts via the `about_me_propose` MCP tool; you approve or reject them from the dashboard at `/about-me`. Same `(key, value)` proposed twice auto-confirms. A `confirmed` value being challenged by a different value queues a conflict propose. The one-line `INDEX.md` is injected into every bot's CLAUDE.md.
+- **`GLOBAL_MEMORY.md`** — legacy read-only shared memory. Still injected after `ABOUT_ME/INDEX.md`. Migrate via `abyss about-me migrate` when you're ready.
 - **Conversation Search (SQLite FTS5)** — an auto-injected MCP tool (`search_conversations`) lets the bot recall specific past messages by keyword, even when they've rolled out of the context window. The index is built incrementally per message; markdown stays the source of truth, and `abyss reindex --bot|--group|--all` rebuilds it from scratch.
 
-Conversation search is on by default whenever the bundled SQLite supports FTS5 (effectively always on macOS / Linux). Each bot has its own `~/.abyss/bots/<name>/conversation.db`; each group has `~/.abyss/groups/<name>/conversation.db`. `abyss doctor` reports FTS5 availability.
+Conversation search is on whenever the bundled SQLite supports FTS5 (effectively always on macOS / Linux). About Me auto-injection only kicks in once `abyss about-me init` (or any propose) creates the `ABOUT_ME/` directory — fresh installs stay unchanged.
+
+### Numeric feedback (1 / 2 / 3)
+
+Every assistant reply in the PWA / dashboard chat carries three tap-sized buttons below it: **1** (좋음), **2** (별로), **3** (틀림). Records land in `~/.abyss/bots/<name>/feedback.jsonl` as raw signal for future behaviour tuning (SELF.md, DPO datasets). `abyss feedback show <bot>` prints per-signal counts + the most recent entries.
 
 ## Slash Commands
 
@@ -242,10 +247,20 @@ abyss memory show <bot>        # Show memory contents
 abyss memory edit <bot>        # Edit MEMORY.md ($EDITOR)
 abyss memory clear <bot>       # Clear memory
 
-# Global memory (shared across all bots, read-only for bots)
+# Global memory (legacy — shared across all bots, read-only for bots)
 abyss global-memory show       # Show global memory contents
 abyss global-memory edit       # Edit GLOBAL_MEMORY.md ($EDITOR)
 abyss global-memory clear      # Clear global memory
+
+# About Me — shared user knowledge base (bots propose, you confirm)
+abyss about-me init                  # Create ABOUT_ME/ scaffold + INDEX
+abyss about-me show [category]       # Render contents as Markdown
+abyss about-me list                  # Table of every entry across categories
+abyss about-me edit <category>       # Edit category file in $EDITOR
+abyss about-me migrate [--dry-run]   # Classify GLOBAL_MEMORY.md into ABOUT_ME
+
+# Numeric feedback (1=좋음 / 2=별로 / 3=틀림)
+abyss feedback show <bot>      # Per-signal counts + recent entries
 
 # Heartbeat management
 abyss heartbeat status         # Show heartbeat status for all bots
@@ -362,7 +377,16 @@ Configuration and session data are stored in `~/.abyss/`. Override the path with
 ```
 ~/.abyss/
 ├── config.yaml               # Global config (timezone, language, bot list, settings)
-├── GLOBAL_MEMORY.md          # Global memory (shared across all bots, read-only)
+├── GLOBAL_MEMORY.md          # Legacy global memory (still injected; migrate to ABOUT_ME/)
+├── ABOUT_ME/                 # Shared user knowledge base (bots propose, you approve)
+│   ├── INDEX.md              # One-line summary per category — injected into every CLAUDE.md
+│   ├── identity.md           # Name, birthday, job, location
+│   ├── relationships.md      # Family, colleagues, friends
+│   ├── preferences.md        # Likes / dislikes / communication style
+│   ├── routines.md           # Daily / weekly rhythms
+│   ├── current_focus.md      # What's top of mind right now
+│   ├── health.md             # Conditions, meds, exercise patterns
+│   └── values.md             # Principles, decision rules
 ├── vapid-keys.json           # Web Push VAPID keypair (auto-generated on first PWA push)
 ├── abyss.pid                 # Bot manager PID (daemon mode)
 ├── abysscope.pid             # Dashboard PID + port (daemon mode)
@@ -377,6 +401,7 @@ Configuration and session data are stored in `~/.abyss/`. Override the path with
 │       ├── cron_sessions/        # Per-job working directories
 │       ├── heartbeat_sessions/   # Heartbeat working directory (HEARTBEAT.md + workspace/)
 │       ├── tool_metrics/         # Daily jsonl of tool calls (PostToolUse hook)
+│       ├── feedback.jsonl        # Numeric feedback (1/2/3) — append-only signal log
 │       └── sessions/
 │           └── chat_<id>/
 │               ├── CLAUDE.md

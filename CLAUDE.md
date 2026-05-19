@@ -69,7 +69,9 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `dashboard.py` | abysscope subprocess lifecycle (locate / build / spawn / stop / PID-file tracking). Imported by `bot_manager` during `abyss start` |
 | `dashboard_ui.py` | Rich-powered checklist UI (`BuildProgress`, `BuildStep`, `StepStatus`) for the `abyss start` / `abyss restart` boot sequence, plus `tail()` log helper |
 | `tool_metrics.py` | Per-bot tool execution metrics — append jsonl events under `bots/<name>/tool_metrics/`, aggregate per-tool latency p50/p95/p99, daily rotation with retention |
-| `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection, `import_skill_from_github()` / `parse_github_url()` (GitHub import) |
+| `feedback.py` | Numeric feedback (1/2/3) per assistant turn. `append_feedback`, `load_feedback`, `aggregate` (latest-wins on same `turn_id`). Storage: `bots/<name>/feedback.jsonl`. Surfaced via 1/2/3 pill buttons in `mobile-chat-message-bubble.tsx` and the `abyss feedback show` CLI |
+| `about_me.py` | Shared user knowledge base under `~/.abyss/ABOUT_ME/` (7 category markdowns + `INDEX.md`). `propose_entry` state machine with auto-confirm at 2 reinforcements and `<key>__conflict_<n>` queueing when a propose disagrees with an existing `confirmed` entry. `approve_entry`, `reject_entry`, `update_entry`, `migrate_from_global_memory()` (claude haiku one-shot classifier). `compose_claude_md()` injects `INDEX.md` when `ABOUT_ME/` exists |
+| `skill.py` | Skill discovery/linking, `compose_claude_md()` (merges personality + skills + memory + rules), MCP/env injection, QMD auto-injection, About Me INDEX + SKILL.md injection (gated on `ABOUT_ME/` existing), `import_skill_from_github()` / `parse_github_url()` (GitHub import) |
 | `cron.py` | Cron scheduling (croniter), natural language parsing via Claude haiku, per-job timezone, one-shot support, `edit_cron_job_message()` (message-only edit) |
 | `heartbeat.py` | Periodic situation awareness, active hours check, HEARTBEAT_OK detection |
 | `token_compact.py` | Compress MEMORY.md/SKILL.md/HEARTBEAT.md via `claude -p` one-shot |
@@ -77,6 +79,7 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 | `utils.py` | Message splitting, logging, IME-compatible CLI input |
 | `conversation_index.py` | SQLite FTS5 index over conversation markdown logs. Per-bot DB at `bots/<name>/conversation.db`, per-group at `groups/<name>/conversation.db`. Markdown stays the source of truth |
 | `mcp_servers/conversation_search.py` | stdio MCP server exposing `search_conversations` tool over the FTS5 index. Spawned automatically per Claude call when FTS5 is available |
+| `mcp_servers/about_me.py` | stdio MCP server with four tools (`about_me_propose`, `about_me_get`, `about_me_list_categories`, `about_me_search`). Auto-injected by `claude_runner._prepare_skill_config` when `ABOUT_ME/` exists. Receives `ABYSS_HOME` via env to locate the knowledge base |
 | `hooks/log_tool_metrics.py` | Claude Code `PostToolUse` / `PostToolUseFailure` hook — reads JSON payload from stdin, resolves bot name from cwd, appends event via `tool_metrics.append_event` |
 | `hooks/precompact_hook.py` | Claude Code `PreCompact` hook — runs `token_compact` for the active bot before host compaction, never blocks (always exits 0) |
 | `llm/base.py` | `LLMBackend` Protocol, `LLMRequest`, `LLMResult`. Backend-agnostic envelope used by handlers / cron / heartbeat |
@@ -162,11 +165,21 @@ Every bot and group has a SQLite FTS5 index at `bots/<name>/conversation.db` / `
 ```
 ~/.abyss/
 ├── config.yaml               # timezone, language, bot list, settings
-├── GLOBAL_MEMORY.md          # Shared read-only memory (CLI-managed)
+├── GLOBAL_MEMORY.md          # Legacy shared read-only memory (still injected; migrate to ABOUT_ME/)
+├── ABOUT_ME/                 # Shared user knowledge base (bots propose, you approve)
+│   ├── INDEX.md              # One-line summary per category — injected into every bot's CLAUDE.md
+│   ├── identity.md           # name, birthday, job, location
+│   ├── relationships.md      # family, colleagues, friends
+│   ├── preferences.md        # likes / dislikes / communication style
+│   ├── routines.md           # daily / weekly rhythms
+│   ├── current_focus.md      # top-of-mind projects
+│   ├── health.md             # conditions, meds, exercise
+│   └── values.md             # principles, decision rules
 ├── bots/<name>/
 │   ├── bot.yaml              # display_name, personality, role, goal, model, streaming, skills, heartbeat, backend
 │   ├── CLAUDE.md             # Generated system prompt (do not edit manually)
 │   ├── MEMORY.md             # Bot long-term memory (read/written by Claude Code)
+│   ├── feedback.jsonl        # 1/2/3 numeric feedback log (append-only)
 │   ├── conversation.db       # SQLite FTS5 index (auto-built; rebuild via `abyss reindex --bot <name>`)
 │   ├── cron.yaml             # Cron jobs (schedule, timezone, message)
 │   ├── cron_sessions/<job>/  # Cron working directory

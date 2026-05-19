@@ -1151,3 +1151,161 @@ server_instance._http_session.post = MagicMock(return_value=fake_cm)
 ### UI Layout
 
 Voice mode opens as a right sidebar (`w-72 shrink-0 border-l`) alongside the chat, not as a full-screen overlay. Chat messages remain visible during voice interaction. Header shows "Voice" label (not bot avatar). Messages show messenger-style timestamps (`toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit", hour12: true })`), hidden while streaming.
+
+## ABOUT_ME — Shared User Knowledge Base
+
+Phase 2 of the co-evolution roadmap (see [`plan-coevolution-2026-05-19.md`](plan-coevolution-2026-05-19.md) and [`plan-about-me-2026-05-19.md`](plan-about-me-2026-05-19.md)). Replaces the free-form `GLOBAL_MEMORY.md` with a categorized, metadata-rich store every bot can read; bots write via propose/confirm with a single human approval tap.
+
+### On-disk format
+
+```
+~/.abyss/ABOUT_ME/
+├── INDEX.md            # auto-generated from category files, injected into CLAUDE.md
+├── identity.md
+├── relationships.md
+├── preferences.md
+├── routines.md
+├── current_focus.md
+├── health.md
+└── values.md
+```
+
+Each category file is a sequence of `---`-delimited YAML frontmatter blocks. Reader (`_split_frontmatter_blocks`) walks line by line, tolerates broken yaml (logs a warning, skips the block), unterminated fences (stops cleanly), and the category heading at the top of the file:
+
+```markdown
+# Identity
+
+---
+key: name
+value: ash84
+confidence: high
+source: manual
+added: 2026-05-19
+last_confirmed: 2026-05-19
+status: confirmed
+---
+
+본명 사용자명. 모든 봇이 호칭으로 사용.
+
+---
+key: email
+value: ash84@payhere.in
+...
+```
+
+`AboutEntry.extra` captures unknown frontmatter keys (e.g. `propose_count`, `conflicts_with`) so the schema can extend without breaking older files. Serializer (`to_frontmatter`) merges `extra` back via `payload.update(self.extra)`.
+
+### propose_entry state machine
+
+Implemented in `abyss.about_me.propose_entry`. Returns a `ProposeResult` with a discriminator `action` field. Threshold for auto-confirm is `AUTO_CONFIRM_THRESHOLD = 2`.
+
+```
+                  propose(category, key, value)
+                          │
+                          ▼
+            ┌─────── existing entry with same key? ──────┐
+            │ no                                         │ yes
+            ▼                                            ▼
+        action="created"                ┌──── existing.status?
+        status=propose                  │
+        extra.propose_count=1           ├── propose: same value?
+                                        │    ├── yes: count += 1
+                                        │    │   ├── < threshold: action="reinforced"
+                                        │    │   └── ≥ threshold: action="auto_confirmed",
+                                        │    │       status=confirmed, last_confirmed=today,
+                                        │    │       drop propose_count
+                                        │    └── no: replace value/body/confidence,
+                                        │         propose_count=1, action="updated"
+                                        │
+                                        └── confirmed: same value?
+                                              ├── yes: bump last_confirmed,
+                                              │   action="already_confirmed"
+                                              └── no: append <key>__conflict_<n>
+                                                    propose with extra.conflicts_with=<key>,
+                                                    action="conflict"
+```
+
+Conflict suffix allocator (`_allocate_conflict_key`) walks `1..N` until an unused key is found, so two consecutive different proposes against the same `confirmed` entry become `city__conflict_1`, `city__conflict_2`.
+
+### INDEX.md regeneration
+
+`save_category()` always calls `rebuild_index()` afterwards. The index includes only `confirmed` entries (propose entries stay invisible until the user approves them). Long values are truncated to 60 chars + ellipsis. Empty categories render as `- health: _(empty)_` so the bot can tell what categories exist.
+
+### CLAUDE.md injection (gated)
+
+`skill.compose_claude_md()` injects two sections only when `about_me_directory().exists()`:
+
+1. `## About Me (Shared, Read-Only)` — the one-line index. Placed before the legacy `## Global Memory (Read-Only)` so newer ABOUT_ME content takes precedence.
+2. `## about_me` under `# Available Skills` — the SKILL.md from `builtin_skills/about_me/SKILL.md` telling the bot when to propose, what kinds of facts count as durable, kebab-case key conventions, and not to announce "saving to memory" verbosely.
+
+The gate (`ABOUT_ME/` exists) means a fresh install with no opt-in is byte-identical to before; `abyss about-me init` (or any propose) flips it on for every bot at next startup.
+
+### MCP wiring
+
+`claude_runner._prepare_skill_config` writes `.mcp.json` with an `about_me` server when the gate trips:
+
+```json
+{
+  "mcpServers": {
+    "about_me": {
+      "command": "/path/to/python",
+      "args": ["-m", "abyss.mcp_servers.about_me"],
+      "env": {"ABYSS_HOME": "/Users/ash84/.abyss"}
+    }
+  }
+}
+```
+
+Four tools are added to the `--allowedTools` whitelist:
+
+- `mcp__about_me__about_me_propose`
+- `mcp__about_me__about_me_get`
+- `mcp__about_me__about_me_list_categories`
+- `mcp__about_me__about_me_search`
+
+The server itself (`mcp_servers/about_me.py`) is a stdio JSON-RPC 2.0 loop in the same mould as `conversation_search`. `tools/call` routes through `_TOOL_DISPATCH`. The `propose` handler returns the `ProposeResult` payload as JSON inside `content[0].text`, so the bot can decide whether to say "기억해놨어" or "혹시 부산 맞아?" (in the conflict case).
+
+### HTTP API (dashboard)
+
+`chat_server.py` exposes the bridge between the dashboard and `about_me.py`:
+
+| method | path | purpose |
+|---|---|---|
+| GET | `/about-me/categories` | counts per category + `pending_proposals` total |
+| GET | `/about-me/entries/{cat}?status=propose\|confirmed` | list, optionally filtered |
+| POST | `/about-me/entries/{cat}` | manual create (CLI-like; from dashboard) |
+| POST | `/about-me/entries/{cat}/{key}/approve` | propose → confirmed |
+| POST | `/about-me/entries/{cat}/{key}/reject` | delete |
+| PATCH | `/about-me/entries/{cat}/{key}` | edit value / body / confidence |
+
+Validators (`_validate_about_me_category`, `_validate_about_me_key`) bound the URL surface. Keys allow `[A-Za-z0-9_\-]+` up to 128 chars (covers `<key>__conflict_<n>` shape). All paths reuse the Origin allowlist + CORS middleware.
+
+### Migration from GLOBAL_MEMORY.md
+
+`about_me.migrate_from_global_memory(dry_run=False, model="haiku")` reads `~/.abyss/GLOBAL_MEMORY.md`, runs a single `claude -p` haiku one-shot with `MIGRATION_PROMPT`, parses the resulting JSON, and `upsert_entry()`'s each line as `source="migration:GLOBAL_MEMORY.md"`. The original file is **never deleted** — the user clears it manually once they're satisfied with the split. CLI: `abyss about-me migrate [--dry-run] [--yes]`.
+
+## Numeric Feedback Signal (1 / 2 / 3)
+
+Phase 1 of the co-evolution roadmap. The conversation-log timestamp already on `ChatMessage.timestamp` doubles as the per-turn identifier, so no schema change to existing logs is required.
+
+### Storage
+
+`~/.abyss/bots/<name>/feedback.jsonl` — append-only newline-delimited JSON:
+
+```json
+{"ts":"2026-05-19T08:05:11+00:00","bot":"anne","session_id":"chat_web_a3f9","turn_id":"2026-05-18 05:00:01 UTC","signal":2,"note":""}
+```
+
+Re-rating the same `turn_id` simply appends another line. `aggregate()` returns `latest_per_turn` with latest-wins so downstream readers (future SELF.md reflection, DPO pipeline) don't need to dedupe.
+
+### API
+
+`POST /chat/sessions/{bot}/{session_id}/feedback` on `chat_server`. Body: `{turn_id: str, signal: 1|2|3, note?: str}`. Reuses `_resolve_session_dir` traversal guard. `note` ≤ 2000 chars.
+
+### Front end
+
+`mobile-chat-message-bubble.tsx` renders three pill buttons under each assistant bubble. Hidden while `message.streaming`, hidden on user turns, hidden when `bot` / `sessionId` props are not provided (e.g. read-only routine viewer). Selection persists in `localStorage` per `(bot, session, turn_id)` so a page refresh keeps the highlight visible.
+
+### CLI
+
+`abyss feedback show <bot>` prints per-signal counts + percentage + the most recent N entries via `feedback.aggregate()`. Phase 3 will start consuming these signals via SELF.md reflection cron.

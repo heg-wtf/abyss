@@ -339,6 +339,34 @@ Full backup of `~/.abyss/` directory to an AES-256 encrypted zip file.
 > (`abyss group create/list/show/delete`) are preserved for a future PWA-based re-implementation.
 > `group.py` and `session.group_session_directory()` remain in the codebase as stubs.
 
+### 21. ABOUT_ME — Shared User Knowledge Base
+
+Replaces the free-form `GLOBAL_MEMORY.md` with a structured, two-way edited knowledge base every bot reads. The full design lives in [`plan-about-me-2026-05-19.md`](plan-about-me-2026-05-19.md); this section captures the architectural surface.
+
+- **Storage** — `~/.abyss/ABOUT_ME/` with seven category markdown files plus `INDEX.md`. Each category file is a sequence of `---`-delimited YAML frontmatter blocks; each block represents one entry with `key`, `value`, `confidence`, `source`, `added`, `last_confirmed`, `status` (`confirmed` | `propose`), optional `body`, and an `extra` dict for things like `propose_count` and `conflicts_with`.
+- **Bot view (read)** — `compose_claude_md()` injects the one-line `INDEX.md` summary into every bot's CLAUDE.md as `## About Me (Shared, Read-Only)`, before the legacy `## Global Memory` section. The bot can drill into a category via the `about_me_get` MCP tool when the index isn't detailed enough.
+- **Bot view (write)** — Bots cannot directly write `confirmed` entries. The `about_me_propose(category, key, value, body?, confidence?)` MCP tool runs `propose_entry()` which implements a state machine:
+  - First propose for `key` → new entry with `status="propose"` and `extra.propose_count=1`.
+  - Same value re-proposed → count++; at `AUTO_CONFIRM_THRESHOLD=2` the entry is promoted to `confirmed`.
+  - Different value while still pending → replace value, reset count.
+  - Same value as existing `confirmed` → bump `last_confirmed`.
+  - Different value vs `confirmed` → queue a new entry at `<key>__conflict_<n>` with `extra.conflicts_with=<key>` so the user can resolve the conflict in the dashboard. The original `confirmed` entry is left intact.
+- **User view** — `/about-me` page in abysscope (category tiles + status filter + approve/reject/edit per entry). Backed by REST endpoints on `chat_server`: `GET /about-me/categories`, `GET /about-me/entries/{cat}` (with `?status=` filter), `POST .../approve`, `POST .../reject`, `PATCH .../entries/{cat}/{key}`, `POST .../entries/{cat}` (manual create).
+- **MCP server** — `mcp_servers/about_me.py` mirrors the `conversation_search` stdio JSON-RPC pattern. Four tools: `about_me_propose`, `about_me_get`, `about_me_list_categories`, `about_me_search` (case-insensitive substring across every entry).
+- **Auto-injection gate** — both the SKILL.md injection (in `skill.compose_claude_md`) and the MCP wiring (in `claude_runner._prepare_skill_config`) are gated on `about_me_directory().exists()`. A fresh install with no opt-in keeps its previous CLAUDE.md byte-for-byte; running `abyss about-me init` (or any propose) flips the gate.
+- **CLI** — `abyss about-me init | show [category] | list | edit <category> | migrate [--dry-run] [--yes]`. The `migrate` subcommand uses a claude-haiku one-shot to classify the existing `GLOBAL_MEMORY.md` into the seven categories; the original file is left in place so the migration is reversible.
+- **Index regeneration** — every write through `save_category()` calls `rebuild_index()`. `INDEX.md` only includes `confirmed` entries; `propose` entries stay invisible to the bot until the user approves them. Long values are truncated to 60 chars + ellipsis in the index.
+
+### 22. Numeric Feedback Signal (1 / 2 / 3)
+
+Every assistant turn in the PWA / dashboard chat carries three tap-sized buttons (`1` = 좋음, `2` = 별로, `3` = 틀림). One tap = one record.
+
+- **Storage** — `~/.abyss/bots/<name>/feedback.jsonl` (append-only). One JSON record per click: `{ts, bot, session_id, turn_id, signal, note}`. `turn_id` is the assistant turn's conversation-log header timestamp (`YYYY-MM-DD HH:MM:SS UTC`), already on `ChatMessage.timestamp`, so the front end never has to invent a new identifier.
+- **API** — `POST /chat/sessions/{bot}/{session_id}/feedback` on `chat_server`. Reuses `_resolve_session_dir` traversal guard and the Origin allowlist.
+- **Front end** — `mobile-chat-message-bubble.tsx` renders the three pill buttons under each assistant bubble (hidden during streaming, hidden for user turns). Selection persists per `(bot, session, turn_id)` in `localStorage` so a page refresh keeps the highlight visible.
+- **CLI** — `abyss feedback show <bot>` prints per-signal counts + percentage + the most recent N entries via `feedback.aggregate()`.
+- **Aggregation semantics** — re-rating the same turn appends a new line; `aggregate()` returns `latest_per_turn` with latest-wins so downstream readers (future SELF.md reflection, DPO pipeline) don't have to dedupe.
+
 ## Module Dependencies
 
 ```mermaid
@@ -382,9 +410,18 @@ graph TD
 
     SK --> CFG
     SK --> BS
+    SK --> AM[about_me.py]
     SK --> GR
 
     GR --> CFG
+
+    CS --> AM
+    CR --> AM
+
+    AM --> CFG
+
+    FB[feedback.py] --> CFG
+    CS --> FB
 
     CFG -.->|lazy import| SK
 
@@ -392,6 +429,8 @@ graph TD
     style BM fill:#36c,color:#fff
     style CS fill:#f90,color:#fff
     style CR fill:#f90,color:#fff
+    style AM fill:#a64ac9,color:#fff
+    style FB fill:#a64ac9,color:#fff
     style GR fill:#2d6,color:#fff
 ```
 
