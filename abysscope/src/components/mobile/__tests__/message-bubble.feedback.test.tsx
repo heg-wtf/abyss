@@ -4,11 +4,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MessageBubble } from "../mobile-chat-message-bubble";
 import type { ConversationMessage } from "../mobile-chat-types";
 
-const postFeedbackMock = vi.fn();
-
-vi.mock("@/lib/abyss-api", () => ({
-  postFeedback: (...args: unknown[]) => postFeedbackMock(...args),
-}));
+// ``FeedbackButtons`` hits the Next.js proxy directly via ``fetch`` so
+// the request lands on the same origin the PWA was served from (the
+// phone cannot reach the Python sidecar on 127.0.0.1 over Tailscale).
+// Tests stub ``window.fetch`` to mirror that contract.
+const fetchMock = vi.fn();
 
 function makeAssistantMessage(
   overrides: Partial<ConversationMessage> = {},
@@ -23,12 +23,19 @@ function makeAssistantMessage(
 }
 
 beforeEach(() => {
-  postFeedbackMock.mockReset();
-  postFeedbackMock.mockResolvedValue(undefined);
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue(
+    new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
   window.localStorage.clear();
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   window.localStorage.clear();
 });
 
@@ -81,11 +88,16 @@ describe("MessageBubble feedback footer", () => {
     fireEvent.click(two);
 
     await waitFor(() => {
-      expect(postFeedbackMock).toHaveBeenCalledWith(
-        "anne",
-        "chat_web_abc",
-        "2026-05-19 08:00:00 UTC",
-        2,
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/chat/sessions/anne/chat_web_abc/feedback",
+        expect.objectContaining({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            turn_id: "2026-05-19 08:00:00 UTC",
+            signal: 2,
+          }),
+        }),
       );
     });
 
@@ -129,7 +141,7 @@ describe("MessageBubble feedback footer", () => {
   });
 
   it("shows error label when post fails", async () => {
-    postFeedbackMock.mockRejectedValueOnce(new Error("network"));
+    fetchMock.mockRejectedValueOnce(new Error("network"));
     render(
       <MessageBubble
         message={makeAssistantMessage()}
