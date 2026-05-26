@@ -18,6 +18,24 @@ export interface WorkspaceTreeResult {
   missing: boolean;
 }
 
+export interface WorkspaceFileResult {
+  root: string;
+  relativePath: string;
+  content: string;
+  size: number;
+  mtime: string;
+  truncated: boolean;
+}
+
+/**
+ * Hard cap on inline preview size. Markdown plans / logs are usually
+ * tens of KB; anything past this is almost certainly a runaway log
+ * we do not want to ship over the wire for an inline preview. The
+ * reader returns the first ``MAX_PREVIEW_BYTES`` bytes and sets
+ * ``truncated: true`` so the UI can flag it.
+ */
+export const MAX_PREVIEW_BYTES = 1024 * 1024;
+
 export class WorkspaceAccessError extends Error {
   constructor(
     message: string,
@@ -137,4 +155,79 @@ export function listBotWorkspaceTree(
   }
   const tree = listDirectory(target, realRoot);
   return { root: realRoot, relativePath, tree, missing: false };
+}
+
+/**
+ * Read a single text file from a bot session's workspace.
+ *
+ * Reuses the same root resolution + symlink-escape guard as the tree
+ * listing. Caps the read at `MAX_PREVIEW_BYTES` so a runaway log can
+ * never blow up the preview surface. Throws `WorkspaceAccessError`
+ * for unknown bot, traversal, escape, or directory targets.
+ */
+export function readBotWorkspaceFile(
+  botName: string,
+  chatId: string,
+  relativePath: string,
+): WorkspaceFileResult {
+  const root = workspaceRoot(botName, chatId);
+  if (!root) {
+    throw new WorkspaceAccessError("Unknown bot or session", "not_found");
+  }
+  if (!relativePath) {
+    throw new WorkspaceAccessError("Path is required", "invalid_path");
+  }
+  validateRelativePath(relativePath);
+
+  if (!fs.existsSync(root)) {
+    throw new WorkspaceAccessError("Workspace not found", "not_found");
+  }
+  const realRoot = fs.realpathSync(root);
+  const target = resolveWithinRoot(realRoot, relativePath);
+  if (!fs.existsSync(target)) {
+    throw new WorkspaceAccessError("Path not found", "not_found");
+  }
+  const stat = fs.statSync(target);
+  if (stat.isDirectory()) {
+    throw new WorkspaceAccessError("Path is a directory", "invalid_path");
+  }
+  if (!stat.isFile()) {
+    throw new WorkspaceAccessError("Path is not a regular file", "invalid_path");
+  }
+
+  // Read up to MAX_PREVIEW_BYTES via a file descriptor so an oversized
+  // file does not allocate the whole blob in memory. ``readSync``
+  // returns the number of bytes actually written into the buffer.
+  const truncated = stat.size > MAX_PREVIEW_BYTES;
+  const readLength = Math.min(stat.size, MAX_PREVIEW_BYTES);
+  const buffer = Buffer.alloc(readLength);
+  if (readLength > 0) {
+    const fd = fs.openSync(target, "r");
+    try {
+      let offset = 0;
+      while (offset < readLength) {
+        const bytesRead = fs.readSync(
+          fd,
+          buffer,
+          offset,
+          readLength - offset,
+          offset,
+        );
+        if (bytesRead === 0) break;
+        offset += bytesRead;
+      }
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+  const content = buffer.toString("utf-8");
+
+  return {
+    root: realRoot,
+    relativePath: path.relative(realRoot, target),
+    content,
+    size: stat.size,
+    mtime: stat.mtime.toISOString(),
+    truncated,
+  };
 }

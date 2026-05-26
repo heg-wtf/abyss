@@ -40,6 +40,22 @@ describe("WorkspaceTree component guards", () => {
     expect(source).toMatch(/\/api\/chat\/workspace\?/);
     expect(source).toMatch(/params\.set\("path", relativePath\)/);
   });
+
+  it("opens previewable files in an inline preview", () => {
+    // File clicks should dispatch into ``openPreview`` which hits the
+    // single-file endpoint, and the back button should restore the
+    // tree by clearing ``previewPath``.
+    expect(source).toMatch(/\/api\/chat\/workspace\/file\?/);
+    expect(source).toMatch(/openPreview/);
+    expect(source).toMatch(/setPreviewPath\(null\)/);
+    expect(source).toMatch(/ReactMarkdown/);
+    expect(source).toMatch(/rehypeHighlight/);
+  });
+
+  it("flags truncated files in the preview header", () => {
+    expect(source).toMatch(/previewTruncated/);
+    expect(source).toMatch(/파일이 너무 큽니다/);
+  });
 });
 
 describe("WorkspaceTree mobile integration", () => {

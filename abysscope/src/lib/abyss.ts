@@ -68,8 +68,11 @@ export {
 export type {
   WorkspaceTreeNode,
   WorkspaceTreeResult,
+  WorkspaceFileResult,
 } from "./abyss/workspace";
 export {
   WorkspaceAccessError,
   listBotWorkspaceTree,
+  readBotWorkspaceFile,
+  MAX_PREVIEW_BYTES,
 } from "./abyss/workspace";
