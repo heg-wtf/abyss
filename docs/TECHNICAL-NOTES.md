@@ -1309,3 +1309,31 @@ Re-rating the same `turn_id` simply appends another line. `aggregate()` returns 
 ### CLI
 
 `abyss feedback show <bot>` prints per-signal counts + percentage + the most recent N entries via `feedback.aggregate()`. Phase 3 will start consuming these signals via SELF.md reflection cron.
+
+## Workspace File Preview (Dashboard Chat Side Panel)
+
+`WorkspaceTree` (`abysscope/src/components/chat/workspace-tree.tsx`) lazy-loads `~/.abyss/bots/<bot>/sessions/<chat>/workspace/` via `/api/chat/workspace?bot&session&path` and renders a tree with chevron-toggled subdirectories.
+
+### Inline File Preview
+
+Clicking a file with an extension in `PREVIEW_EXTENSIONS` (`.md` / `.markdown` / `.mdx` / `.txt` / `.log` / `.yaml` / `.yml` / `.json` / `.toml` / `.sh` / `.py` / `.ts` / `.tsx` / `.js` / `.jsx`) hits `/api/chat/workspace/file?bot&session&path` and swaps the panel body to a preview view with a back button. The tree stays mounted so expand state survives the round-trip. Files outside the set show no hover affordance.
+
+Markdown (`.md` / `.markdown` / `.mdx`) renders via `react-markdown` with `[remarkBreaks, remarkGfm]` + `[rehypeHighlight]`. The highlight.js GitHub-dark theme is imported once in `globals.css` so any markdown surface can render highlighted fenced code without re-importing. Other text falls through to a plain `<pre><code>`.
+
+### API Route
+
+`abysscope/src/app/api/chat/workspace/file/route.ts` is a thin `GET` wrapper over `readBotWorkspaceFile()` in `lib/abyss/workspace.ts`. Returns `{ root, relativePath, content, size, mtime, truncated }`.
+
+Guards (`WorkspaceAccessError` with `code → status` mapping):
+
+- `not_found` → 404 — unknown bot, missing workspace dir, missing file
+- `invalid_path` → 400 — empty `path`, `..` traversal, directory target, non-regular file
+- `forbidden` → 403 — symlink escape (realpathSync resolved outside workspace root)
+
+### Read Cap
+
+`MAX_PREVIEW_BYTES = 1 MiB`. Uses `openSync` + `readSync` loop to read up to the cap. If `stat.size > MAX_PREVIEW_BYTES`, `truncated: true` is returned and the UI surfaces a Korean warning banner (`파일이 너무 큽니다. 앞부분만 표시합니다.`).
+
+### Session ID Normalisation
+
+`workspaceRoot()` strips a leading `chat_` from incoming `chatId` before path construction. Web sessions on the mobile PWA send `session.id` with the prefix already attached; without normalisation the path would resolve to `sessions/chat_chat_web_<uuid>/workspace/` and 404.

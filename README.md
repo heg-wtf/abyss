@@ -361,6 +361,7 @@ cd abysscope && npx next build && npx next start --port 3847
 | Logs | Date picker, text filter, delete (single/bulk/by-age), daemon log truncate |
 | Conversations | Per-chat conversation viewer with date navigation, individual file delete |
 | Chat | In-browser chat with any bot — SDK session pool, SSE token streaming, image + PDF uploads |
+| Workspace Panel | Side-panel tree over `bots/<bot>/sessions/<chat>/workspace/`. Click a file (`.md` / `.txt` / `.log` / `.yaml` / `.json` / `.sh` / `.py` / `.ts(x)` / `.js(x)` / `.toml`) for an inline preview with markdown rendering + syntax highlighting (`rehype-highlight`). 1 MiB preview cap; symlink-escape guarded |
 | Voice Chat | Mic button opens voice sidebar with animated Orb — ElevenLabs Scribe v2 STT → bot reply → ElevenLabs TTS playback, auto-restart loop, theme-aware Orb colors |
 | Tool Metrics | Per-bot tool call latency (p50/p95/p99) and counts from Claude Code `PostToolUse` hooks |
 
