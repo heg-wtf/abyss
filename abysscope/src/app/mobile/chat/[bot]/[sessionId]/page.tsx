@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
   getChatMessages,
@@ -7,6 +8,21 @@ import {
 import { MobileChatScreen } from "@/components/mobile/mobile-chat-screen";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ bot: string; sessionId: string }>;
+}): Promise<Metadata> {
+  const { bot, sessionId } = await params;
+  const sessions = await listChatSessions(bot).catch(() => []);
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) return { title: "Chat" };
+  const botLabel = session.bot_display_name?.trim() || bot;
+  const sessionLabel = session.custom_name?.trim();
+  const where = sessionLabel ? `${botLabel} · ${sessionLabel}` : botLabel;
+  return { title: `Chat · ${where}` };
+}
 
 /**
  * Mobile chat screen for a specific bot + session pair.

@@ -1,15 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { X } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { MarkdownBody } from "./mobile-chat-markdown-body";
 import { StreamingDots } from "./mobile-chat-streaming";
 import { formatTime } from "./mobile-chat-helpers";
 import type { ConversationMessage } from "./mobile-chat-types";
-import {
-  postFeedback,
-  type FeedbackSignal,
-} from "@/lib/abyss-api";
+import type { FeedbackSignal } from "@/lib/abyss-api";
 
 const SIGNAL_LABELS: Record<FeedbackSignal, string> = {
   1: "좋음",
@@ -60,7 +57,24 @@ function FeedbackButtons({
     setPending(true);
     setError(false);
     try {
-      await postFeedback(bot, sessionId, turnId, signal);
+      // Goes through the Next.js proxy so the request lands on the
+      // same origin the PWA was served from. The browser cannot
+      // reach the Python sidecar (127.0.0.1:3848) directly when the
+      // PWA is opened from a phone via Tailscale — the phone's own
+      // loopback has no sidecar — so calling the absolute URL from
+      // ``postFeedback`` would only emit a CORS preflight and never
+      // a real POST.
+      const response = await fetch(
+        `/api/chat/sessions/${encodeURIComponent(bot)}/${encodeURIComponent(sessionId)}/feedback`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ turn_id: turnId, signal }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       setSelected(signal);
       try {
         window.localStorage.setItem(storageKey, String(signal));
@@ -75,7 +89,7 @@ function FeedbackButtons({
   };
 
   return (
-    <div className="mt-1 flex items-center gap-1.5">
+    <>
       {([1, 2, 3] as FeedbackSignal[]).map((value) => {
         const isSelected = selected === value;
         return (
@@ -100,7 +114,57 @@ function FeedbackButtons({
       {error ? (
         <span className="text-[10px] text-destructive">저장 실패</span>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const handleCopy = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = content;
+        textarea.setAttribute("readonly", "");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopied(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? "복사됨" : "메시지 복사"}
+      title={copied ? "복사됨" : "복사"}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-colors hover:bg-muted"
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5" aria-hidden />
+      ) : (
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+      )}
+    </button>
   );
 }
 
@@ -118,6 +182,7 @@ export function MessageBubble({
   sessionId?: string;
 }) {
   const isUser = message.role === "user";
+  const showCopy = !message.streaming && !!message.content;
   const showFeedback =
     !isUser &&
     !message.streaming &&
@@ -125,6 +190,7 @@ export function MessageBubble({
     !!message.timestamp &&
     !!bot &&
     !!sessionId;
+  const showActions = showCopy || showFeedback;
   return (
     <li className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -176,12 +242,17 @@ export function MessageBubble({
             {formatTime(message.timestamp)}
           </div>
         </div>
-        {showFeedback ? (
-          <FeedbackButtons
-            bot={bot!}
-            sessionId={sessionId!}
-            turnId={message.timestamp}
-          />
+        {showActions ? (
+          <div className="mt-1 flex items-center gap-1.5">
+            {showCopy ? <CopyButton content={message.content} /> : null}
+            {showFeedback ? (
+              <FeedbackButtons
+                bot={bot!}
+                sessionId={sessionId!}
+                turnId={message.timestamp}
+              />
+            ) : null}
+          </div>
         ) : null}
         {queued && (
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground">

@@ -319,6 +319,7 @@ abyss/
 │   │   ├── imessage/       # iMessage skill (imsg CLI)
 │   │   ├── reminders/      # Apple Reminders skill (reminders-cli)
 │   │   ├── image/          # Image processing skill (slimg CLI)
+<<<<<<< Updated upstream
 │   │   ├── supabase/       # Supabase MCP skill (DB, Storage, Edge Functions)
 │   │   ├── gmail/          # Gmail skill (gogcli)
 │   │   ├── gcalendar/      # Google Calendar skill (gogcli)
@@ -326,6 +327,15 @@ abyss/
 │   │   ├── jira/           # Jira skill (MCP, issue management)
 │   │   ├── translate/      # Translate skill (translatecli, Gemini)
 │   │   ├── qmd/            # QMD knowledge search skill (MCP, HTTP daemon)
+=======
+│   │   ├── supabase/      # Supabase MCP skill (DB, Storage, Edge Functions)
+│   │   ├── gmail/         # Gmail skill (gogcli)
+│   │   ├── gcalendar/     # Google Calendar skill (gogcli)
+│   │   ├── twitter/      # Twitter/X skill (MCP, tweet posting/search)
+│   │   ├── jira/         # Jira skill (MCP, issue management)
+│   │   ├── translate/    # Translate skill (translatecli, Gemini)
+│   │   ├── qmd/          # QMD knowledge search skill (MCP, HTTP daemon)
+>>>>>>> Stashed changes
 │   │   ├── conversation_search/ # Past conversation recall (FTS5 MCP, auto-injected)
 │   │   └── code_review/    # `claude ultrareview` PR/path review
 │   ├── backup.py            # Encrypted backup (AES-256 zip)

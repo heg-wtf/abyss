@@ -20,7 +20,7 @@ import { MobileShell } from "@/components/mobile/mobile-shell";
  */
 
 export const metadata: Metadata = {
-  title: "Abyss Mobile",
+  title: { default: "Abyss Mobile", template: "%s · Abyss Mobile" },
 };
 
 export const viewport: Viewport = {
