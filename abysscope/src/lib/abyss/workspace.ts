@@ -31,8 +31,12 @@ export class WorkspaceAccessError extends Error {
 function workspaceRoot(botName: string, chatId: string): string | null {
   const botPath = getBotPath(botName);
   if (!botPath) return null;
-  if (!/^[A-Za-z0-9._-]+$/.test(chatId)) return null;
-  return path.join(botPath, "sessions", `chat_${chatId}`, "workspace");
+  // ``ChatSession.id`` from the Python sidecar is the full directory
+  // name (e.g. ``chat_web_<uuid>``) but legacy callers pass the bare
+  // chatId without the ``chat_`` prefix. Normalize both forms.
+  const normalized = chatId.startsWith("chat_") ? chatId.slice(5) : chatId;
+  if (!/^[A-Za-z0-9._-]+$/.test(normalized)) return null;
+  return path.join(botPath, "sessions", `chat_${normalized}`, "workspace");
 }
 
 function validateRelativePath(relativePath: string): void {

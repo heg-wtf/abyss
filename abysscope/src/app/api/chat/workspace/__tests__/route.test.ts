@@ -110,6 +110,29 @@ describe("GET /api/chat/workspace", () => {
     ]);
   });
 
+  it("accepts session id with leading 'chat_' prefix", async () => {
+    // ``ChatSession.id`` from the Python sidecar is the full
+    // directory name (e.g. ``chat_web_<uuid>``). The mobile chat
+    // screen passes it through to the workspace API verbatim, so
+    // the route must not double the ``chat_`` prefix.
+    const { workspace } = setupBot();
+    fs.mkdirSync(workspace, { recursive: true });
+    fs.writeFileSync(path.join(workspace, "plan.md"), "hi");
+
+    const response = await GET(
+      buildRequest({ bot: "testbot", session: "chat_1" }),
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      missing: boolean;
+      tree: { name: string; type: string }[];
+    };
+    expect(body.missing).toBe(false);
+    expect(body.tree.map((n) => `${n.type}:${n.name}`)).toEqual([
+      "file:plan.md",
+    ]);
+  });
+
   it("returns 400 for path traversal attempts", async () => {
     const { workspace } = setupBot();
     fs.mkdirSync(workspace, { recursive: true });
