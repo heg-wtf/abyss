@@ -15,12 +15,14 @@ which was retired in v2026.05.15 in favor of this single lifecycle.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 from contextlib import suppress
 from pathlib import Path
 
@@ -90,11 +92,16 @@ async def _run_bots(
     pid_file.write_text(str(os.getpid()))
 
     stop_event = asyncio.Event()
+    # Thread-safe mirror so blocking work running in ``run_in_executor``
+    # (e.g. ``dashboard.build_and_start`` retrying ``next build``) can
+    # bail out of its backoff sleep when shutdown is requested.
+    executor_stop_event = threading.Event()
     loop = asyncio.get_running_loop()
 
     def signal_handler():
         logger.info("Shutdown signal received")
         stop_event.set()
+        executor_stop_event.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, signal_handler)
@@ -205,14 +212,24 @@ async def _run_bots(
             else:
                 try:
                     abyss_version = importlib.metadata.version("abyss")
-                    dashboard_handle = await loop.run_in_executor(
-                        None,
+                    # Retry the build a few times with backoff so transient
+                    # network issues at launchd boot (no WiFi yet) don't
+                    # leave the dashboard permanently down while the
+                    # daemon stays up under KeepAlive. The backoff polls
+                    # ``executor_stop_event`` so SIGINT mid-retry is
+                    # honoured immediately instead of waiting up to
+                    # ``max_attempts × backoff`` seconds.
+                    build_call = functools.partial(
                         dashboard_module.build_and_start,
                         dashboard_port,
                         log_path,
                         progress,
                         abyss_version,
+                        max_build_attempts=3,
+                        build_backoff_seconds=20.0,
+                        cancel_event=executor_stop_event,
                     )
+                    dashboard_handle = await loop.run_in_executor(None, build_call)
                 except (FileNotFoundError, RuntimeError) as dashboard_error:
                     logger.error("Dashboard failed to start: %s", dashboard_error)
                     dashboard_handle = None

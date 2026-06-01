@@ -25,6 +25,8 @@ import os
 import signal
 import socket
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -188,6 +190,23 @@ def _run_to_log(args: list[str], cwd: Path, env: dict[str, str], log_path: Path)
     return proc.returncode
 
 
+class BuildCancelled(RuntimeError):
+    """Raised when a build retry is aborted by an external ``cancel_event``."""
+
+
+def _interruptible_sleep(seconds: float, cancel_event: threading.Event | None) -> bool:
+    """Sleep for ``seconds``, polling ``cancel_event`` every 100 ms.
+
+    Returns ``True`` if the wait completed, ``False`` if it was cancelled.
+    With ``cancel_event=None`` this degrades to a single ``time.sleep``.
+    """
+    if cancel_event is None:
+        time.sleep(max(0.0, seconds))
+        return True
+    # ``Event.wait`` returns True once the flag is set, so the sense flips.
+    return not cancel_event.wait(timeout=max(0.0, seconds))
+
+
 @dataclass
 class DashboardHandle:
     """Reference to a running dashboard subprocess."""
@@ -212,6 +231,10 @@ def build_and_start(
     log_path: Path,
     progress: BuildProgress,
     abyss_version: str,
+    *,
+    max_build_attempts: int = 1,
+    build_backoff_seconds: float = 5.0,
+    cancel_event: threading.Event | None = None,
 ) -> DashboardHandle:
     """Build the dashboard and spawn ``next start`` as a child process.
 
@@ -219,6 +242,12 @@ def build_and_start(
     progress next to ``chat_server`` and per-bot init in a single
     checklist. ``log_path`` collects stdout/stderr from ``npm`` and
     ``next``.
+
+    ``max_build_attempts`` retries ``next build`` on non-zero exit
+    (e.g. transient network issues at boot). ``build_backoff_seconds``
+    is the wait between attempts. ``cancel_event`` (when supplied) is
+    polled during the backoff so a Ctrl+C arriving mid-retry doesn't
+    wait the full backoff window before honouring shutdown.
     """
     abysscope_directory: Path | None = None
     next_env: dict[str, str] = {}
@@ -256,16 +285,38 @@ def build_and_start(
         "NODE_OPTIONS": (f"{existing_node_options} --dns-result-order=ipv4first".strip()),
     }
 
+    attempts = max(1, max_build_attempts)
     with progress.step("Build dashboard") as step:
-        step.detail = "next build"
-        code = _run_to_log(
-            ["npx", "next", "build"],
-            cwd=abysscope_directory,
-            env=next_env,
-            log_path=log_path,
-        )
-        if code != 0:
-            step.detail = f"exit {code} — see log"
+        last_code = 0
+        for attempt in range(1, attempts + 1):
+            step.detail = (
+                "next build" if attempt == 1 else f"next build (retry {attempt}/{attempts})"
+            )
+            progress.refresh()
+            code = _run_to_log(
+                ["npx", "next", "build"],
+                cwd=abysscope_directory,
+                env=next_env,
+                log_path=log_path,
+            )
+            if code == 0:
+                break
+            last_code = code
+            if attempt < attempts:
+                logger.warning(
+                    "next build failed (attempt %d/%d, exit %d) — retrying in %.1fs",
+                    attempt,
+                    attempts,
+                    code,
+                    build_backoff_seconds,
+                )
+                step.detail = f"exit {code} — retry in {build_backoff_seconds:.0f}s"
+                progress.refresh()
+                if not _interruptible_sleep(build_backoff_seconds, cancel_event):
+                    step.detail = f"exit {code} — cancelled before retry"
+                    raise BuildCancelled(step.detail)
+        else:
+            step.detail = f"exit {last_code} — see log"
             raise RuntimeError(step.detail)
         bundle = _next_build_artifact_size(abysscope_directory)
         step.detail = f"bundle {_format_size(bundle)}" if bundle else "built"

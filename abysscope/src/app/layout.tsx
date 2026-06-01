@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
@@ -20,9 +19,17 @@ const pretendard = localFont({
   weight: "45 920",
 });
 
-const geistMono = Geist_Mono({
+/**
+ * Geist Mono variable — self-hosted to keep the dashboard build
+ * network-independent. Fetching from Google Fonts at build time
+ * fails when launchd boots ``abyss`` before WiFi associates, which
+ * leaves the dashboard subprocess dead while the daemon stays up.
+ */
+const geistMono = localFont({
+  src: "./fonts/GeistMono-Variable.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
+  weight: "100 900",
 });
 
 export const metadata: Metadata = {
