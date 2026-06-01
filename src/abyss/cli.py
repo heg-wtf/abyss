@@ -53,6 +53,8 @@ feedback_app = typer.Typer(help="Numeric feedback (1/2/3) statistics")
 app.add_typer(feedback_app, name="feedback")
 about_me_app = typer.Typer(help="Shared user knowledge base (ABOUT_ME/)")
 app.add_typer(about_me_app, name="about-me")
+self_app = typer.Typer(help="Per-bot self-reflection (SELF.md)")
+app.add_typer(self_app, name="self")
 
 
 @app.command()
@@ -1468,6 +1470,113 @@ def feedback_show(
                 note = note[:37] + "..."
             recent.add_row(ts, session_id, str(signal), note)
         console.print(recent)
+
+
+# --- Self reflection subcommands ---
+
+
+@self_app.command("show")
+def self_show(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Print the bot's SELF.md (empty notice if missing)."""
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    from abyss.config import load_bot_config
+    from abyss.self_reflection import load_self_md
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    content = load_self_md(bot)
+    if not content.strip():
+        console.print(f"[yellow]SELF.md is empty for '{bot}'.[/yellow]")
+        return
+    console.print(Markdown(content))
+
+
+@self_app.command("reflect")
+def self_reflect(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Run one reflection turn now and overwrite SELF.md."""
+    import asyncio
+
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.self_reflection import run_reflection
+
+    console = Console()
+    config = load_bot_config(bot)
+    if not config:
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    console.print(f"[cyan]Running reflection for {bot}…[/cyan]")
+    asyncio.run(run_reflection(bot, config))
+    console.print(f"[green]SELF.md updated for {bot}.[/green]")
+
+
+@self_app.command("schedule")
+def self_schedule(
+    bot: str = typer.Argument(help="Bot name"),
+    cron_expr: str = typer.Option(
+        None,
+        "--cron",
+        "-c",
+        help="Cron schedule (default: weekly Sunday 04:00)",
+    ),
+) -> None:
+    """Register the weekly self-reflection cron job for ``bot``."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import add_cron_job, get_cron_job
+    from abyss.self_reflection import DEFAULT_REFLECTION_CRON, REFLECTION_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if get_cron_job(bot, REFLECTION_JOB_NAME):
+        console.print(
+            f"[yellow]'{REFLECTION_JOB_NAME}' already scheduled for {bot}. "
+            "Unschedule first to change cadence.[/yellow]"
+        )
+        raise typer.Exit(1)
+    schedule = (cron_expr or DEFAULT_REFLECTION_CRON).strip()
+    add_cron_job(
+        bot,
+        {
+            "name": REFLECTION_JOB_NAME,
+            "schedule": schedule,
+            "enabled": True,
+            "message": (
+                "Run weekly self-reflection. Update SELF.md based on the "
+                "recent conversation log and feedback aggregate."
+            ),
+        },
+    )
+    console.print(
+        f"[green]Scheduled '{REFLECTION_JOB_NAME}' for {bot} (cron='{schedule}').[/green]"
+    )
+
+
+@self_app.command("unschedule")
+def self_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Remove the self-reflection cron job for ``bot``."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import remove_cron_job
+    from abyss.self_reflection import REFLECTION_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if remove_cron_job(bot, REFLECTION_JOB_NAME):
+        console.print(f"[green]Removed '{REFLECTION_JOB_NAME}' from {bot}.[/green]")
+    else:
+        console.print(f"[yellow]No '{REFLECTION_JOB_NAME}' job to remove for {bot}.[/yellow]")
 
 
 # --- About Me subcommands ---

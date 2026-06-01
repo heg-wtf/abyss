@@ -381,6 +381,19 @@ def compose_claude_md(
         ]
     )
 
+    from abyss.self_reflection import load_self_md
+
+    self_md = load_self_md(bot_name).strip()
+    if self_md:
+        sections.append("")
+        sections.append("## Self Reflection (Internal, Read-Only)")
+        sections.append(
+            "- 아래는 너의 자기반성 기록이다. 주간 reflection cron 이 갱신하며, 직접 수정하지 마라."
+        )
+        sections.append("- 같은 실수를 반복하지 않기 위한 메모이니, 답변 작성 전 참고하라.")
+        sections.append("")
+        sections.append(self_md)
+
     from abyss.about_me import about_me_directory, has_any_entries, load_index
     from abyss.session import load_global_memory
 

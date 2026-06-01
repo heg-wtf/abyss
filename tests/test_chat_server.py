@@ -1827,6 +1827,77 @@ async def test_about_me_reject_removes(client, abyss_home):
     assert load_category("identity") == []
 
 
+# --- SELF.md routes (Phase 3) ---
+
+
+@pytest.mark.asyncio
+async def test_self_get_returns_empty_when_missing(client, abyss_home):
+    resp = await client.get("/self/alpha")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["bot"] == "alpha"
+    assert body["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_self_get_returns_content(client, abyss_home):
+    from abyss.self_reflection import save_self_md
+
+    save_self_md("alpha", "## Mistake patterns\n- be concise\n")
+    resp = await client.get("/self/alpha")
+    body = await resp.json()
+    assert "be concise" in body["content"]
+
+
+@pytest.mark.asyncio
+async def test_self_get_bot_not_found_404(client):
+    resp = await client.get("/self/ghost")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_self_get_invalid_bot_name_400(client):
+    resp = await client.get("/self/..%2Fevil")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_self_put_writes_content(client, abyss_home):
+    from abyss.self_reflection import load_self_md
+
+    resp = await client.put("/self/alpha", json={"content": "new reflection"})
+    assert resp.status == 200
+    assert load_self_md("alpha") == "new reflection"
+
+
+@pytest.mark.asyncio
+async def test_self_put_invalid_json_400(client, abyss_home):
+    resp = await client.put(
+        "/self/alpha",
+        data=b"not-json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_self_put_non_string_content_400(client, abyss_home):
+    resp = await client.put("/self/alpha", json={"content": 123})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_self_put_bot_not_found_404(client, abyss_home):
+    resp = await client.put("/self/ghost", json={"content": "x"})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_self_put_invalid_bot_name_400(client, abyss_home):
+    resp = await client.put("/self/..%2Fevil", json={"content": "x"})
+    assert resp.status == 400
+
+
 @pytest.mark.asyncio
 async def test_about_me_approve_unknown_404(client):
     resp = await client.post("/about-me/entries/identity/ghost/approve")
