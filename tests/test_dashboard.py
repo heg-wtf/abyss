@@ -386,6 +386,119 @@ def test_dashboard_subcommand_no_longer_exists():
     # confirm the runner rejected it rather than executing anything.
 
 
+def _make_progress() -> dashboard.BuildProgress:
+    """Construct a non-live BuildProgress with the canonical step list."""
+    from abyss.dashboard_ui import BuildProgress
+
+    return BuildProgress(title="test", steps=dashboard.build_steps())
+
+
+def _stub_build_and_start_deps(monkeypatch, tmp_path, build_codes, *, sleeps):
+    """Patch dashboard internals so `build_and_start` only exercises the retry path.
+
+    ``build_codes`` is a list of exit codes returned by successive
+    ``_run_to_log(["npx", "next", "build", ...])`` calls. ``sleeps``
+    captures every ``time.sleep`` call so tests can assert on backoff.
+    """
+    abysscope_dir = tmp_path / "abysscope"
+    abysscope_dir.mkdir()
+    (abysscope_dir / "node_modules").mkdir()  # skip npm install branch
+
+    build_invocations: list[list[str]] = []
+    iterator = iter(build_codes)
+
+    def fake_run_to_log(args, cwd, env, log_path):
+        if args[:3] == ["npx", "next", "build"]:
+            build_invocations.append(list(args))
+            try:
+                return next(iterator)
+            except StopIteration:
+                return 0
+        return 0
+
+    fake_process = type("FakeProcess", (), {"pid": 4242, "poll": staticmethod(lambda: None)})()
+
+    def fake_popen(*args, **kwargs):
+        return fake_process
+
+    monkeypatch.setattr(dashboard, "find_abysscope_directory", lambda: abysscope_dir)
+    monkeypatch.setattr(dashboard, "_format_directory", lambda p: str(p))
+    monkeypatch.setattr(dashboard, "_detect_commit_sha", lambda p: "deadbeef")
+    monkeypatch.setattr(dashboard, "_next_build_artifact_size", lambda p: 0)
+    monkeypatch.setattr(dashboard, "_run_to_log", fake_run_to_log)
+    monkeypatch.setattr(dashboard.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(dashboard.time, "sleep", lambda seconds: sleeps.append(seconds))
+    return build_invocations
+
+
+def test_build_and_start_retries_until_success(tmp_path, temp_abyss_home, monkeypatch):
+    """Two failed builds followed by a success must result in a running handle."""
+    sleeps: list[float] = []
+    build_invocations = _stub_build_and_start_deps(monkeypatch, tmp_path, [1, 1, 0], sleeps=sleeps)
+
+    handle = dashboard.build_and_start(
+        port=3847,
+        log_path=tmp_path / "build.log",
+        progress=_make_progress(),
+        abyss_version="0.0.0",
+        max_build_attempts=3,
+        build_backoff_seconds=0.1,
+    )
+
+    assert handle.port == 3847
+    assert handle.process.pid == 4242
+    assert len(build_invocations) == 3
+    # Backoff applied between attempts 1→2 and 2→3, but not after a success.
+    assert sleeps == [0.1, 0.1]
+
+
+def test_build_and_start_raises_after_max_attempts(tmp_path, temp_abyss_home, monkeypatch):
+    """All attempts failing must raise RuntimeError and skip spawning."""
+    sleeps: list[float] = []
+    build_invocations = _stub_build_and_start_deps(monkeypatch, tmp_path, [1, 1, 1], sleeps=sleeps)
+    popen_calls: list[tuple] = []
+    monkeypatch.setattr(
+        dashboard.subprocess,
+        "Popen",
+        lambda *a, **kw: (
+            popen_calls.append((a, kw))
+            or (_ for _ in ()).throw(AssertionError("Popen must not run when build fails"))
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=r"exit 1"):
+        dashboard.build_and_start(
+            port=3847,
+            log_path=tmp_path / "build.log",
+            progress=_make_progress(),
+            abyss_version="0.0.0",
+            max_build_attempts=3,
+            build_backoff_seconds=0.1,
+        )
+
+    assert len(build_invocations) == 3
+    # Final attempt does not sleep — only inter-attempt backoff.
+    assert sleeps == [0.1, 0.1]
+    assert popen_calls == []
+
+
+def test_build_and_start_single_attempt_default(tmp_path, temp_abyss_home, monkeypatch):
+    """Default ``max_build_attempts=1`` preserves prior behavior — no retry."""
+    sleeps: list[float] = []
+    build_invocations = _stub_build_and_start_deps(monkeypatch, tmp_path, [1], sleeps=sleeps)
+
+    with pytest.raises(RuntimeError):
+        dashboard.build_and_start(
+            port=3847,
+            log_path=tmp_path / "build.log",
+            progress=_make_progress(),
+            abyss_version="0.0.0",
+        )
+
+    assert len(build_invocations) == 1
+    assert sleeps == []  # no backoff with a single attempt
+
+
 def test_start_signature_exposes_daemon_and_port():
     """``abyss start`` exposes ``--daemon``/``--port`` (foreground default)."""
     import re

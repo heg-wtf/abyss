@@ -25,6 +25,7 @@ import os
 import signal
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -212,6 +213,9 @@ def build_and_start(
     log_path: Path,
     progress: BuildProgress,
     abyss_version: str,
+    *,
+    max_build_attempts: int = 1,
+    build_backoff_seconds: float = 5.0,
 ) -> DashboardHandle:
     """Build the dashboard and spawn ``next start`` as a child process.
 
@@ -219,6 +223,10 @@ def build_and_start(
     progress next to ``chat_server`` and per-bot init in a single
     checklist. ``log_path`` collects stdout/stderr from ``npm`` and
     ``next``.
+
+    ``max_build_attempts`` retries ``next build`` on non-zero exit
+    (e.g. transient network issues at boot). ``build_backoff_seconds``
+    is the wait between attempts.
     """
     abysscope_directory: Path | None = None
     next_env: dict[str, str] = {}
@@ -256,16 +264,36 @@ def build_and_start(
         "NODE_OPTIONS": (f"{existing_node_options} --dns-result-order=ipv4first".strip()),
     }
 
+    attempts = max(1, max_build_attempts)
     with progress.step("Build dashboard") as step:
-        step.detail = "next build"
-        code = _run_to_log(
-            ["npx", "next", "build"],
-            cwd=abysscope_directory,
-            env=next_env,
-            log_path=log_path,
-        )
-        if code != 0:
-            step.detail = f"exit {code} — see log"
+        last_code = 0
+        for attempt in range(1, attempts + 1):
+            step.detail = (
+                "next build" if attempts == 1 else f"next build (attempt {attempt}/{attempts})"
+            )
+            progress.refresh()
+            code = _run_to_log(
+                ["npx", "next", "build"],
+                cwd=abysscope_directory,
+                env=next_env,
+                log_path=log_path,
+            )
+            if code == 0:
+                break
+            last_code = code
+            if attempt < attempts:
+                logger.warning(
+                    "next build failed (attempt %d/%d, exit %d) — retrying in %.1fs",
+                    attempt,
+                    attempts,
+                    code,
+                    build_backoff_seconds,
+                )
+                step.detail = f"exit {code} — retry in {build_backoff_seconds:.0f}s"
+                progress.refresh()
+                time.sleep(build_backoff_seconds)
+        else:
+            step.detail = f"exit {last_code} — see log"
             raise RuntimeError(step.detail)
         bundle = _next_build_artifact_size(abysscope_directory)
         step.detail = f"bundle {_format_size(bundle)}" if bundle else "built"

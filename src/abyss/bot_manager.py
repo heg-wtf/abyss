@@ -15,6 +15,7 @@ which was retired in v2026.05.15 in favor of this single lifecycle.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import shutil
@@ -205,14 +206,20 @@ async def _run_bots(
             else:
                 try:
                     abyss_version = importlib.metadata.version("abyss")
-                    dashboard_handle = await loop.run_in_executor(
-                        None,
+                    # Retry the build a few times with backoff so transient
+                    # network issues at launchd boot (no WiFi yet) don't
+                    # leave the dashboard permanently down while the
+                    # daemon stays up under KeepAlive.
+                    build_call = functools.partial(
                         dashboard_module.build_and_start,
                         dashboard_port,
                         log_path,
                         progress,
                         abyss_version,
+                        max_build_attempts=3,
+                        build_backoff_seconds=20.0,
                     )
+                    dashboard_handle = await loop.run_in_executor(None, build_call)
                 except (FileNotFoundError, RuntimeError) as dashboard_error:
                     logger.error("Dashboard failed to start: %s", dashboard_error)
                     dashboard_handle = None
