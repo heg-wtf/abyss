@@ -1,6 +1,6 @@
 # Plan: Dashboard 부팅 시 Google Fonts fetch 실패로 미기동되는 문제 수정
 - date: 2026-06-01
-- status: approved
+- status: in-progress
 - author: claude
 - approved-by: ash84
 

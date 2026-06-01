@@ -457,14 +457,12 @@ def test_build_and_start_raises_after_max_attempts(tmp_path, temp_abyss_home, mo
     sleeps: list[float] = []
     build_invocations = _stub_build_and_start_deps(monkeypatch, tmp_path, [1, 1, 1], sleeps=sleeps)
     popen_calls: list[tuple] = []
-    monkeypatch.setattr(
-        dashboard.subprocess,
-        "Popen",
-        lambda *a, **kw: (
-            popen_calls.append((a, kw))
-            or (_ for _ in ()).throw(AssertionError("Popen must not run when build fails"))
-        ),
-    )
+
+    def _popen_must_not_run(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        raise AssertionError("Popen must not run when build fails")
+
+    monkeypatch.setattr(dashboard.subprocess, "Popen", _popen_must_not_run)
 
     with pytest.raises(RuntimeError, match=r"exit 1"):
         dashboard.build_and_start(
@@ -480,6 +478,60 @@ def test_build_and_start_raises_after_max_attempts(tmp_path, temp_abyss_home, mo
     # Final attempt does not sleep — only inter-attempt backoff.
     assert sleeps == [0.1, 0.1]
     assert popen_calls == []
+
+
+def test_build_and_start_cancel_event_breaks_retry_loop(tmp_path, temp_abyss_home, monkeypatch):
+    """``cancel_event`` mid-retry must raise BuildCancelled without finishing the backoff."""
+    import threading
+
+    sleeps: list[float] = []
+    build_invocations = _stub_build_and_start_deps(monkeypatch, tmp_path, [1, 1, 1], sleeps=sleeps)
+    cancel_event = threading.Event()
+    # Pre-set the event so the first inter-attempt sleep returns False
+    # immediately. The retry loop must surface BuildCancelled rather than
+    # spinning through the remaining attempts.
+    cancel_event.set()
+
+    popen_calls: list[tuple] = []
+
+    def _popen_must_not_run(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        raise AssertionError("Popen must not run when build is cancelled")
+
+    monkeypatch.setattr(dashboard.subprocess, "Popen", _popen_must_not_run)
+
+    with pytest.raises(dashboard.BuildCancelled, match=r"cancelled before retry"):
+        dashboard.build_and_start(
+            port=3847,
+            log_path=tmp_path / "build.log",
+            progress=_make_progress(),
+            abyss_version="0.0.0",
+            max_build_attempts=3,
+            build_backoff_seconds=60.0,
+            cancel_event=cancel_event,
+        )
+
+    # Only the first attempt should have run before the cancel was honoured.
+    assert len(build_invocations) == 1
+    assert popen_calls == []
+
+
+def test_interruptible_sleep_returns_true_when_not_cancelled(monkeypatch):
+    """Without a cancel_event the helper falls through to time.sleep and returns True."""
+    slept: list[float] = []
+    monkeypatch.setattr(dashboard.time, "sleep", lambda s: slept.append(s))
+    assert dashboard._interruptible_sleep(0.5, None) is True
+    assert slept == [0.5]
+
+
+def test_interruptible_sleep_returns_false_when_cancelled():
+    """An already-set Event must short-circuit the wait and return False."""
+    import threading
+
+    event = threading.Event()
+    event.set()
+    # 60s nominal timeout; if the helper actually waited we'd hang the test.
+    assert dashboard._interruptible_sleep(60.0, event) is False
 
 
 def test_build_and_start_single_attempt_default(tmp_path, temp_abyss_home, monkeypatch):
