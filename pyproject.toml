@@ -1,6 +1,6 @@
 [project]
 name = "abyss"
-version = "2026.05.15"
+version = "2026.06.02"
 description = "Personal AI assistant via PWA + Claude Code"
 requires-python = ">=3.12"
 dependencies = [
