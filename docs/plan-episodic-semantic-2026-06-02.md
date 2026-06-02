@@ -1,7 +1,7 @@
 # Plan: Phase 4 — Episodic → Semantic 추출
 
 - date: 2026-06-02
-- status: approved
+- status: done
 - author: claude
 - approved-by: ash84
 

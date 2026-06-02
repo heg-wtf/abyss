@@ -577,3 +577,74 @@ export async function saveSelfMd(bot: string, content: string): Promise<void> {
     body: JSON.stringify({ content }),
   });
 }
+
+export interface EpisodeRow {
+  ts: string;
+  date: string;
+  kind: "fact" | "event" | "decision" | "change";
+  summary: string;
+  source_turn: string;
+  meta: Record<string, unknown>;
+}
+
+export interface EpisodesResponse {
+  bot: string;
+  episodes: EpisodeRow[];
+}
+
+export async function fetchEpisodes(
+  bot: string,
+  options: { since?: string; kind?: string; limit?: number } = {},
+): Promise<EpisodesResponse> {
+  const params = new URLSearchParams();
+  if (options.since) params.set("since", options.since);
+  if (options.kind) params.set("kind", options.kind);
+  if (options.limit != null) params.set("limit", String(options.limit));
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return jsonFetch<EpisodesResponse>(`/episodes/${encodeURIComponent(bot)}${suffix}`);
+}
+
+export interface FactRow {
+  id: number;
+  subject: string;
+  claim: string;
+  confidence: number;
+  source_turn: string;
+  source_episode_id: number | null;
+  status: "active" | "retracted" | "superseded";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FactsResponse {
+  bot: string;
+  facts: FactRow[];
+}
+
+export async function fetchFacts(
+  bot: string,
+  options: {
+    subject?: string;
+    minConfidence?: number;
+    limit?: number;
+    includeRetracted?: boolean;
+  } = {},
+): Promise<FactsResponse> {
+  const params = new URLSearchParams();
+  if (options.subject) params.set("subject", options.subject);
+  if (options.minConfidence != null)
+    params.set("min_confidence", String(options.minConfidence));
+  if (options.limit != null) params.set("limit", String(options.limit));
+  if (options.includeRetracted) params.set("include_retracted", "true");
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return jsonFetch<FactsResponse>(`/facts/${encodeURIComponent(bot)}${suffix}`);
+}
+
+export async function retractFact(bot: string, factId: number): Promise<void> {
+  await jsonFetch(`/facts/${encodeURIComponent(bot)}/${factId}`, {
+    method: "PUT",
+    body: JSON.stringify({ action: "retract" }),
+  });
+}

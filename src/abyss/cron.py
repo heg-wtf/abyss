@@ -409,25 +409,40 @@ async def execute_cron_job(
 
     logger.info("Executing cron job '%s' for bot '%s'", job_name, bot_name)
 
+    # Reserved job names bypass the generic LLM round-trip and run the
+    # dedicated handler (episode extraction writes to ``episodes.jsonl``
+    # + ``facts.db``, not the conversation log). Surface a short summary
+    # back into ``response`` so the conversation log + Web Push still
+    # have something to render.
+    from abyss.episodes import EPISODE_EXTRACT_JOB_NAME
+
     try:
         cron_bot_config = {
             **bot_config,
             "model": model,
             "skills": job_skills,
         }
-        backend = get_or_create(bot_name, cron_bot_config)
-        request = LLMRequest(
-            bot_name=bot_name,
-            bot_path=bot_directory(bot_name),
-            session_directory=Path(working_directory),
-            working_directory=working_directory,
-            bot_config=cron_bot_config,
-            user_prompt=message,
-            timeout=command_timeout,
-            session_key=f"cron:{bot_name}:{job_name}",
-        )
-        result = await backend.run(request)
-        response = result.text
+        if job_name == EPISODE_EXTRACT_JOB_NAME:
+            from abyss.episodes import extract_yesterday
+
+            episode_ids, fact_ids = await extract_yesterday(bot_name, cron_bot_config)
+            response = (
+                f"Episode extraction finished: {len(episode_ids)} episodes, {len(fact_ids)} facts."
+            )
+        else:
+            backend = get_or_create(bot_name, cron_bot_config)
+            request = LLMRequest(
+                bot_name=bot_name,
+                bot_path=bot_directory(bot_name),
+                session_directory=Path(working_directory),
+                working_directory=working_directory,
+                bot_config=cron_bot_config,
+                user_prompt=message,
+                timeout=command_timeout,
+                session_key=f"cron:{bot_name}:{job_name}",
+            )
+            result = await backend.run(request)
+            response = result.text
     except Exception as error:
         response = f"Cron job '{job_name}' failed: {error}"
         logger.exception("Cron job '%s' failed", job_name)

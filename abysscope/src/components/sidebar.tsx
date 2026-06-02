@@ -116,6 +116,18 @@ function SidebarImpl() {
             active={pathname === "/self" || pathname.startsWith("/self/")}
           />
           <CollapsedLink
+            href="/episodes"
+            label="Episodes"
+            icon="📚"
+            active={pathname === "/episodes" || pathname.startsWith("/episodes/")}
+          />
+          <CollapsedLink
+            href="/facts"
+            label="Facts"
+            icon="🧠"
+            active={pathname === "/facts" || pathname.startsWith("/facts/")}
+          />
+          <CollapsedLink
             href="/settings"
             label="Settings"
             icon="⚙️"
@@ -318,6 +330,32 @@ function SidebarImpl() {
         >
           <span>🪞</span>
           <span>Self Reflection</span>
+        </Link>
+
+        <Link
+          href="/episodes"
+          className={cn(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            pathname === "/episodes" || pathname.startsWith("/episodes/")
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+        >
+          <span>📚</span>
+          <span>Episodes</span>
+        </Link>
+
+        <Link
+          href="/facts"
+          className={cn(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            pathname === "/facts" || pathname.startsWith("/facts/")
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+        >
+          <span>🧠</span>
+          <span>Facts</span>
         </Link>
 
         <Link
