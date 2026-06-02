@@ -945,3 +945,65 @@ def test_import_skill_from_github_marks_untrusted(tmp_path, monkeypatch):
     # Original yaml fields preserved.
     assert yaml_data["description"] == "imported helper"
     assert is_untrusted_skill("imported") is True
+
+
+# --- SELF.md gating regression (Phase 3) ---
+
+
+def test_compose_claude_md_no_self_section_when_absent(temp_abyss_home):
+    """compose_claude_md omits the Self Reflection section when SELF.md is missing."""
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "Self Reflection" not in result
+
+
+def test_compose_claude_md_no_self_section_when_blank(temp_abyss_home):
+    """compose_claude_md skips Self Reflection when SELF.md is whitespace only."""
+    from abyss.self_reflection import save_self_md
+
+    save_self_md("my-bot", "   \n   \n")
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "Self Reflection" not in result
+
+
+def test_compose_claude_md_injects_self_section_when_present(temp_abyss_home):
+    """compose_claude_md injects SELF.md content under a Self Reflection heading."""
+    from abyss.self_reflection import save_self_md
+
+    save_self_md("my-bot", "## Mistake patterns\n- talks too much\n")
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    assert "## Self Reflection (Internal, Read-Only)" in result
+    assert "talks too much" in result
+
+
+def test_compose_claude_md_self_between_rules_and_about_me(temp_abyss_home):
+    """Section order: Rules → Self Reflection → About Me."""
+    from abyss.about_me import AboutEntry, upsert_entry
+    from abyss.self_reflection import save_self_md
+
+    upsert_entry("identity", AboutEntry(key="name", value="ash84"))
+    save_self_md("my-bot", "## Mistake patterns\n- needs to be concise\n")
+
+    result = compose_claude_md(
+        bot_name="my-bot",
+        personality="Friendly",
+        role="Helper",
+    )
+    rules_index = result.find("## Rules")
+    self_index = result.find("## Self Reflection")
+    about_me_index = result.find("## About Me")
+    assert rules_index != -1
+    assert self_index != -1
+    assert about_me_index != -1
+    assert rules_index < self_index < about_me_index

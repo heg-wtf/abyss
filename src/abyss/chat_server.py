@@ -728,6 +728,8 @@ class ChatServer:
             "/about-me/entries/{category}/{key}/reject",
             self._handle_about_me_reject,
         )
+        router.add_get("/self/{bot}", self._handle_self_get)
+        router.add_put("/self/{bot}", self._handle_self_put)
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -1208,6 +1210,39 @@ class ChatServer:
         if not reject_entry(category, key):
             return web.json_response({"error": "entry not found"}, status=404)
         return web.json_response({"ok": True})
+
+    async def _handle_self_get(self, request: web.Request) -> web.Response:
+        """Return the bot's SELF.md text (empty string if file is missing)."""
+        from abyss.self_reflection import load_self_md
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        return web.json_response({"bot": bot_name, "content": load_self_md(bot_name)})
+
+    async def _handle_self_put(self, request: web.Request) -> web.Response:
+        """Overwrite the bot's SELF.md with the supplied markdown body.
+
+        Body: ``{"content": "<markdown>"}``. Used by the dashboard SELF
+        editor for manual edits / rollbacks. The reflection cron and
+        ``abyss self reflect`` CLI go through ``run_reflection`` instead.
+        """
+        from abyss.self_reflection import save_self_md
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        content = body.get("content") if isinstance(body, dict) else None
+        if not isinstance(content, str):
+            return web.json_response({"error": "content must be a string"}, status=400)
+        save_self_md(bot_name, content)
+        return web.json_response({"ok": True, "bot": bot_name})
 
     async def _handle_log_feedback(self, request: web.Request) -> web.Response:
         """Record a numeric feedback signal (1/2/3) for an assistant turn.

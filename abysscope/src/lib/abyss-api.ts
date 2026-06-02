@@ -561,3 +561,19 @@ export async function* parseChatEvents(
     }
   }
 }
+
+export interface SelfMdResponse {
+  bot: string;
+  content: string;
+}
+
+export async function fetchSelfMd(bot: string): Promise<SelfMdResponse> {
+  return jsonFetch<SelfMdResponse>(`/self/${encodeURIComponent(bot)}`);
+}
+
+export async function saveSelfMd(bot: string, content: string): Promise<void> {
+  await jsonFetch(`/self/${encodeURIComponent(bot)}`, {
+    method: "PUT",
+    body: JSON.stringify({ content }),
+  });
+}
