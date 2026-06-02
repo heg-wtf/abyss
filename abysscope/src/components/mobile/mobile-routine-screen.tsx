@@ -302,6 +302,7 @@ export function MobileRoutineScreen({ routine, initialMessages }: Props) {
         <SessionsDrawerPanel
           activeBot={routine.bot}
           activeSessionId=""
+          initialTab="routines"
           onSelect={(target) => {
             setSessionsOpen(false);
             router.push(`/mobile/chat/${target.bot}/${target.id}`);
