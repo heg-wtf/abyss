@@ -55,6 +55,10 @@ about_me_app = typer.Typer(help="Shared user knowledge base (ABOUT_ME/)")
 app.add_typer(about_me_app, name="about-me")
 self_app = typer.Typer(help="Per-bot self-reflection (SELF.md)")
 app.add_typer(self_app, name="self")
+episodes_app = typer.Typer(help="Per-bot episodic timeline (episodes.jsonl)")
+app.add_typer(episodes_app, name="episodes")
+facts_app = typer.Typer(help="Per-bot structured facts (facts.db)")
+app.add_typer(facts_app, name="facts")
 
 
 @app.command()
@@ -1577,6 +1581,219 @@ def self_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
         console.print(f"[green]Removed '{REFLECTION_JOB_NAME}' from {bot}.[/green]")
     else:
         console.print(f"[yellow]No '{REFLECTION_JOB_NAME}' job to remove for {bot}.[/yellow]")
+
+
+# --- Episodes subcommands ---
+
+
+@episodes_app.command("show")
+def episodes_show(
+    bot: str = typer.Argument(help="Bot name"),
+    since: str = typer.Option(None, "--since", help="YYYY-MM-DD lower bound (inclusive)"),
+    kind: str = typer.Option(
+        None,
+        "--kind",
+        help="Filter by episode kind (fact|event|decision|change)",
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max rows to print"),
+) -> None:
+    """Print the bot's episodic timeline newest-first."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.config import load_bot_config
+    from abyss.episodes import iter_episodes
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    kinds = (kind,) if kind else None
+    rows = list(iter_episodes(bot, since=since, kinds=kinds, limit=limit))
+    if not rows:
+        console.print(f"[yellow]No episodes for '{bot}'.[/yellow]")
+        return
+    table = Table(title=f"Episodes — {bot}")
+    table.add_column("Date")
+    table.add_column("Kind")
+    table.add_column("Summary")
+    table.add_column("Source")
+    for row in rows:
+        table.add_row(row.date, row.kind, row.summary, row.source_turn)
+    console.print(table)
+
+
+@episodes_app.command("extract")
+def episodes_extract(
+    bot: str = typer.Argument(help="Bot name"),
+    date: str = typer.Option(
+        None,
+        "--date",
+        help="YYMMDD to extract (defaults to yesterday UTC)",
+    ),
+) -> None:
+    """Run extraction now for one day and persist episodes + facts."""
+    import asyncio
+
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.episodes import extract_yesterday
+
+    console = Console()
+    config = load_bot_config(bot)
+    if not config:
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    console.print(f"[cyan]Extracting episodes for {bot} ({date or 'yesterday'})…[/cyan]")
+    episode_ids, fact_ids = asyncio.run(extract_yesterday(bot, config, yymmdd=date))
+    console.print(
+        f"[green]Done — {len(episode_ids)} episodes, {len(fact_ids)} facts persisted.[/green]"
+    )
+
+
+@episodes_app.command("schedule")
+def episodes_schedule(
+    bot: str = typer.Argument(help="Bot name"),
+    cron_expr: str = typer.Option(
+        None,
+        "--cron",
+        "-c",
+        help="Cron schedule (default: nightly 03:00)",
+    ),
+) -> None:
+    """Register the nightly episode-extraction cron job for ``bot``."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import add_cron_job, get_cron_job
+    from abyss.episodes import EPISODE_EXTRACT_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if get_cron_job(bot, EPISODE_EXTRACT_JOB_NAME):
+        console.print(
+            f"[yellow]'{EPISODE_EXTRACT_JOB_NAME}' already scheduled for {bot}. "
+            "Unschedule first to change cadence.[/yellow]"
+        )
+        raise typer.Exit(1)
+    schedule = (cron_expr or "0 3 * * *").strip()
+    add_cron_job(
+        bot,
+        {
+            "name": EPISODE_EXTRACT_JOB_NAME,
+            "schedule": schedule,
+            "enabled": True,
+            "message": (
+                "Nightly episodic memory extraction. "
+                "Reads yesterday's conversation logs and updates "
+                "episodes.jsonl + facts.db."
+            ),
+        },
+    )
+    console.print(
+        f"[green]Scheduled '{EPISODE_EXTRACT_JOB_NAME}' for {bot} (cron='{schedule}').[/green]"
+    )
+
+
+@episodes_app.command("unschedule")
+def episodes_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Remove the nightly episode-extraction cron job for ``bot``."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import remove_cron_job
+    from abyss.episodes import EPISODE_EXTRACT_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if remove_cron_job(bot, EPISODE_EXTRACT_JOB_NAME):
+        console.print(f"[green]Removed '{EPISODE_EXTRACT_JOB_NAME}' from {bot}.[/green]")
+    else:
+        console.print(f"[yellow]No '{EPISODE_EXTRACT_JOB_NAME}' job to remove for {bot}.[/yellow]")
+
+
+# --- Facts subcommands ---
+
+
+@facts_app.command("show")
+def facts_show(
+    bot: str = typer.Argument(help="Bot name"),
+    subject: str = typer.Option(None, "--subject", "-s", help="Filter by exact subject"),
+    min_confidence: float = typer.Option(
+        0.0, "--min-confidence", help="Drop rows below this confidence"
+    ),
+    limit: int = typer.Option(20, "--limit", "-n"),
+    include_retracted: bool = typer.Option(
+        False, "--include-retracted", help="Show retracted rows too"
+    ),
+) -> None:
+    """Print the bot's structured facts ordered by confidence."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.config import load_bot_config
+    from abyss.episodes import query_facts
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    statuses: tuple[str, ...] = (
+        ("active", "retracted", "superseded") if include_retracted else ("active",)
+    )
+    rows = query_facts(
+        bot,
+        subject=subject,
+        min_confidence=min_confidence,
+        statuses=statuses,
+        limit=limit,
+    )
+    if not rows:
+        console.print(f"[yellow]No facts for '{bot}'.[/yellow]")
+        return
+    table = Table(title=f"Facts — {bot}")
+    table.add_column("ID")
+    table.add_column("Subject")
+    table.add_column("Claim")
+    table.add_column("Confidence")
+    table.add_column("Status")
+    table.add_column("Source")
+    for row in rows:
+        table.add_row(
+            str(row["id"]),
+            row["subject"],
+            row["claim"],
+            f"{row['confidence']:.2f}",
+            row["status"],
+            row.get("source_turn", "") or "",
+        )
+    console.print(table)
+
+
+@facts_app.command("retract")
+def facts_retract(
+    bot: str = typer.Argument(help="Bot name"),
+    fact_id: int = typer.Argument(help="Fact id (see ``abyss facts show``)"),
+) -> None:
+    """Retract one fact — flips status to 'retracted' and zeros confidence."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.episodes import retract_fact
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if retract_fact(bot, fact_id):
+        console.print(f"[green]Retracted fact {fact_id} for {bot}.[/green]")
+    else:
+        console.print(f"[yellow]No fact {fact_id} to retract for {bot}.[/yellow]")
 
 
 # --- About Me subcommands ---

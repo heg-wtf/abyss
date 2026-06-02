@@ -1899,6 +1899,141 @@ async def test_self_put_invalid_bot_name_400(client, abyss_home):
 
 
 @pytest.mark.asyncio
+async def test_episodes_get_returns_empty_when_missing(client, abyss_home):
+    resp = await client.get("/episodes/alpha")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["bot"] == "alpha"
+    assert body["episodes"] == []
+
+
+@pytest.mark.asyncio
+async def test_episodes_get_returns_persisted_rows(client, abyss_home):
+    from abyss.episodes import Episode, append_episode
+
+    append_episode(
+        "alpha",
+        Episode(
+            ts="2026-06-01T00:00:00+00:00",
+            date="2026-06-01",
+            kind="decision",
+            summary="ship phase 4",
+        ),
+    )
+    resp = await client.get("/episodes/alpha")
+    body = await resp.json()
+    assert len(body["episodes"]) == 1
+    assert body["episodes"][0]["summary"] == "ship phase 4"
+
+
+@pytest.mark.asyncio
+async def test_episodes_get_filters_by_kind_and_limit(client, abyss_home):
+    from abyss.episodes import Episode, append_episode
+
+    for date, kind, summary in [
+        ("2026-06-01", "decision", "ship"),
+        ("2026-06-01", "fact", "release shipped"),
+        ("2026-05-30", "event", "earlier event"),
+    ]:
+        append_episode(
+            "alpha",
+            Episode(
+                ts=f"{date}T00:00:00+00:00",
+                date=date,
+                kind=kind,
+                summary=summary,
+            ),
+        )
+    resp = await client.get("/episodes/alpha?kind=decision")
+    body = await resp.json()
+    assert [e["kind"] for e in body["episodes"]] == ["decision"]
+
+    resp = await client.get("/episodes/alpha?limit=2")
+    body = await resp.json()
+    assert len(body["episodes"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_episodes_get_invalid_limit_400(client, abyss_home):
+    resp = await client.get("/episodes/alpha?limit=not-a-number")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_episodes_get_bot_not_found(client):
+    resp = await client.get("/episodes/ghost")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_episodes_get_invalid_bot_400(client, abyss_home):
+    resp = await client.get("/episodes/..%2Fetc")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_facts_get_returns_active_only_by_default(client, abyss_home):
+    from abyss.episodes import Fact, retract_fact, upsert_fact
+
+    upsert_fact("alpha", Fact(subject="release", claim="shipped", confidence=0.9))
+    bad_id = upsert_fact("alpha", Fact(subject="bad", claim="bad claim", confidence=0.5))
+    retract_fact("alpha", bad_id)
+    resp = await client.get("/facts/alpha")
+    body = await resp.json()
+    subjects = {row["subject"] for row in body["facts"]}
+    assert subjects == {"release"}
+
+
+@pytest.mark.asyncio
+async def test_facts_get_include_retracted(client, abyss_home):
+    from abyss.episodes import Fact, retract_fact, upsert_fact
+
+    fact_id = upsert_fact("alpha", Fact(subject="x", claim="y", confidence=0.9))
+    retract_fact("alpha", fact_id)
+    resp = await client.get("/facts/alpha?include_retracted=true")
+    body = await resp.json()
+    assert any(row["status"] == "retracted" for row in body["facts"])
+
+
+@pytest.mark.asyncio
+async def test_facts_get_invalid_min_confidence_400(client, abyss_home):
+    resp = await client.get("/facts/alpha?min_confidence=NaN-ish")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_facts_put_retract_happy_path(client, abyss_home):
+    from abyss.episodes import Fact, query_facts, upsert_fact
+
+    fact_id = upsert_fact("alpha", Fact(subject="x", claim="y", confidence=0.9))
+    resp = await client.put(f"/facts/alpha/{fact_id}", json={"action": "retract"})
+    assert resp.status == 200
+    rows = query_facts("alpha", statuses=("retracted",))
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_facts_put_unknown_action_400(client, abyss_home):
+    resp = await client.put("/facts/alpha/1", json={"action": "delete"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_facts_put_unknown_fact_404(client, abyss_home):
+    from abyss.episodes import init_facts_db
+
+    init_facts_db("alpha")
+    resp = await client.put("/facts/alpha/999", json={"action": "retract"})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_facts_put_invalid_fact_id_400(client, abyss_home):
+    resp = await client.put("/facts/alpha/not-a-number", json={"action": "retract"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
 async def test_about_me_approve_unknown_404(client):
     resp = await client.post("/about-me/entries/identity/ghost/approve")
     assert resp.status == 404

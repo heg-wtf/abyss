@@ -730,6 +730,9 @@ class ChatServer:
         )
         router.add_get("/self/{bot}", self._handle_self_get)
         router.add_put("/self/{bot}", self._handle_self_put)
+        router.add_get("/episodes/{bot}", self._handle_episodes_get)
+        router.add_get("/facts/{bot}", self._handle_facts_get)
+        router.add_put("/facts/{bot}/{fact_id}", self._handle_facts_put)
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -1243,6 +1246,97 @@ class ChatServer:
             return web.json_response({"error": "content must be a string"}, status=400)
         save_self_md(bot_name, content)
         return web.json_response({"ok": True, "bot": bot_name})
+
+    async def _handle_episodes_get(self, request: web.Request) -> web.Response:
+        """Return episodes for ``bot`` newest-first.
+
+        Query params: ``since=YYYY-MM-DD`` (inclusive lower bound),
+        ``limit=N`` (default 50, max 500), ``kind=fact|event|...``.
+        """
+        from dataclasses import asdict
+
+        from abyss.episodes import iter_episodes
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+
+        since = request.query.get("since")
+        kind = request.query.get("kind")
+        kinds = (kind,) if kind else None
+        try:
+            limit = min(max(1, int(request.query.get("limit", "50"))), 500)
+        except ValueError:
+            return web.json_response({"error": "invalid limit"}, status=400)
+        rows = [asdict(ep) for ep in iter_episodes(bot_name, since=since, kinds=kinds, limit=limit)]
+        return web.json_response({"bot": bot_name, "episodes": rows})
+
+    async def _handle_facts_get(self, request: web.Request) -> web.Response:
+        """Return facts for ``bot`` ordered by confidence desc.
+
+        Query params: ``subject=<exact>``, ``min_confidence=<float>``,
+        ``limit=N`` (default 50, max 500), ``include_retracted=true|false``.
+        """
+        from abyss.episodes import query_facts
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+
+        subject = request.query.get("subject") or None
+        try:
+            min_confidence = float(request.query.get("min_confidence", "0"))
+        except ValueError:
+            return web.json_response({"error": "invalid min_confidence"}, status=400)
+        try:
+            limit = min(max(1, int(request.query.get("limit", "50"))), 500)
+        except ValueError:
+            return web.json_response({"error": "invalid limit"}, status=400)
+        include_retracted = request.query.get("include_retracted", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        statuses: tuple[str, ...] = (
+            ("active", "retracted", "superseded") if include_retracted else ("active",)
+        )
+        rows = query_facts(
+            bot_name,
+            subject=subject,
+            min_confidence=min_confidence,
+            statuses=statuses,
+            limit=limit,
+        )
+        return web.json_response({"bot": bot_name, "facts": rows})
+
+    async def _handle_facts_put(self, request: web.Request) -> web.Response:
+        """Update one fact — currently only ``retract`` is supported.
+
+        Body: ``{"action": "retract"}``. Returns 404 when the fact id
+        is unknown so the dashboard can disambiguate stale UI.
+        """
+        from abyss.episodes import retract_fact
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        try:
+            fact_id = int(request.match_info["fact_id"])
+        except ValueError:
+            return web.json_response({"error": "invalid fact_id"}, status=400)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        action = body.get("action") if isinstance(body, dict) else None
+        if action != "retract":
+            return web.json_response({"error": "unsupported action"}, status=400)
+        if not retract_fact(bot_name, fact_id):
+            return web.json_response({"error": "fact not found"}, status=404)
+        return web.json_response({"ok": True, "bot": bot_name, "fact_id": fact_id})
 
     async def _handle_log_feedback(self, request: web.Request) -> web.Response:
         """Record a numeric feedback signal (1/2/3) for an assistant turn.

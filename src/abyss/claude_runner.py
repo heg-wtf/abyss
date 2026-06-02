@@ -539,6 +539,11 @@ ABOUT_ME_ALLOWED_TOOLS = [
     "mcp__about_me__about_me_search",
 ]
 
+RECALL_FACT_ALLOWED_TOOLS = [
+    "mcp__recall_fact__recall_fact",
+    "mcp__recall_fact__recent_episodes",
+]
+
 
 def _resolve_bot_dir_from_working_directory(working_directory: str) -> Path | None:
     """Walk parents of ``working_directory`` to find the bot root.
@@ -609,6 +614,29 @@ def _conversation_search_mcp_server(working_directory: str) -> dict | None:
     if is_mcp_always_load_enabled():
         entry["alwaysLoad"] = True
     return {"conversation_search": entry}
+
+
+def _recall_fact_mcp_server(bot_dir: Path) -> dict | None:
+    """Build the recall_fact MCP entry for a bot whose ``facts.db`` exists.
+
+    The server uses cwd-walking to find the bot, so cwd must be inside
+    ``bots/<name>/...`` when Claude Code spawns it. ``ABYSS_HOME`` is
+    forwarded explicitly to keep test isolation predictable.
+    """
+    import sys
+
+    from abyss.config import abyss_home, is_mcp_always_load_enabled
+
+    if not (bot_dir / "facts.db").exists():
+        return None
+    entry: dict = {
+        "command": sys.executable,
+        "args": ["-m", "abyss.mcp_servers.recall_fact"],
+        "env": {"ABYSS_HOME": str(abyss_home())},
+    }
+    if is_mcp_always_load_enabled():
+        entry["alwaysLoad"] = True
+    return {"recall_fact": entry}
 
 
 def _prepare_skill_config(
@@ -692,6 +720,22 @@ def _prepare_skill_config(
             else:
                 mcp_config = {"mcpServers": dict(cs_server)}
             for tool in CONVERSATION_SEARCH_ALLOWED_TOOLS:
+                if tool not in allowed_tools:
+                    allowed_tools.append(tool)
+
+    # Auto-inject recall_fact MCP when the bot has a facts.db. The bot
+    # resolves the same way as conversation_search; we only attach the
+    # server when the structured store actually exists so a fresh bot
+    # with no extraction history doesn't pay the spawn cost.
+    rf_bot_dir = _resolve_bot_dir_from_working_directory(working_directory)
+    if rf_bot_dir is not None and (rf_bot_dir / "facts.db").exists():
+        rf_server = _recall_fact_mcp_server(rf_bot_dir)
+        if rf_server is not None:
+            if mcp_config:
+                mcp_config["mcpServers"].update(rf_server)
+            else:
+                mcp_config = {"mcpServers": dict(rf_server)}
+            for tool in RECALL_FACT_ALLOWED_TOOLS:
                 if tool not in allowed_tools:
                     allowed_tools.append(tool)
 
