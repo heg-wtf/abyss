@@ -29,6 +29,13 @@ interface Props {
   activeSessionId: string;
   onSelect: (target: { bot: string; id: string }) => void;
   onCreate: (botName: string, sessionId: string) => void;
+  /**
+   * Which tab to show first. The drawer opens from two surfaces:
+   * chat screens (default "chats") and the routine viewer (passes
+   * "routines"), so the user lands on the list that matches the
+   * surface they're already on.
+   */
+  initialTab?: "chats" | "routines";
 }
 
 /**
@@ -46,6 +53,7 @@ export function SessionsDrawerPanel({
   activeSessionId,
   onSelect,
   onCreate,
+  initialTab = "chats",
 }: Props) {
   const router = useRouter();
   // Subscribes to the module-level streaming store so the indicator
@@ -58,7 +66,7 @@ export function SessionsDrawerPanel({
   const [routinesLoading, setRoutinesLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [pickerOpen, setPickerOpen] = React.useState(false);
-  const [tab, setTab] = React.useState<"chats" | "routines">("chats");
+  const [tab, setTab] = React.useState<"chats" | "routines">(initialTab);
   const [menuAnchor, setMenuAnchor] = React.useState<{
     session: ChatSession;
     rect: { top: number; left: number; bottom: number; right: number };
