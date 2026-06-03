@@ -1,13 +1,25 @@
 /**
  * Client for the abyss chat sidecar HTTP API.
  *
- * The sidecar (`abyss start`) serves the mobile PWA and dashboard chat,
- * binding to 127.0.0.1:3848 by default. Override with `ABYSS_CHAT_API_URL`.
+ * The sidecar (`abyss start`) binds to 127.0.0.1:3848 (loopback only),
+ * so the browser cannot reach it directly when the dashboard is loaded
+ * over the network IP or a PWA over Tailscale. We route all client-side
+ * calls through ``/api/sidecar/[...path]`` — a same-origin Next.js
+ * proxy that forwards to chat_server server-side, where loopback always
+ * works. Server-side callers (Next.js API routes, tests) keep hitting
+ * the loopback URL directly because ``typeof window === "undefined"``
+ * there, so the override is invisible to them.
+ *
+ * ``ABYSS_CHAT_API_URL`` is still honoured server-side as the override
+ * to point at a non-default sidecar port / host.
  */
 
 const DEFAULT_BASE = "http://127.0.0.1:3848";
 
 export function getApiBase(): string {
+  if (typeof window !== "undefined") {
+    return "/api/sidecar";
+  }
   return process.env.ABYSS_CHAT_API_URL ?? DEFAULT_BASE;
 }
 
