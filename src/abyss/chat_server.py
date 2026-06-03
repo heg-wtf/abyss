@@ -742,6 +742,14 @@ class ChatServer:
             "/skill-proposals/{bot}/{proposal_id}/reject",
             self._handle_skill_proposal_reject,
         )
+        router.add_get("/goals/{bot}", self._handle_goals_get)
+        router.add_post("/goals/{bot}", self._handle_goals_post)
+        router.add_put("/goals/{bot}/{goal_id}", self._handle_goals_put)
+        router.add_delete("/goals/{bot}/{goal_id}", self._handle_goals_delete)
+        router.add_post(
+            "/goals/{bot}/{goal_id}/progress",
+            self._handle_goal_progress_post,
+        )
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -1414,6 +1422,129 @@ class ChatServer:
         if updated is None:
             return web.json_response({"error": "proposal not found"}, status=404)
         return web.json_response({"ok": True, "proposal": asdict(updated)})
+
+    async def _handle_goals_get(self, request: web.Request) -> web.Response:
+        """List goals for ``bot``, optionally filtered by status."""
+        from dataclasses import asdict
+
+        from abyss.goals import list_goals
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        status_filter = request.query.get("status")
+        rows = list_goals(bot_name, status=status_filter)
+        return web.json_response({"bot": bot_name, "goals": [asdict(row) for row in rows]})
+
+    async def _handle_goals_post(self, request: web.Request) -> web.Response:
+        """Add a new goal. Body: ``{title, kpi?, target?, id?}``."""
+        from dataclasses import asdict
+
+        from abyss.goals import add_goal
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+        title = (body.get("title") or "").strip()
+        if not title:
+            return web.json_response({"error": "title required"}, status=400)
+        try:
+            goal = add_goal(
+                bot_name,
+                title,
+                goal_id=(body.get("id") or None),
+                kpi=(body.get("kpi") or "").strip(),
+                target=(body.get("target") or "").strip(),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "goal": asdict(goal)}, status=201)
+
+    async def _handle_goals_put(self, request: web.Request) -> web.Response:
+        """Update title/kpi/target/status of a goal."""
+        from dataclasses import asdict
+
+        from abyss.goals import update_goal
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        goal_id = request.match_info["goal_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+        try:
+            updated = update_goal(
+                bot_name,
+                goal_id,
+                title=body.get("title"),
+                kpi=body.get("kpi"),
+                target=body.get("target"),
+                status=body.get("status"),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if updated is None:
+            return web.json_response({"error": "goal not found"}, status=404)
+        return web.json_response({"ok": True, "goal": asdict(updated)})
+
+    async def _handle_goals_delete(self, request: web.Request) -> web.Response:
+        from abyss.goals import delete_goal
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        goal_id = request.match_info["goal_id"]
+        if not delete_goal(bot_name, goal_id):
+            return web.json_response({"error": "goal not found"}, status=404)
+        return web.json_response({"ok": True, "goal_id": goal_id})
+
+    async def _handle_goal_progress_post(self, request: web.Request) -> web.Response:
+        """Human-side progress logger. Body: ``{note, value?}``."""
+        from dataclasses import asdict
+
+        from abyss.goals import record_progress
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        goal_id = request.match_info["goal_id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "invalid JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "body must be an object"}, status=400)
+        note = (body.get("note") or "").strip()
+        if not note:
+            return web.json_response({"error": "note required"}, status=400)
+        value = body.get("value")
+        if value is not None:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "value must be a number"}, status=400)
+        try:
+            entry = record_progress(bot_name, goal_id, note, value=value)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if entry is None:
+            return web.json_response({"error": "goal not found"}, status=404)
+        return web.json_response({"ok": True, "entry": asdict(entry)})
 
     async def _handle_log_feedback(self, request: web.Request) -> web.Response:
         """Record a numeric feedback signal (1/2/3) for an assistant turn.

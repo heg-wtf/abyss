@@ -394,6 +394,30 @@ def compose_claude_md(
         sections.append("")
         sections.append(self_md)
 
+    # ── Phase 6 Goals ───────────────────────────────────────────────
+    # Inject only top-3 active goals to keep CLAUDE.md compact. The
+    # ``record_progress`` MCP tool is always available so the bot can
+    # log a new entry whenever it sees movement.
+    from abyss.goals import list_goals
+
+    active_goals = list_goals(bot_name, status="active")[:3]
+    if active_goals:
+        sections.append("")
+        sections.append("## Goals (Top Active)")
+        sections.append(
+            "- 아래는 활성 목표 요약이다. 진척이 있을 때 `record_progress` 도구로 기록하라."
+        )
+        sections.append("")
+        for goal in active_goals:
+            line = f"- **{goal.title}** (id=`{goal.id}`)"
+            if goal.kpi:
+                line += f" — KPI: {goal.kpi}"
+            if goal.target:
+                line += f" — Target: {goal.target}"
+            if goal.progress:
+                line += f" — last progress: {goal.progress[-1].ts}"
+            sections.append(line)
+
     from abyss.about_me import about_me_directory, has_any_entries, load_index
     from abyss.session import load_global_memory
 

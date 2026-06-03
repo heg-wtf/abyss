@@ -552,6 +552,10 @@ CALL_BOT_ALLOWED_TOOLS = [
     "mcp__call_bot__call_bot",
 ]
 
+RECORD_PROGRESS_ALLOWED_TOOLS = [
+    "mcp__record_progress__record_progress",
+]
+
 
 def _resolve_bot_dir_from_working_directory(working_directory: str) -> Path | None:
     """Walk parents of ``working_directory`` to find the bot root.
@@ -622,6 +626,25 @@ def _conversation_search_mcp_server(working_directory: str) -> dict | None:
     if is_mcp_always_load_enabled():
         entry["alwaysLoad"] = True
     return {"conversation_search": entry}
+
+
+def _record_progress_mcp_server() -> dict | None:
+    """Build the record_progress MCP entry. Always-on per bot.
+
+    The server reads ``ABYSS_HOME`` to locate the goals.yaml file.
+    """
+    import sys
+
+    from abyss.config import abyss_home, is_mcp_always_load_enabled
+
+    entry: dict = {
+        "command": sys.executable,
+        "args": ["-m", "abyss.mcp_servers.record_progress"],
+        "env": {"ABYSS_HOME": str(abyss_home())},
+    }
+    if is_mcp_always_load_enabled():
+        entry["alwaysLoad"] = True
+    return {"record_progress": entry}
 
 
 def _call_bot_mcp_server() -> dict | None:
@@ -800,6 +823,20 @@ def _prepare_skill_config(
         else:
             mcp_config = {"mcpServers": dict(cb_server)}
         for tool in CALL_BOT_ALLOWED_TOOLS:
+            if tool not in allowed_tools:
+                allowed_tools.append(tool)
+
+    # Auto-inject record_progress MCP for every bot. Phase 6: the bot
+    # can log progress on any goal the human already defined in
+    # goals.yaml. No gate condition — the tool is always available,
+    # it just errors out cleanly when goals.yaml is empty.
+    rp_server = _record_progress_mcp_server()
+    if rp_server is not None:
+        if mcp_config:
+            mcp_config["mcpServers"].update(rp_server)
+        else:
+            mcp_config = {"mcpServers": dict(rp_server)}
+        for tool in RECORD_PROGRESS_ALLOWED_TOOLS:
             if tool not in allowed_tools:
                 allowed_tools.append(tool)
 

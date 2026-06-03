@@ -705,3 +705,77 @@ export async function rejectSkillProposal(
     { method: "POST" },
   );
 }
+
+export interface ProgressEntry {
+  ts: string;
+  note: string;
+  value?: number | null;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  kpi: string;
+  target: string;
+  status: "active" | "done" | "archived";
+  created_at: string;
+  progress: ProgressEntry[];
+}
+
+export interface GoalsResponse {
+  bot: string;
+  goals: Goal[];
+}
+
+export async function fetchGoals(
+  bot: string,
+  options: { status?: "active" | "done" | "archived" } = {},
+): Promise<GoalsResponse> {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return jsonFetch<GoalsResponse>(`/goals/${encodeURIComponent(bot)}${suffix}`);
+}
+
+export async function addGoal(
+  bot: string,
+  payload: { title: string; kpi?: string; target?: string; id?: string },
+): Promise<{ ok: boolean; goal: Goal }> {
+  return jsonFetch<{ ok: boolean; goal: Goal }>(
+    `/goals/${encodeURIComponent(bot)}`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+}
+
+export async function updateGoal(
+  bot: string,
+  goalId: string,
+  payload: Partial<Pick<Goal, "title" | "kpi" | "target" | "status">>,
+): Promise<{ ok: boolean; goal: Goal }> {
+  return jsonFetch<{ ok: boolean; goal: Goal }>(
+    `/goals/${encodeURIComponent(bot)}/${encodeURIComponent(goalId)}`,
+    { method: "PUT", body: JSON.stringify(payload) },
+  );
+}
+
+export async function deleteGoal(bot: string, goalId: string): Promise<void> {
+  await jsonFetch(
+    `/goals/${encodeURIComponent(bot)}/${encodeURIComponent(goalId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function recordGoalProgress(
+  bot: string,
+  goalId: string,
+  note: string,
+  value?: number | null,
+): Promise<{ ok: boolean; entry: ProgressEntry }> {
+  const body: Record<string, unknown> = { note };
+  if (value != null && Number.isFinite(value)) body.value = value;
+  return jsonFetch<{ ok: boolean; entry: ProgressEntry }>(
+    `/goals/${encodeURIComponent(bot)}/${encodeURIComponent(goalId)}/progress`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}

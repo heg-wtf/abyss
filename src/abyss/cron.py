@@ -415,6 +415,7 @@ async def execute_cron_job(
     # back into ``response`` so the conversation log + Web Push still
     # have something to render.
     from abyss.episodes import EPISODE_EXTRACT_JOB_NAME
+    from abyss.goals import GOAL_DIGEST_JOB_NAME
 
     try:
         cron_bot_config = {
@@ -429,6 +430,28 @@ async def execute_cron_job(
             response = (
                 f"Episode extraction finished: {len(episode_ids)} episodes, {len(fact_ids)} facts."
             )
+        elif job_name == GOAL_DIGEST_JOB_NAME:
+            # Reuse the generic LLM round-trip but replace the cron
+            # message with a structured prompt derived from goals.yaml +
+            # last 7 days of progress. Output lands in the conversation
+            # log like any other cron job so the mobile Routines tab
+            # and Web Push surface the digest naturally.
+            from abyss.goals import build_digest_prompt
+
+            digest_prompt = build_digest_prompt(bot_name)
+            backend = get_or_create(bot_name, cron_bot_config)
+            request = LLMRequest(
+                bot_name=bot_name,
+                bot_path=bot_directory(bot_name),
+                session_directory=Path(working_directory),
+                working_directory=working_directory,
+                bot_config=cron_bot_config,
+                user_prompt=digest_prompt,
+                timeout=command_timeout,
+                session_key=f"cron:{bot_name}:{job_name}",
+            )
+            result = await backend.run(request)
+            response = result.text
         else:
             backend = get_or_create(bot_name, cron_bot_config)
             request = LLMRequest(
