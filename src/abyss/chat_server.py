@@ -750,6 +750,9 @@ class ChatServer:
             "/goals/{bot}/{goal_id}/progress",
             self._handle_goal_progress_post,
         )
+        router.add_get("/persona/{bot}/snapshots", self._handle_persona_snapshots_get)
+        router.add_get("/persona/{bot}/drift", self._handle_persona_drift_get)
+        router.add_post("/persona/{bot}/snapshot", self._handle_persona_snapshot_post)
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -1545,6 +1548,58 @@ class ChatServer:
         if entry is None:
             return web.json_response({"error": "goal not found"}, status=404)
         return web.json_response({"ok": True, "entry": asdict(entry)})
+
+    async def _handle_persona_snapshots_get(self, request: web.Request) -> web.Response:
+        """List recent persona snapshots, newest first."""
+        from dataclasses import asdict
+
+        from abyss.persona_drift import iter_snapshots
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        try:
+            limit = min(max(1, int(request.query.get("limit", "30"))), 365)
+        except ValueError:
+            return web.json_response({"error": "invalid limit"}, status=400)
+        snapshots = [asdict(snap) for snap in iter_snapshots(bot_name, limit=limit)]
+        return web.json_response({"bot": bot_name, "snapshots": snapshots})
+
+    async def _handle_persona_drift_get(self, request: web.Request) -> web.Response:
+        """Compute the drift report for ``bot`` over an optional window."""
+        from dataclasses import asdict
+
+        from abyss.persona_drift import compute_drift
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        try:
+            window = min(max(1, int(request.query.get("window", "7"))), 90)
+        except ValueError:
+            return web.json_response({"error": "invalid window"}, status=400)
+        report = compute_drift(bot_name, window_days=window)
+        if report is None:
+            return web.json_response({"bot": bot_name, "drift": None})
+        return web.json_response({"bot": bot_name, "drift": asdict(report)})
+
+    async def _handle_persona_snapshot_post(self, request: web.Request) -> web.Response:
+        """Manually trigger a snapshot (event='manual')."""
+        from dataclasses import asdict
+
+        from abyss.persona_drift import take_snapshot
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        try:
+            snap = take_snapshot(bot_name, event="manual")
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response({"ok": True, "snapshot": asdict(snap)})
 
     async def _handle_log_feedback(self, request: web.Request) -> web.Response:
         """Record a numeric feedback signal (1/2/3) for an assistant turn.

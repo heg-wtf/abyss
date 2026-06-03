@@ -1,7 +1,7 @@
 # Plan: Phase 8.0 — Persona drift detection
 
 - date: 2026-06-03
-- status: approved
+- status: done
 - author: claude
 - approved-by: ash84
 

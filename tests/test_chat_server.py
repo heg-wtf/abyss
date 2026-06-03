@@ -2253,6 +2253,78 @@ async def test_goals_get_bot_not_found_404(client):
     assert resp.status == 404
 
 
+# ── Phase 8.0 persona drift routes ──
+
+
+@pytest.mark.asyncio
+async def test_persona_snapshots_get_empty(client, abyss_home):
+    resp = await client.get("/persona/alpha/snapshots")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body == {"bot": "alpha", "snapshots": []}
+
+
+@pytest.mark.asyncio
+async def test_persona_snapshot_post_creates_row(client, abyss_home, monkeypatch):
+    monkeypatch.setattr("abyss.persona_drift._compose_for_bot", lambda _bot: "## A\nbody\n")
+    resp = await client.post("/persona/alpha/snapshot")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["snapshot"]["event"] == "manual"
+
+
+@pytest.mark.asyncio
+async def test_persona_drift_get_none_when_one_snapshot(client, abyss_home, monkeypatch):
+    monkeypatch.setattr("abyss.persona_drift._compose_for_bot", lambda _bot: "## A\nbody\n")
+    await client.post("/persona/alpha/snapshot")
+    resp = await client.get("/persona/alpha/drift")
+    body = await resp.json()
+    assert body == {"bot": "alpha", "drift": None}
+
+
+@pytest.mark.asyncio
+async def test_persona_drift_get_returns_report(client, abyss_home, monkeypatch):
+    from abyss.persona_drift import take_snapshot
+
+    monkeypatch.setattr(
+        "abyss.persona_drift._compose_for_bot",
+        lambda _bot: "## A\n" + ("big " * 200) + "\n",
+    )
+    monkeypatch.setattr("abyss.persona_drift._iso_now", lambda: "2026-05-27T00:00:00+00:00")
+    take_snapshot("alpha", event="manual")
+    monkeypatch.setattr("abyss.persona_drift._iso_now", lambda: "2026-06-03T00:00:00+00:00")
+    monkeypatch.setattr("abyss.persona_drift._compose_for_bot", lambda _bot: "## A\ntiny\n")
+    take_snapshot("alpha", event="manual")
+    resp = await client.get("/persona/alpha/drift?window=7")
+    body = await resp.json()
+    assert body["drift"]["shrinkage_alert"] is True
+    assert body["drift"]["total_delta_bytes"] < 0
+
+
+@pytest.mark.asyncio
+async def test_persona_invalid_bot_400(client, abyss_home):
+    resp = await client.get("/persona/..%2Fetc/snapshots")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_persona_bot_not_found_404(client):
+    resp = await client.get("/persona/ghost/snapshots")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_persona_drift_invalid_window_400(client, abyss_home):
+    resp = await client.get("/persona/alpha/drift?window=not-a-number")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_persona_snapshots_invalid_limit_400(client, abyss_home):
+    resp = await client.get("/persona/alpha/snapshots?limit=not-a-number")
+    assert resp.status == 400
+
+
 @pytest.mark.asyncio
 async def test_about_me_approve_unknown_404(client):
     resp = await client.post("/about-me/entries/identity/ghost/approve")

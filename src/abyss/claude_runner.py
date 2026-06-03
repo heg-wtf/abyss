@@ -105,6 +105,19 @@ def _abyss_precompact_hook_entry() -> dict[str, Any]:
     return {"matcher": "", "hooks": [{"type": "command", "command": command}]}
 
 
+def _abyss_postcompact_hook_entry() -> dict[str, Any]:
+    """Build the PostCompact hook entry — Phase 8.0 persona-drift trigger.
+
+    Fires after Claude Code finishes compacting the session. The hook
+    takes a fresh persona snapshot tagged ``post-compact`` and fires
+    a Web Push if total bytes shrank past the threshold.
+    """
+    import sys
+
+    command = f"{sys.executable} -m abyss.hooks.postcompact_hook"
+    return {"matcher": "", "hooks": [{"type": "command", "command": command}]}
+
+
 def _abyss_posttooluse_hook_entry(outcome: str = "success") -> dict[str, Any]:
     """Build the PostToolUse / PostToolUseFailure hook entry.
 
@@ -210,6 +223,7 @@ def _write_session_settings(working_directory: str, allowed_tools: list[str]) ->
 
     if _hooks_enabled_for_working_directory(working_directory):
         settings["hooks"]["PreCompact"] = [_abyss_precompact_hook_entry()]
+        settings["hooks"]["PostCompact"] = [_abyss_postcompact_hook_entry()]
         # PostToolUse fires only on success; failures land on
         # PostToolUseFailure (CC docs). Register both so the metrics
         # log doesn't underreport errors. Skill-supplied entries are

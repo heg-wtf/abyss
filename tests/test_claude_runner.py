@@ -386,6 +386,7 @@ def test_write_session_settings_blocks_inherited_hooks_with_clean_dict(tmp_path)
     # SessionStart) cannot leak into the bot subprocess.
     assert set(settings["hooks"].keys()) == {
         "PreCompact",
+        "PostCompact",
         "PostToolUse",
         "PostToolUseFailure",
     }

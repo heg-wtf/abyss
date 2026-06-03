@@ -1720,4 +1720,99 @@ want to edit row 3 by hand". atomic write (`tempfile.mkstemp` +
   yaml. Shared goals would need a project-level surface.
 - Quantitative KPI sparklines — Phase 6 ships text timeline only;
   graph view is Phase 6.5 if the data justifies it.
-- Persona-drift detection — Phase 8.
+- Persona-drift detection — see the Persona Drift section below.
+
+
+## Persona Drift — Phase 8.0
+
+### Storage
+
+```
+bots/<name>/persona_snapshots.jsonl
+```
+
+One JSON line per snapshot. We deliberately do NOT store the full
+text — only sha256 + size totals + section sizes. Reasons:
+
+- **Privacy**: composed CLAUDE.md may pull in ABOUT_ME / MEMORY /
+  SELF / goals snippets the user did not intend to checkpoint to a
+  long-lived store.
+- **Disk**: a 30-day snapshot history is < 30 KB at this shape
+  whereas full text would be megabytes.
+
+The hash detects "did anything change at all"; the section sizes
+explain *what* moved.
+
+### Section parsing
+
+Header detection uses ``^##\s+(.+?)\s*$`` — the canonical form
+``compose_claude_md`` emits. Any content before the first ``##``
+(the ``# Bot Name`` block, intro paragraphs) is bucketed into
+``__preamble__`` so total bytes always sum to the file length —
+no silent loss.
+
+Duplicate ``## Section Name`` headers (rare but the bot can have
+two ``## About Me`` chunks if a future composer slips up) are
+**summed** rather than overwritten so byte accounting stays exact.
+
+### Drift compute
+
+`compute_drift(bot, window_days)`:
+
+1. Find the newest snapshot.
+2. Find the closest snapshot at least ``window_days`` ago. If
+   none exists fall back to the oldest snapshot we have.
+3. Diff per section + total bytes + hash.
+4. Set ``shrinkage_alert=True`` when total delta is ≤ -10%.
+
+Returns ``None`` when fewer than 2 snapshots exist — callers
+render that as "not enough history yet".
+
+### Post-compact hook
+
+`hooks/postcompact_hook.py` fires after Claude Code finishes
+compacting the session. It:
+
+1. Reads the most recent snapshot **before** taking a new one.
+2. Takes a fresh snapshot tagged ``event="post-compact"``.
+3. Compares the two via `compare_snapshots`.
+4. If shrinkage ≥ threshold → `logger.warning` + best-effort
+   Web Push (`title="🧬 {bot} persona drift"`).
+
+Always exits 0; an internal failure cannot block the host session.
+
+### Cron dispatch
+
+`cron.execute_cron_job` branches on two reserved names:
+
+- `persona_snapshot` (default `0 4 * * *`) — takes a daily
+  snapshot. No LLM call. Status line lands in the conversation log.
+- `persona_digest` (default `30 4 * * 0`) — builds
+  `build_drift_digest_prompt(bot)` from the drift report and runs
+  it through the normal LLM round-trip so the user gets prose
+  (Korean by default) instead of raw numbers.
+
+### Why byte-level not embedding-based
+
+A 10% byte drop usually means a real section disappeared (compact
+ate Personality, SELF rewrite collapsed, etc.). Cosine-similarity
+on sentence embeddings would catch tonal drift more accurately but:
+
+- Cost: every snapshot would mean an embedding call.
+- Dependencies: pinning a local embedding model is non-trivial on
+  M1/M2 macOS.
+- False positives: small wording changes look like drift even
+  when intent is identical.
+
+Byte-level is the cheap MVP. Phase 8.5 may introduce embedding
+drift if byte-level proves too noisy or too quiet.
+
+### Out of scope (deferred)
+
+- **Provenance** — adding `source: <conversation-YYMMDD#turn-N>`
+  attribution to MEMORY / ABOUT_ME entries is Phase 8.1. Existing
+  `facts.db` already tracks `source_turn`.
+- **Conflict detection** — bot encountering contradictory memory
+  and asking the user "was it X or Y?" is Phase 8.2.
+- **Embedding-based drift** — cosine similarity for tonal drift
+  (Phase 8.5).
