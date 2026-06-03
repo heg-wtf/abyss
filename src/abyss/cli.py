@@ -65,6 +65,8 @@ facts_app = typer.Typer(help="Per-bot structured facts (facts.db)")
 app.add_typer(facts_app, name="facts")
 goals_app = typer.Typer(help="Per-bot goal tracking (goals.yaml)")
 app.add_typer(goals_app, name="goals")
+persona_app = typer.Typer(help="Per-bot persona drift tracking (Phase 8.0)")
+app.add_typer(persona_app, name="persona")
 
 
 @app.command()
@@ -1587,6 +1589,165 @@ def self_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
         console.print(f"[green]Removed '{REFLECTION_JOB_NAME}' from {bot}.[/green]")
     else:
         console.print(f"[yellow]No '{REFLECTION_JOB_NAME}' job to remove for {bot}.[/yellow]")
+
+
+# --- Persona drift subcommands (Phase 8.0) ---
+
+
+@persona_app.command("show")
+def persona_show(
+    bot: str = typer.Argument(help="Bot name"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Recent snapshots"),
+) -> None:
+    """Print the recent persona snapshots newest-first."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.config import load_bot_config
+    from abyss.persona_drift import iter_snapshots
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    rows = list(iter_snapshots(bot, limit=limit))
+    if not rows:
+        console.print(f"[yellow]No persona snapshots for '{bot}'.[/yellow]")
+        return
+    table = Table(title=f"Persona snapshots — {bot}")
+    table.add_column("Timestamp")
+    table.add_column("Event")
+    table.add_column("Total bytes")
+    table.add_column("Sections")
+    table.add_column("Hash")
+    for snap in rows:
+        table.add_row(
+            snap.ts,
+            snap.event,
+            f"{snap.total_bytes:,}",
+            str(len(snap.section_sizes)),
+            snap.hash[:12],
+        )
+    console.print(table)
+
+
+@persona_app.command("snapshot")
+def persona_snapshot(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Manually trigger a snapshot (event='manual')."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.persona_drift import take_snapshot
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    snap = take_snapshot(bot, event="manual")
+    console.print(
+        f"[green]Snapshot taken: {snap.total_bytes:,} bytes, "
+        f"{len(snap.section_sizes)} sections, hash={snap.hash[:12]}.[/green]"
+    )
+
+
+@persona_app.command("drift")
+def persona_drift(
+    bot: str = typer.Argument(help="Bot name"),
+    window: int = typer.Option(7, "--window", help="Days to look back"),
+) -> None:
+    """Print the drift report for ``bot`` over the past ``window`` days."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.persona_drift import compute_drift
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    report = compute_drift(bot, window_days=window)
+    if report is None:
+        console.print(
+            f"[yellow]Not enough snapshots for '{bot}' yet — at least two needed.[/yellow]"
+        )
+        return
+    headline = "[red]⚠️ shrinkage alert[/red]" if report.shrinkage_alert else "[green]stable[/green]"
+    console.print(f"[bold]Drift report — {bot}[/bold] · {headline}")
+    console.print(f"  Baseline: {report.baseline_ts} ({report.baseline_bytes:,} bytes)")
+    console.print(f"  Latest:   {report.latest_ts} ({report.latest_bytes:,} bytes)")
+    console.print(
+        f"  Delta:    {report.total_delta_bytes:+,} bytes ({report.total_delta_pct:+.1%})"
+    )
+    console.print(f"  Hash changed: {report.hash_changed}")
+    if report.section_deltas:
+        console.print("  Section deltas:")
+        for name, delta in sorted(
+            report.section_deltas.items(), key=lambda kv: abs(kv[1]), reverse=True
+        )[:10]:
+            console.print(f"    {name}: {delta:+,}")
+
+
+@persona_app.command("schedule")
+def persona_schedule(
+    bot: str = typer.Argument(help="Bot name"),
+    daily_cron: str = typer.Option("0 4 * * *", "--daily", help="Cron for daily snapshot"),
+    digest_cron: str = typer.Option("30 4 * * 0", "--digest", help="Cron for weekly drift digest"),
+) -> None:
+    """Register the daily snapshot + weekly digest cron jobs."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import add_cron_job, get_cron_job
+    from abyss.persona_drift import PERSONA_DAILY_JOB_NAME, PERSONA_DIGEST_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    added = 0
+    for name, schedule, message in (
+        (
+            PERSONA_DAILY_JOB_NAME,
+            daily_cron,
+            "Daily persona snapshot (Phase 8.0 drift tracking).",
+        ),
+        (
+            PERSONA_DIGEST_JOB_NAME,
+            digest_cron,
+            "Weekly persona drift digest.",
+        ),
+    ):
+        if get_cron_job(bot, name):
+            console.print(f"[yellow]'{name}' already scheduled for {bot}.[/yellow]")
+            continue
+        add_cron_job(
+            bot,
+            {"name": name, "schedule": schedule, "enabled": True, "message": message},
+        )
+        console.print(f"[green]Scheduled '{name}' for {bot} (cron='{schedule}').[/green]")
+        added += 1
+    if added == 0:
+        raise typer.Exit(1)
+
+
+@persona_app.command("unschedule")
+def persona_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Remove both persona cron jobs."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import remove_cron_job
+    from abyss.persona_drift import PERSONA_DAILY_JOB_NAME, PERSONA_DIGEST_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    for name in (PERSONA_DAILY_JOB_NAME, PERSONA_DIGEST_JOB_NAME):
+        if remove_cron_job(bot, name):
+            console.print(f"[green]Removed '{name}' from {bot}.[/green]")
+        else:
+            console.print(f"[yellow]No '{name}' to remove for {bot}.[/yellow]")
 
 
 # --- Goals subcommands (Phase 6) ---

@@ -779,3 +779,68 @@ export async function recordGoalProgress(
     { method: "POST", body: JSON.stringify(body) },
   );
 }
+
+export interface PersonaSnapshot {
+  ts: string;
+  hash: string;
+  total_bytes: number;
+  section_sizes: Record<string, number>;
+  event: "daily" | "post-compact" | "manual";
+}
+
+export interface PersonaSnapshotsResponse {
+  bot: string;
+  snapshots: PersonaSnapshot[];
+}
+
+export interface PersonaDriftReport {
+  latest_ts: string;
+  baseline_ts: string;
+  latest_bytes: number;
+  baseline_bytes: number;
+  total_delta_bytes: number;
+  total_delta_pct: number;
+  hash_changed: boolean;
+  section_deltas: Record<string, number>;
+  shrinkage_alert: boolean;
+}
+
+export interface PersonaDriftResponse {
+  bot: string;
+  drift: PersonaDriftReport | null;
+}
+
+export async function fetchPersonaSnapshots(
+  bot: string,
+  options: { limit?: number } = {},
+): Promise<PersonaSnapshotsResponse> {
+  const params = new URLSearchParams();
+  if (options.limit != null) params.set("limit", String(options.limit));
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return jsonFetch<PersonaSnapshotsResponse>(
+    `/persona/${encodeURIComponent(bot)}/snapshots${suffix}`,
+  );
+}
+
+export async function fetchPersonaDrift(
+  bot: string,
+  options: { window?: number } = {},
+): Promise<PersonaDriftResponse> {
+  const params = new URLSearchParams();
+  if (options.window != null) params.set("window", String(options.window));
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return jsonFetch<PersonaDriftResponse>(
+    `/persona/${encodeURIComponent(bot)}/drift${suffix}`,
+  );
+}
+
+export async function triggerPersonaSnapshot(
+  bot: string,
+): Promise<{ ok: boolean; snapshot: PersonaSnapshot }> {
+  return jsonFetch<{ ok: boolean; snapshot: PersonaSnapshot }>(
+    `/persona/${encodeURIComponent(bot)}/snapshot`,
+    { method: "POST" },
+  );
+}
