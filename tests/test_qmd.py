@@ -166,10 +166,17 @@ def test_prepare_skill_config_no_qmd_when_not_installed(temp_abyss_home):
     working_directory = str(temp_abyss_home / "work")
     Path(working_directory).mkdir()
 
+    from abyss.claude_runner import PROPOSE_SKILL_ALLOWED_TOOLS
+
     with patch("shutil.which", return_value=None):
         allowed_tools, _ = _prepare_skill_config(working_directory, None)
 
-    assert allowed_tools is None
+    # ``propose_skill`` is always injected even when QMD isn't installed.
+    assert allowed_tools is not None
+    for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
+        assert tool in allowed_tools
+    # QMD-specific tools must NOT appear when ``shutil.which`` returns None.
+    assert not any(tool.startswith("mcp__qmd__") for tool in allowed_tools)
 
 
 def test_prepare_skill_config_qmd_merges_with_skills(temp_abyss_home):

@@ -2034,6 +2034,104 @@ async def test_facts_put_invalid_fact_id_400(client, abyss_home):
 
 
 @pytest.mark.asyncio
+async def test_skill_proposals_get_empty(client, abyss_home):
+    resp = await client.get("/skill-proposals/alpha")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body == {"bot": "alpha", "proposals": []}
+
+
+@pytest.mark.asyncio
+async def test_skill_proposals_get_filters_by_status(client, abyss_home):
+    from abyss.skill_proposals import add_proposal, update_status
+
+    a = add_proposal("alpha", "https://github.com/x/a", "r")
+    add_proposal("alpha", "https://github.com/x/b", "r")
+    update_status("alpha", a.id, "approved")
+    resp = await client.get("/skill-proposals/alpha?status=pending")
+    body = await resp.json()
+    assert len(body["proposals"]) == 1
+    assert body["proposals"][0]["candidate_url"] == "https://github.com/x/b"
+
+
+@pytest.mark.asyncio
+async def test_skill_proposals_get_bot_not_found(client):
+    resp = await client.get("/skill-proposals/ghost")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_skill_proposals_get_invalid_bot_400(client, abyss_home):
+    resp = await client.get("/skill-proposals/..%2Fetc")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_skill_proposal_approve_happy_path(client, abyss_home, monkeypatch):
+    from abyss.skill_proposals import add_proposal, get_proposal
+
+    p = add_proposal("alpha", "https://github.com/owner/skill", "r")
+
+    def fake_import(url, name=None):
+        path = abyss_home / "skills" / "skill"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    monkeypatch.setattr("abyss.skill.import_skill_from_github", fake_import)
+    monkeypatch.setattr("abyss.skill.attach_skill_to_bot", lambda *_a, **_k: None)
+
+    resp = await client.post(f"/skill-proposals/alpha/{p.id}/approve")
+    assert resp.status == 200, await resp.text()
+    body = await resp.json()
+    assert body["ok"] is True
+    assert body["skill_name"] == "skill"
+    assert get_proposal("alpha", p.id).status == "approved"
+
+
+@pytest.mark.asyncio
+async def test_skill_proposal_approve_unknown_404(client, abyss_home):
+    resp = await client.post("/skill-proposals/alpha/ghost-id/approve")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_skill_proposal_approve_import_error_surfaces_stage(client, abyss_home, monkeypatch):
+    """Import failure returns HTTP 200 with ok=false + stage so the
+    dashboard can render the error without a try/catch ceremony."""
+    from abyss.skill_proposals import add_proposal
+
+    p = add_proposal("alpha", "https://github.com/x/y", "r")
+    monkeypatch.setattr(
+        "abyss.skill.import_skill_from_github",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("clone failed")),
+    )
+    resp = await client.post(f"/skill-proposals/alpha/{p.id}/approve")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["ok"] is False
+    assert body["stage"] == "import"
+    assert "clone failed" in body["error"]
+
+
+@pytest.mark.asyncio
+async def test_skill_proposal_reject_happy_path(client, abyss_home):
+    from abyss.skill_proposals import add_proposal, get_proposal
+
+    p = add_proposal("alpha", "https://github.com/x/y", "r")
+    resp = await client.post(f"/skill-proposals/alpha/{p.id}/reject")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["proposal"]["status"] == "rejected"
+    assert get_proposal("alpha", p.id).status == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_skill_proposal_reject_unknown_404(client, abyss_home):
+    resp = await client.post("/skill-proposals/alpha/ghost/reject")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
 async def test_about_me_approve_unknown_404(client):
     resp = await client.post("/about-me/entries/identity/ghost/approve")
     assert resp.status == 404
