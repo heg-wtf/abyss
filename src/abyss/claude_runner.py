@@ -544,6 +544,10 @@ RECALL_FACT_ALLOWED_TOOLS = [
     "mcp__recall_fact__recent_episodes",
 ]
 
+PROPOSE_SKILL_ALLOWED_TOOLS = [
+    "mcp__propose_skill__propose_skill",
+]
+
 
 def _resolve_bot_dir_from_working_directory(working_directory: str) -> Path | None:
     """Walk parents of ``working_directory`` to find the bot root.
@@ -614,6 +618,27 @@ def _conversation_search_mcp_server(working_directory: str) -> dict | None:
     if is_mcp_always_load_enabled():
         entry["alwaysLoad"] = True
     return {"conversation_search": entry}
+
+
+def _propose_skill_mcp_server() -> dict | None:
+    """Build the propose_skill MCP entry. Always-on per bot.
+
+    The server is cheap (single stdio handler, no DB). It uses cwd
+    walking to resolve the bot, so we just need ``ABYSS_HOME`` in the
+    env to keep test isolation predictable.
+    """
+    import sys
+
+    from abyss.config import abyss_home, is_mcp_always_load_enabled
+
+    entry: dict = {
+        "command": sys.executable,
+        "args": ["-m", "abyss.mcp_servers.propose_skill"],
+        "env": {"ABYSS_HOME": str(abyss_home())},
+    }
+    if is_mcp_always_load_enabled():
+        entry["alwaysLoad"] = True
+    return {"propose_skill": entry}
 
 
 def _recall_fact_mcp_server(bot_dir: Path) -> dict | None:
@@ -722,6 +747,20 @@ def _prepare_skill_config(
             for tool in CONVERSATION_SEARCH_ALLOWED_TOOLS:
                 if tool not in allowed_tools:
                     allowed_tools.append(tool)
+
+    # Auto-inject propose_skill MCP for every bot. Phase 5: the bot can
+    # call it whenever it notices a missing capability — no opt-in
+    # condition (unlike recall_fact which gates on facts.db) because
+    # the bot needs the tool to exist before it has anything to propose.
+    ps_server = _propose_skill_mcp_server()
+    if ps_server is not None:
+        if mcp_config:
+            mcp_config["mcpServers"].update(ps_server)
+        else:
+            mcp_config = {"mcpServers": dict(ps_server)}
+        for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
+            if tool not in allowed_tools:
+                allowed_tools.append(tool)
 
     # Auto-inject recall_fact MCP when the bot has a facts.db. The bot
     # resolves the same way as conversation_search; we only attach the

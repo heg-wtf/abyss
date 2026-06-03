@@ -648,3 +648,60 @@ export async function retractFact(bot: string, factId: number): Promise<void> {
     body: JSON.stringify({ action: "retract" }),
   });
 }
+
+export interface SkillProposal {
+  id: string;
+  bot: string;
+  candidate_url: string;
+  reasons: string[];
+  alternative_urls: string[];
+  proposed_at: string;
+  resolved_at: string | null;
+  status: "pending" | "approved" | "rejected";
+}
+
+export interface SkillProposalsResponse {
+  bot: string;
+  proposals: SkillProposal[];
+}
+
+export async function fetchSkillProposals(
+  bot: string,
+  options: { status?: "pending" | "approved" | "rejected" } = {},
+): Promise<SkillProposalsResponse> {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
+  return jsonFetch<SkillProposalsResponse>(
+    `/skill-proposals/${encodeURIComponent(bot)}${suffix}`,
+  );
+}
+
+export interface ApproveSkillProposalResponse {
+  ok: boolean;
+  skill_name?: string | null;
+  proposal?: SkillProposal;
+  error?: string;
+  stage?: string;
+}
+
+export async function approveSkillProposal(
+  bot: string,
+  proposalId: string,
+): Promise<ApproveSkillProposalResponse> {
+  return jsonFetch<ApproveSkillProposalResponse>(
+    `/skill-proposals/${encodeURIComponent(bot)}/${encodeURIComponent(proposalId)}/approve`,
+    { method: "POST" },
+  );
+}
+
+export async function rejectSkillProposal(
+  bot: string,
+  proposalId: string,
+): Promise<{ ok: boolean; proposal: SkillProposal }> {
+  return jsonFetch<{ ok: boolean; proposal: SkillProposal }>(
+    `/skill-proposals/${encodeURIComponent(bot)}/${encodeURIComponent(proposalId)}/reject`,
+    { method: "POST" },
+  );
+}

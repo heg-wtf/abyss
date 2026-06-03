@@ -733,6 +733,15 @@ class ChatServer:
         router.add_get("/episodes/{bot}", self._handle_episodes_get)
         router.add_get("/facts/{bot}", self._handle_facts_get)
         router.add_put("/facts/{bot}/{fact_id}", self._handle_facts_put)
+        router.add_get("/skill-proposals/{bot}", self._handle_skill_proposals_get)
+        router.add_post(
+            "/skill-proposals/{bot}/{proposal_id}/approve",
+            self._handle_skill_proposal_approve,
+        )
+        router.add_post(
+            "/skill-proposals/{bot}/{proposal_id}/reject",
+            self._handle_skill_proposal_reject,
+        )
         router.add_get("/healthz", self._handle_health)
 
     async def start(self) -> None:
@@ -1337,6 +1346,74 @@ class ChatServer:
         if not retract_fact(bot_name, fact_id):
             return web.json_response({"error": "fact not found"}, status=404)
         return web.json_response({"ok": True, "bot": bot_name, "fact_id": fact_id})
+
+    async def _handle_skill_proposals_get(self, request: web.Request) -> web.Response:
+        """Return skill proposals for ``bot``, optionally filtered by status.
+
+        Query params: ``status=pending|approved|rejected``.
+        """
+        from dataclasses import asdict
+
+        from abyss.skill_proposals import list_proposals
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        status_filter = request.query.get("status")
+        rows = list_proposals(bot_name, status=status_filter)
+        return web.json_response({"bot": bot_name, "proposals": [asdict(row) for row in rows]})
+
+    async def _handle_skill_proposal_approve(self, request: web.Request) -> web.Response:
+        """Approve a proposal — runs import + attach + status update."""
+        from abyss.skill_proposals import approve
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        proposal_id = request.match_info["proposal_id"]
+        result = approve(bot_name, proposal_id)
+        # Only "proposal not found" surfaces as 404 — every other
+        # failure (import / attach error, previously rejected) returns
+        # 200 with ``ok=false`` so the dashboard can render the stage
+        # + error text without catching an HTTP exception.
+        if not result.get("ok") and result.get("stage") == "lookup" and not result.get("proposal"):
+            return web.json_response({"error": result["error"]}, status=404)
+        proposal = result.get("proposal")
+        payload: dict[str, Any] = {
+            "ok": bool(result.get("ok")),
+            "proposal_id": proposal_id,
+        }
+        if "skill_name" in result:
+            payload["skill_name"] = result["skill_name"]
+        if "skill_path" in result:
+            payload["skill_path"] = result["skill_path"]
+        if "stage" in result:
+            payload["stage"] = result["stage"]
+        if "error" in result:
+            payload["error"] = result["error"]
+        if proposal is not None and hasattr(proposal, "id"):
+            from dataclasses import asdict
+
+            payload["proposal"] = asdict(proposal)
+        return web.json_response(payload)
+
+    async def _handle_skill_proposal_reject(self, request: web.Request) -> web.Response:
+        """Reject a proposal — flips status to ``rejected``."""
+        from dataclasses import asdict
+
+        from abyss.skill_proposals import reject
+
+        bot_name = _validate_bot_name(request.match_info["bot"])
+        bot_path = bot_directory(bot_name)
+        if not bot_path.exists():
+            return web.json_response({"error": "bot not found"}, status=404)
+        proposal_id = request.match_info["proposal_id"]
+        updated = reject(bot_name, proposal_id)
+        if updated is None:
+            return web.json_response({"error": "proposal not found"}, status=404)
+        return web.json_response({"ok": True, "proposal": asdict(updated)})
 
     async def _handle_log_feedback(self, request: web.Request) -> web.Response:
         """Record a numeric feedback signal (1/2/3) for an assistant turn.

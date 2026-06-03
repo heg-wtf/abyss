@@ -41,6 +41,10 @@ bot_app = typer.Typer(help="Bot management")
 app.add_typer(bot_app, name="bot")
 skill_app = typer.Typer(help="Skill management", invoke_without_command=True)
 app.add_typer(skill_app, name="skills")
+skill_proposals_app = typer.Typer(
+    help="Bot-proposed skill suggestions (Phase 5 of co-evolution)",
+)
+skill_app.add_typer(skill_proposals_app, name="proposals")
 cron_app = typer.Typer(help="Cron job management")
 app.add_typer(cron_app, name="cron")
 memory_app = typer.Typer(help="Bot memory management")
@@ -1581,6 +1585,92 @@ def self_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
         console.print(f"[green]Removed '{REFLECTION_JOB_NAME}' from {bot}.[/green]")
     else:
         console.print(f"[yellow]No '{REFLECTION_JOB_NAME}' job to remove for {bot}.[/yellow]")
+
+
+# --- Skill proposals subcommands (Phase 5) ---
+
+
+@skill_proposals_app.command("show")
+def skill_proposals_show(
+    bot: str = typer.Argument(help="Bot name"),
+    status: str = typer.Option(None, "--status", help="Filter by pending|approved|rejected"),
+) -> None:
+    """Print pending skill proposals the bot made for human review."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.config import load_bot_config
+    from abyss.skill_proposals import list_proposals
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    rows = list_proposals(bot, status=status)
+    if not rows:
+        console.print(f"[yellow]No proposals for '{bot}'.[/yellow]")
+        return
+    table = Table(title=f"Skill proposals — {bot}")
+    table.add_column("ID")
+    table.add_column("URL")
+    table.add_column("Reasons")
+    table.add_column("Status")
+    table.add_column("Proposed at")
+    for row in rows:
+        reasons = "\n".join(row.reasons) if row.reasons else "(none)"
+        table.add_row(row.id, row.candidate_url, reasons, row.status, row.proposed_at)
+    console.print(table)
+
+
+@skill_proposals_app.command("approve")
+def skill_proposals_approve(
+    bot: str = typer.Argument(help="Bot name"),
+    proposal_id: str = typer.Argument(help="Proposal id (see ``skills proposals show``)"),
+) -> None:
+    """Approve a proposal — clones the GitHub skill and attaches it to the bot."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.skill_proposals import approve
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    result = approve(bot, proposal_id)
+    if not result.get("ok"):
+        console.print(
+            f"[red]Approve failed at '{result.get('stage', '?')}': {result.get('error')}[/red]"
+        )
+        raise typer.Exit(1)
+    if result.get("noop"):
+        console.print(f"[yellow]Proposal {proposal_id} was already approved.[/yellow]")
+        return
+    console.print(
+        f"[green]Approved — installed '{result['skill_name']}' and attached to {bot}.[/green]"
+    )
+
+
+@skill_proposals_app.command("reject")
+def skill_proposals_reject(
+    bot: str = typer.Argument(help="Bot name"),
+    proposal_id: str = typer.Argument(help="Proposal id"),
+) -> None:
+    """Reject a proposal — bot will not re-propose the same URL."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.skill_proposals import reject
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    updated = reject(bot, proposal_id)
+    if updated is None:
+        console.print(f"[yellow]No proposal {proposal_id} for {bot}.[/yellow]")
+        return
+    console.print(f"[green]Rejected {proposal_id} for {bot}.[/green]")
 
 
 # --- Episodes subcommands ---

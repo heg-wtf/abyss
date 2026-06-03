@@ -1478,3 +1478,91 @@ bot list, inline picker, fetch on bot change.
 - Cross-bot fact sharing — facts.db is per-bot. Shared user-side facts
   flow through `ABOUT_ME/`.
 - Persona-drift detection — Phase 8.
+
+
+## Skill Proposals — Phase 5 Skill Autonomy
+
+### Storage layout
+
+```
+bots/<name>/skill_proposals.yaml
+```
+
+A flat yaml list, one entry per `(bot, candidate_url)`. Dedup key is
+`candidate_url` — re-proposing the same URL accumulates `reasons[]`
+and refreshes `proposed_at`. A `rejected` status is sticky: the bot
+proposing the same URL again gets the rejected row back unchanged,
+so it can read it via MCP and learn not to retry.
+
+### Storage shape
+
+```yaml
+- id: <uuid4 hex>
+  bot: anne
+  candidate_url: https://github.com/owner/repo
+  reasons:
+    - "needed a stripe invoice fetcher (cron job 'daily-finance')"
+  alternative_urls: []
+  proposed_at: 2026-06-03T10:00:00+00:00
+  resolved_at: null
+  status: pending  # pending | approved | rejected
+```
+
+### Detection mechanism
+
+`propose_skill` MCP tool only — the bot calls it when it notices a
+missing capability. No reflection-cron auto-detection in Phase 5
+(deferred to a later sub-phase if MCP signal turns out to be too
+sparse). The single tool keeps the contract tight: bot must name
+both the missing capability and the situation that exposed it
+(`reason`), and must produce a `https://github.com/<owner>/<repo>`
+URL (anything else is rejected before storage so the queue stays clean).
+
+### Approve flow
+
+`approve(bot, proposal_id)`:
+
+1. Look up proposal — 404-equivalent if missing.
+2. If already `approved` → noop success.
+3. If already `rejected` → fail with `stage='lookup'`.
+4. `import_skill_from_github(url)` (reuses existing surface) — if it
+   raises, return `{ok: false, stage: 'import', error: <msg>}` and
+   leave status at `pending` so the human can fix the URL and retry.
+5. `attach_skill_to_bot(bot, name)` — same failure handling, but
+   stage `'attach'` and the skill is left installed (orphan ok).
+6. `update_status(bot, id, 'approved')` and return success.
+
+The chat server route exposes step 4/5 failures as HTTP 200 + `ok=false`
+so the dashboard can render the stage text inline without a try/catch.
+Only "proposal not found" is a real HTTP 404.
+
+### Always-on MCP injection
+
+`claude_runner._prepare_skill_config` attaches `propose_skill` for
+every bot (no gate condition — unlike `recall_fact` which checks
+`facts.db`). The bot needs the tool to exist before there's anything
+to propose; gating on the proposals file would create a chicken/egg.
+The MCP server is cheap (single stdio handler, no DB).
+
+### Surfaces
+
+- CLI: `abyss skills proposals show/approve/reject`
+- REST: `GET /skill-proposals/{bot}?status=`, `POST .../approve`, `POST .../reject`
+- Dashboard: `/skills/proposals` page with bot picker + status filter +
+  per-card Approve/Reject buttons; sidebar entry `💡 Proposals` under
+  the Skills group
+
+### Why a single yaml file (not SQLite)
+
+Volume is low (a bot might propose tens of skills total, not
+thousands), and the human reads / edits this directly. yaml stays
+diffable and `cat`-able. SQLite would lock us out of "I just want to
+edit this row by hand" — yaml lets that happen.
+
+### Out of scope (deferred)
+
+- Reflection-cron auto-detection of skill gaps (Phase 5.5 if needed).
+- Cross-bot proposal sharing — per-bot only; one bot's proposed skill
+  doesn't surface in another bot's queue.
+- Auto-revoke of an `approved` skill from `bot.yaml` if the user later
+  changes their mind — use `abyss skills remove` for that.

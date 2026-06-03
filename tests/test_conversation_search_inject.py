@@ -44,12 +44,21 @@ def test_prepare_skill_config_skips_when_fts5_unavailable(
     session_dir: Path,
 ) -> None:
     """Without the ``enable_conversation_search`` marker the auto-inject is off."""
-    from abyss.claude_runner import _prepare_skill_config
+    from abyss.claude_runner import (
+        PROPOSE_SKILL_ALLOWED_TOOLS,
+        _prepare_skill_config,
+    )
 
     allowed_tools, _ = _prepare_skill_config(str(session_dir), None)
-    # Should be None — no skills attached, FTS5 stubbed False, QMD off.
-    assert allowed_tools is None
-    assert not (session_dir / ".mcp.json").exists()
+    # FTS5 stubbed False, QMD off, no user skills — only the always-on
+    # ``propose_skill`` MCP gets injected (no conversation_search).
+    assert allowed_tools is not None
+    for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
+        assert tool in allowed_tools
+    assert not any(
+        tool.startswith("mcp__conversation_search__") for tool in allowed_tools
+    )
+    assert (session_dir / ".mcp.json").exists()
 
 
 @pytest.mark.enable_conversation_search
@@ -59,12 +68,20 @@ def test_prepare_skill_config_skips_for_invalid_session_path(
     """Working directories with no ``bots/<name>/`` ancestor are silently skipped."""
     from abyss.claude_runner import _prepare_skill_config
 
+    from abyss.claude_runner import PROPOSE_SKILL_ALLOWED_TOOLS
+
     shallow = tmp_path / "shallow"
     shallow.mkdir()
     allowed_tools, _ = _prepare_skill_config(str(shallow), None)
-    # No ``bots/`` ancestor → MCP injection skipped, no .mcp.json written.
-    assert allowed_tools is None
-    assert not (shallow / ".mcp.json").exists()
+    # No ``bots/`` ancestor → bot-scoped MCPs skipped, but the
+    # always-on ``propose_skill`` MCP still attaches.
+    assert allowed_tools is not None
+    for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
+        assert tool in allowed_tools
+    assert not any(
+        tool.startswith("mcp__conversation_search__") for tool in allowed_tools
+    )
+    assert (shallow / ".mcp.json").exists()
 
 
 # ─── regression: Codex P2 — bot dir resolution across context types ─────
