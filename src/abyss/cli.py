@@ -63,6 +63,8 @@ episodes_app = typer.Typer(help="Per-bot episodic timeline (episodes.jsonl)")
 app.add_typer(episodes_app, name="episodes")
 facts_app = typer.Typer(help="Per-bot structured facts (facts.db)")
 app.add_typer(facts_app, name="facts")
+goals_app = typer.Typer(help="Per-bot goal tracking (goals.yaml)")
+app.add_typer(goals_app, name="goals")
 
 
 @app.command()
@@ -1585,6 +1587,217 @@ def self_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
         console.print(f"[green]Removed '{REFLECTION_JOB_NAME}' from {bot}.[/green]")
     else:
         console.print(f"[yellow]No '{REFLECTION_JOB_NAME}' job to remove for {bot}.[/yellow]")
+
+
+# --- Goals subcommands (Phase 6) ---
+
+
+@goals_app.command("show")
+def goals_show(
+    bot: str = typer.Argument(help="Bot name"),
+    status: str = typer.Option(None, "--status", help="Filter by active|done|archived"),
+) -> None:
+    """Print the bot's goal list."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from abyss.config import load_bot_config
+    from abyss.goals import list_goals
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    rows = list_goals(bot, status=status)
+    if not rows:
+        console.print(f"[yellow]No goals for '{bot}'.[/yellow]")
+        return
+    table = Table(title=f"Goals — {bot}")
+    table.add_column("ID")
+    table.add_column("Title")
+    table.add_column("KPI")
+    table.add_column("Target")
+    table.add_column("Status")
+    table.add_column("Last progress")
+    for goal in rows:
+        last = goal.progress[-1].ts if goal.progress else "(none)"
+        table.add_row(goal.id, goal.title, goal.kpi or "—", goal.target or "—", goal.status, last)
+    console.print(table)
+
+
+@goals_app.command("add")
+def goals_add(
+    bot: str = typer.Argument(help="Bot name"),
+    title: str = typer.Argument(help="Short goal title"),
+    kpi: str = typer.Option("", "--kpi", help="What 'done' looks like"),
+    target: str = typer.Option("", "--target", help="Deadline / target value"),
+    goal_id: str = typer.Option(None, "--id", help="Override the auto-slugified id"),
+) -> None:
+    """Add a new active goal."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.goals import add_goal
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    try:
+        goal = add_goal(bot, title, goal_id=goal_id, kpi=kpi, target=target)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(f"[green]Added '{goal.id}' to {bot}.[/green]")
+
+
+@goals_app.command("progress")
+def goals_progress(
+    bot: str = typer.Argument(help="Bot name"),
+    goal_id: str = typer.Argument(help="Goal id (see `goals show`)"),
+    note: str = typer.Argument(help="One-sentence progress note"),
+    value: float = typer.Option(None, "--value", help="Optional numeric delta"),
+) -> None:
+    """Manually log progress on a goal (bots use the MCP tool)."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.goals import record_progress
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    try:
+        entry = record_progress(bot, goal_id, note, value=value)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    if entry is None:
+        console.print(f"[yellow]No goal '{goal_id}' for {bot}.[/yellow]")
+        return
+    console.print(f"[green]Logged progress on '{goal_id}' for {bot}.[/green]")
+
+
+@goals_app.command("done")
+def goals_done(
+    bot: str = typer.Argument(help="Bot name"),
+    goal_id: str = typer.Argument(help="Goal id"),
+) -> None:
+    """Mark a goal as done."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.goals import mark_done
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    updated = mark_done(bot, goal_id)
+    if updated is None:
+        console.print(f"[yellow]No goal '{goal_id}' for {bot}.[/yellow]")
+        return
+    console.print(f"[green]Marked '{goal_id}' done.[/green]")
+
+
+@goals_app.command("archive")
+def goals_archive(
+    bot: str = typer.Argument(help="Bot name"),
+    goal_id: str = typer.Argument(help="Goal id"),
+) -> None:
+    """Archive a goal — keeps history but hides from active list."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.goals import mark_archived
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    updated = mark_archived(bot, goal_id)
+    if updated is None:
+        console.print(f"[yellow]No goal '{goal_id}' for {bot}.[/yellow]")
+        return
+    console.print(f"[green]Archived '{goal_id}'.[/green]")
+
+
+@goals_app.command("delete")
+def goals_delete(
+    bot: str = typer.Argument(help="Bot name"),
+    goal_id: str = typer.Argument(help="Goal id"),
+) -> None:
+    """Delete a goal entirely (use ``archive`` for soft-delete)."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.goals import delete_goal
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if delete_goal(bot, goal_id):
+        console.print(f"[green]Deleted '{goal_id}'.[/green]")
+    else:
+        console.print(f"[yellow]No goal '{goal_id}' for {bot}.[/yellow]")
+
+
+@goals_app.command("schedule")
+def goals_schedule(
+    bot: str = typer.Argument(help="Bot name"),
+    cron_expr: str = typer.Option(None, "--cron", "-c", help="Cron schedule (default: Mon 09:00)"),
+) -> None:
+    """Register the weekly goal-digest cron job."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import add_cron_job, get_cron_job
+    from abyss.goals import GOAL_DIGEST_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if get_cron_job(bot, GOAL_DIGEST_JOB_NAME):
+        console.print(f"[yellow]'{GOAL_DIGEST_JOB_NAME}' already scheduled for {bot}.[/yellow]")
+        raise typer.Exit(1)
+    schedule = (cron_expr or "0 9 * * 1").strip()
+    add_cron_job(
+        bot,
+        {
+            "name": GOAL_DIGEST_JOB_NAME,
+            "schedule": schedule,
+            "enabled": True,
+            "message": (
+                "Weekly goal digest. Summarises the past 7 days of "
+                "progress and surfaces stalled goals."
+            ),
+        },
+    )
+    console.print(
+        f"[green]Scheduled '{GOAL_DIGEST_JOB_NAME}' for {bot} (cron='{schedule}').[/green]"
+    )
+
+
+@goals_app.command("unschedule")
+def goals_unschedule(bot: str = typer.Argument(help="Bot name")) -> None:
+    """Remove the weekly goal-digest cron job."""
+    from rich.console import Console
+
+    from abyss.config import load_bot_config
+    from abyss.cron import remove_cron_job
+    from abyss.goals import GOAL_DIGEST_JOB_NAME
+
+    console = Console()
+    if not load_bot_config(bot):
+        console.print(f"[red]Bot '{bot}' not found.[/red]")
+        raise typer.Exit(1)
+    if remove_cron_job(bot, GOAL_DIGEST_JOB_NAME):
+        console.print(f"[green]Removed '{GOAL_DIGEST_JOB_NAME}' from {bot}.[/green]")
+    else:
+        console.print(f"[yellow]No '{GOAL_DIGEST_JOB_NAME}' to remove.[/yellow]")
 
 
 # --- Skill proposals subcommands (Phase 5) ---

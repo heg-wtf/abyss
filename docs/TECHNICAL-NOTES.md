@@ -1648,3 +1648,76 @@ a nested one doesn't see inflated state.
 - Caller-identity-aware peer behaviour — peer doesn't get told who
   pinged it. The `from_<caller>/` directory exists for audit, not
   for behaviour switching.
+
+
+## Goals — Phase 6 per-bot goal tracking
+
+### Storage layout
+
+```
+bots/<name>/goals.yaml
+```
+
+A flat yaml list, one entry per goal. Single file (not goal-def +
+progress-jsonl split) — volume per bot is small (tens of goals,
+dozens of progress rows each), and humans want one file to grep /
+edit.
+
+```yaml
+- id: ship-blog
+  title: Ship the blog launcher PR
+  kpi: PR merged to main
+  target: 2026-06-15
+  status: active   # active | done | archived
+  created_at: 2026-06-03T09:00:00+00:00
+  progress:
+    - ts: 2026-06-03T10:00:00+00:00
+      note: "drafted plan, opened PR"
+    - ts: 2026-06-04T20:00:00+00:00
+      note: "addressed review, CI green"
+      value: 1
+```
+
+### Surfaces
+
+| Surface | Role |
+|---|---|
+| `record_progress` MCP | Bot logs progress on an **existing** goal. Cannot invent new goals — humans curate the list. |
+| `abyss goals` CLI | Add / show / progress / done / archive / delete + cron schedule |
+| `GET /goals/{bot}` etc. | Dashboard REST surface |
+| `/goals` page | Bot picker, status filter, card view with inline progress + Done/Archive/Delete |
+| `compose_claude_md` | Injects top-3 active goals so the bot keeps them top-of-mind without grepping the file |
+| `goal_digest` cron | Weekly LLM digest (`0 9 * * 1` default) lands in `conversation-YYMMDD.md` → Routines tab |
+
+### Why no autodiscovery of goals
+
+The bot can only **append** to existing goals via `record_progress`.
+It cannot create new ones. Reason: goals are a human-curated
+declaration of intent. Letting the bot invent goals would turn the
+list into noise — "ship blog (just kidding, it was a stretch)" etc.
+The human edits the canon, the bot logs movement.
+
+### Cron dispatch
+
+`cron.execute_cron_job` branches on the reserved job name
+`GOAL_DIGEST_JOB_NAME = "goal_digest"`. For that name it calls
+`build_digest_prompt(bot)` to assemble the prompt (active goals +
+last 7 days of progress + canned instructions), then runs the
+result through the normal LLM round-trip. Output lands in the cron
+session's conversation log like every other cron job.
+
+### Why a single yaml
+
+Same trade as `skill_proposals.yaml`: the human reads / edits this
+directly, volume is small, and SQLite would lock us out of "I just
+want to edit row 3 by hand". atomic write (`tempfile.mkstemp` +
+`os.replace`) handles concurrent writes from bot + human cleanly.
+
+### Out of scope
+
+- Auto goal extraction from conversation (deferred Phase 6.5).
+- Cross-bot goal dependencies — one bot's goals stay in that bot's
+  yaml. Shared goals would need a project-level surface.
+- Quantitative KPI sparklines — Phase 6 ships text timeline only;
+  graph view is Phase 6.5 if the data justifies it.
+- Persona-drift detection — Phase 8.

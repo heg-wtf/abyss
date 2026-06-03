@@ -2131,6 +2131,128 @@ async def test_skill_proposal_reject_unknown_404(client, abyss_home):
     assert resp.status == 404
 
 
+# ── Phase 6 goals routes ──
+
+
+@pytest.mark.asyncio
+async def test_goals_get_empty(client, abyss_home):
+    resp = await client.get("/goals/alpha")
+    assert resp.status == 200
+    body = await resp.json()
+    assert body == {"bot": "alpha", "goals": []}
+
+
+@pytest.mark.asyncio
+async def test_goals_post_creates_goal(client, abyss_home):
+    resp = await client.post(
+        "/goals/alpha",
+        json={"title": "Ship blog", "kpi": "PR merged"},
+    )
+    assert resp.status == 201
+    body = await resp.json()
+    assert body["goal"]["title"] == "Ship blog"
+    assert body["goal"]["id"] == "ship-blog"
+
+
+@pytest.mark.asyncio
+async def test_goals_post_rejects_missing_title(client, abyss_home):
+    resp = await client.post("/goals/alpha", json={"kpi": "x"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_goals_post_duplicate_id_400(client, abyss_home):
+    await client.post("/goals/alpha", json={"title": "Ship blog"})
+    resp = await client.post("/goals/alpha", json={"title": "Ship blog"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_goals_put_updates_status(client, abyss_home):
+    from abyss.goals import add_goal, get_goal
+
+    g = add_goal("alpha", "Ship blog")
+    resp = await client.put(f"/goals/alpha/{g.id}", json={"status": "done"})
+    assert resp.status == 200
+    assert get_goal("alpha", g.id).status == "done"
+
+
+@pytest.mark.asyncio
+async def test_goals_put_unknown_404(client, abyss_home):
+    resp = await client.put("/goals/alpha/ghost", json={"status": "done"})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_goals_put_invalid_status_400(client, abyss_home):
+    from abyss.goals import add_goal
+
+    g = add_goal("alpha", "Ship blog")
+    resp = await client.put(f"/goals/alpha/{g.id}", json={"status": "wishful"})
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_goals_delete_removes_row(client, abyss_home):
+    from abyss.goals import add_goal, list_goals
+
+    g = add_goal("alpha", "Ship blog")
+    resp = await client.delete(f"/goals/alpha/{g.id}")
+    assert resp.status == 200
+    assert list_goals("alpha") == []
+
+
+@pytest.mark.asyncio
+async def test_goals_delete_unknown_404(client, abyss_home):
+    resp = await client.delete("/goals/alpha/ghost")
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_goal_progress_post_appends(client, abyss_home):
+    from abyss.goals import add_goal, get_goal
+
+    g = add_goal("alpha", "Ship blog")
+    resp = await client.post(
+        f"/goals/alpha/{g.id}/progress",
+        json={"note": "drafted plan", "value": 1},
+    )
+    assert resp.status == 200
+    timeline = get_goal("alpha", g.id).progress
+    assert timeline[-1].note == "drafted plan"
+    assert timeline[-1].value == 1
+
+
+@pytest.mark.asyncio
+async def test_goal_progress_post_unknown_goal_404(client, abyss_home):
+    resp = await client.post("/goals/alpha/ghost/progress", json={"note": "x"})
+    assert resp.status == 404
+
+
+@pytest.mark.asyncio
+async def test_goal_progress_post_invalid_value_400(client, abyss_home):
+    from abyss.goals import add_goal
+
+    g = add_goal("alpha", "Ship blog")
+    resp = await client.post(
+        f"/goals/alpha/{g.id}/progress",
+        json={"note": "x", "value": "not-a-number"},
+    )
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_goals_routes_reject_invalid_bot_name(client, abyss_home):
+    resp = await client.get("/goals/..%2Fetc")
+    assert resp.status == 400
+
+
+@pytest.mark.asyncio
+async def test_goals_get_bot_not_found_404(client):
+    resp = await client.get("/goals/ghost")
+    assert resp.status == 404
+
+
 @pytest.mark.asyncio
 async def test_about_me_approve_unknown_404(client):
     resp = await client.post("/about-me/entries/identity/ghost/approve")
