@@ -55,9 +55,7 @@ def test_prepare_skill_config_skips_when_fts5_unavailable(
     assert allowed_tools is not None
     for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
         assert tool in allowed_tools
-    assert not any(
-        tool.startswith("mcp__conversation_search__") for tool in allowed_tools
-    )
+    assert not any(tool.startswith("mcp__conversation_search__") for tool in allowed_tools)
     assert (session_dir / ".mcp.json").exists()
 
 
@@ -66,9 +64,7 @@ def test_prepare_skill_config_skips_for_invalid_session_path(
     tmp_path: Path,
 ) -> None:
     """Working directories with no ``bots/<name>/`` ancestor are silently skipped."""
-    from abyss.claude_runner import _prepare_skill_config
-
-    from abyss.claude_runner import PROPOSE_SKILL_ALLOWED_TOOLS
+    from abyss.claude_runner import PROPOSE_SKILL_ALLOWED_TOOLS, _prepare_skill_config
 
     shallow = tmp_path / "shallow"
     shallow.mkdir()
@@ -78,9 +74,7 @@ def test_prepare_skill_config_skips_for_invalid_session_path(
     assert allowed_tools is not None
     for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
         assert tool in allowed_tools
-    assert not any(
-        tool.startswith("mcp__conversation_search__") for tool in allowed_tools
-    )
+    assert not any(tool.startswith("mcp__conversation_search__") for tool in allowed_tools)
     assert (shallow / ".mcp.json").exists()
 
 
