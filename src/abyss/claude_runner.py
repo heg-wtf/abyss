@@ -548,6 +548,10 @@ PROPOSE_SKILL_ALLOWED_TOOLS = [
     "mcp__propose_skill__propose_skill",
 ]
 
+CALL_BOT_ALLOWED_TOOLS = [
+    "mcp__call_bot__call_bot",
+]
+
 
 def _resolve_bot_dir_from_working_directory(working_directory: str) -> Path | None:
     """Walk parents of ``working_directory`` to find the bot root.
@@ -618,6 +622,28 @@ def _conversation_search_mcp_server(working_directory: str) -> dict | None:
     if is_mcp_always_load_enabled():
         entry["alwaysLoad"] = True
     return {"conversation_search": entry}
+
+
+def _call_bot_mcp_server() -> dict | None:
+    """Build the call_bot MCP entry. Always-on per bot.
+
+    Forwards ``ABYSS_HOME`` so the peer-bot lookup works in tests, and
+    seeds ``ABYSS_CALL_BOT_DEPTH`` to "0" so the depth counter starts
+    from a known value (the env is incremented inside the tool before
+    delegating to the peer's LLM).
+    """
+    import sys
+
+    from abyss.config import abyss_home, is_mcp_always_load_enabled
+
+    entry: dict = {
+        "command": sys.executable,
+        "args": ["-m", "abyss.mcp_servers.call_bot"],
+        "env": {"ABYSS_HOME": str(abyss_home()), "ABYSS_CALL_BOT_DEPTH": "0"},
+    }
+    if is_mcp_always_load_enabled():
+        entry["alwaysLoad"] = True
+    return {"call_bot": entry}
 
 
 def _propose_skill_mcp_server() -> dict | None:
@@ -759,6 +785,21 @@ def _prepare_skill_config(
         else:
             mcp_config = {"mcpServers": dict(ps_server)}
         for tool in PROPOSE_SKILL_ALLOWED_TOOLS:
+            if tool not in allowed_tools:
+                allowed_tools.append(tool)
+
+    # Auto-inject call_bot MCP for every bot. Phase 7.0: any bot can
+    # delegate a question to another bot whose personality / memory /
+    # skills are better suited. ``ABYSS_CALL_BOT_DEPTH`` env caps
+    # recursion at 3 — start at 0 here so a top-level bot is depth 0
+    # and its first call_bot bumps the env to 1.
+    cb_server = _call_bot_mcp_server()
+    if cb_server is not None:
+        if mcp_config:
+            mcp_config["mcpServers"].update(cb_server)
+        else:
+            mcp_config = {"mcpServers": dict(cb_server)}
+        for tool in CALL_BOT_ALLOWED_TOOLS:
             if tool not in allowed_tools:
                 allowed_tools.append(tool)
 

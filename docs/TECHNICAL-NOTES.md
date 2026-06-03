@@ -1566,3 +1566,85 @@ edit this row by hand" — yaml lets that happen.
   doesn't surface in another bot's queue.
 - Auto-revoke of an `approved` skill from `bot.yaml` if the user later
   changes their mind — use `abyss skills remove` for that.
+
+
+## call_bot — Phase 7.0 cross-bot delegation
+
+### Why it exists
+
+Phase 7 of the co-evolution roadmap wants multi-bot collaboration. The
+full vision (`@mention` routing, multi-bot PWA sessions) is a UI
+surface change; the underlying primitive — letting one bot ask another
+bot for help — is independent and can ship first. Phase 7.0 is just
+that primitive.
+
+### The mechanism
+
+`mcp_servers/call_bot.py` exposes a single stdio MCP tool:
+
+```
+call_bot(bot: str, message: str, timeout?: number) → text
+```
+
+When a bot invokes it the server:
+
+1. Resolves the caller from `cwd` (same heuristic as
+   `conversation_search` / `recall_fact`).
+2. Rejects self-call, unknown peer, empty / oversized message
+   (`MAX_MESSAGE_BYTES = 4096`).
+3. Checks the `ABYSS_CALL_BOT_DEPTH` env. Refuses to recurse past
+   `MAX_DEPTH = 3` so a `A → B → A → ...` cycle can't burn unbounded
+   tokens.
+4. Bumps the env to `depth+1`, calls
+   `llm.registry.get_or_create(peer, peer_config)` (same SDK pool
+   as chat / cron / heartbeat) with
+   `LLMRequest(session_key="peer_call:<caller>:<peer>:<depth>",
+   working_directory=bots/<peer>/peer_call_sessions/from_<caller>/)`.
+5. Restores the env to the original depth (so unrelated sibling
+   tools don't see an inflated counter) and returns the peer's
+   reply text.
+
+The session key encodes caller + peer + post-increment depth, so each
+nested call gets its own pool slot — no race between sibling calls.
+
+### Why a per-call working directory
+
+`bots/<peer>/peer_call_sessions/from_<caller>/` is a separate
+namespace from the peer's normal chat sessions
+(`bots/<peer>/sessions/chat_*`). Reasons:
+
+- Cron / heartbeat / chat for the peer each use distinct cwds today;
+  call_bot adds another. Keeping audit logs separate lets the user
+  see "what did kim do when anne pinged her" without it polluting
+  kim's normal conversation history.
+- The peer's own `CLAUDE.md` injection still happens — peer reads
+  its own personality / MEMORY / SELF / facts / skills from disk.
+- The peer doesn't see the caller's session history. The bot's
+  prompt is whatever `message` the caller sent. If context is
+  needed, the caller has to include it.
+
+### Always-on injection
+
+`claude_runner._prepare_skill_config` attaches `call_bot` for every
+bot (no gate condition, same as `propose_skill`). The tool itself
+must exist before any bot has anything to delegate.
+
+### Loop guard details
+
+The env counter survives spawn because Claude Code propagates the
+parent env to child MCP servers. So if A calls B (depth 0→1), and
+B's run spawns another `call_bot` (B → C, depth 1→2), and C tries
+to recurse (depth 2→3 would be allowed, 3→4 is refused), the chain
+caps cleanly at three live frames. Each call also restores the env
+on the way out so a sibling `call_bot` invocation that ran *after*
+a nested one doesn't see inflated state.
+
+### Out of scope
+
+- `@mention` chat routing in the chat server (Phase 7.1).
+- Multi-bot PWA sessions (one screen, many bots).
+- Letting the peer reuse its own running chat session — current
+  design is single-turn per call.
+- Caller-identity-aware peer behaviour — peer doesn't get told who
+  pinged it. The `from_<caller>/` directory exists for audit, not
+  for behaviour switching.

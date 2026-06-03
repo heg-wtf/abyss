@@ -1,7 +1,7 @@
 # Plan: Phase 7.0 — call_bot MCP (orchestrator pattern)
 
 - date: 2026-06-03
-- status: approved
+- status: done
 - author: claude
 - approved-by: ash84
 
