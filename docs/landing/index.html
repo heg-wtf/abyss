@@ -9,11 +9,11 @@
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
     <meta
       name="description"
-      content="abyss is an open-source, local-first personal AI assistant built on Claude Code. Multi-bot, file-based, with a mobile PWA and a web dashboard. Runs on your Mac."
+      content="abyss is an open-source, local-first personal AI built on Claude Code. The bots reflect, recall, propose skills, track goals, delegate to each other, and detect their own drift — eight co-evolution axes shipping today."
     />
     <meta
       name="keywords"
-      content="abyss, claude code, personal AI, local-first, multi-bot, mobile PWA, skill system, conversation search, cron, web push, automation, Mac"
+      content="abyss, claude code, personal AI, local-first, multi-bot, co-evolution, self-reflection, persona drift, skill autonomy, goal tracking, mobile PWA, automation, Mac"
     />
     <meta name="author" content="HEG" />
     <meta name="robots" content="index, follow" />
@@ -21,7 +21,7 @@
     <meta property="og:title" content="abyss — Your personal AI, right in your hand." />
     <meta
       property="og:description"
-      content="Open-source, local-first personal AI built on Claude Code. Multi-bot. File-based. Mobile PWA + web dashboard. Your data, your machine."
+      content="The bots reflect, recall, propose skills, track goals, delegate to each other, and detect their own drift. Local-first. Built on Claude Code."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://abyss.heg.wtf" />
@@ -30,7 +30,7 @@
     <meta name="twitter:title" content="abyss — Your personal AI, right in your hand." />
     <meta
       name="twitter:description"
-      content="Open-source, local-first personal AI built on Claude Code. Multi-bot. File-based. Mobile PWA + web dashboard."
+      content="The bots reflect, recall, propose skills, track goals, delegate to each other, and detect their own drift. Local-first. Built on Claude Code."
     />
 
     <link rel="canonical" href="https://abyss.heg.wtf" />
@@ -257,6 +257,87 @@
         min-width: 24px;
       }
 
+      /* CO-EVOLUTION */
+      section.coevolution {
+        padding: 160px 0;
+        border-top: 1px solid var(--hairline);
+      }
+      .coev-header {
+        margin-bottom: 64px;
+      }
+      .coev-header h2 {
+        font-family: "Newsreader", serif;
+        font-weight: 200;
+        font-size: clamp(40px, 5vw, 64px);
+        line-height: 1.1;
+        letter-spacing: -0.01em;
+        margin: 32px 0 0;
+      }
+      .coev-header h2 i { font-style: italic; }
+      .coev-lede {
+        margin-top: 28px;
+        font-family: "Newsreader", serif;
+        font-weight: 300;
+        font-size: 19px;
+        line-height: 1.6;
+        max-width: 720px;
+        color: var(--muted);
+      }
+      .coev-grid {
+        display: grid;
+        grid-template-columns: 80px 1fr;
+        gap: 28px 36px;
+        align-items: baseline;
+      }
+      .coev-row {
+        display: contents;
+      }
+      .coev-row .num {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: var(--muted);
+        padding-top: 8px;
+        border-top: 1px solid var(--hairline);
+      }
+      .coev-row .body {
+        border-top: 1px solid var(--hairline);
+        padding-top: 8px;
+      }
+      .coev-row h3 {
+        font-family: "Newsreader", serif;
+        font-weight: 300;
+        font-size: 22px;
+        line-height: 1.3;
+        margin: 0 0 6px;
+        color: var(--fg);
+      }
+      .coev-row h3 .mono-tag {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin-left: 10px;
+        text-transform: uppercase;
+      }
+      .coev-row p {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--muted);
+      }
+      @media (max-width: 720px) {
+        .coev-grid {
+          grid-template-columns: 1fr;
+          gap: 24px;
+        }
+        .coev-row .num {
+          padding-top: 0;
+          border-top: 0;
+          margin-bottom: -8px;
+        }
+      }
+
       /* CAPABILITIES */
       section.capabilities {
         padding: 160px 0;
@@ -390,8 +471,9 @@
               right in your hand.
             </h1>
             <p class="lede">
-              Local-first. Multi-bot. Built on Claude Code. No server, no
-              database, no cloud lock-in.
+              Local-first. Multi-bot. Built on Claude Code. The bots
+              reflect, recall, and ask for new skills — abyss evolves
+              with you, not the other way around.
             </p>
             <div class="cta">
               <a href="#install" class="link-underlined">Install →</a>
@@ -438,30 +520,106 @@
             <div class="mono">ABYSS CORE</div>
             <ul>
               <li>multi-bot manager</li>
-              <li>file sessions</li>
-              <li>skills</li>
-              <li>cron</li>
-              <li>heartbeat</li>
+              <li>self-reflection</li>
+              <li>episodic + facts</li>
+              <li>goal tracking</li>
+              <li>persona drift</li>
+              <li>cron + heartbeat</li>
             </ul>
           </div>
           <div class="arch-arrow">⟷</div>
           <div class="arch-box">
             <div class="mono">DASHBOARD</div>
             <ul>
-              <li>web ui</li>
               <li>localhost:3847</li>
-              <li>sessions</li>
-              <li>memory</li>
+              <li>sessions + memory</li>
+              <li>episodes + facts</li>
+              <li>goals + persona</li>
+              <li>skill proposals</li>
             </ul>
           </div>
         </div>
       </section>
     </div>
 
+    <section class="coevolution">
+      <div class="container">
+        <div class="coev-header">
+          <div class="mono">02 — CO-EVOLUTION LOOP</div>
+          <div class="gold-hairline"></div>
+          <h2>The bot <i>grows</i> with you.</h2>
+          <p class="coev-lede">
+            Personal AI loses to time. Tone flattens, memories rot,
+            blind spots compound. abyss closes the loop in eight
+            axes — every one of them shipping today.
+          </p>
+        </div>
+
+        <div class="coev-grid">
+          <div class="coev-row">
+            <div class="num">01</div>
+            <div class="body">
+              <h3>Numeric feedback <span class="mono-tag">1 / 2 / 3</span></h3>
+              <p>Every assistant turn gets a 1 / 2 / 3 pill. The signal lands in <code>feedback.jsonl</code> and feeds reflection.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">02</div>
+            <div class="body">
+              <h3>Shared user knowledge <span class="mono-tag">ABOUT_ME</span></h3>
+              <p>Bots propose entries into seven categories of who you are; you confirm with one tap. Every bot reads the same canon.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">03</div>
+            <div class="body">
+              <h3>Self-reflection <span class="mono-tag">SELF.md</span></h3>
+              <p>A weekly reflection cron rewrites the bot&rsquo;s private notebook of mistake patterns and self-correction rules.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">04</div>
+            <div class="body">
+              <h3>Episodic → semantic <span class="mono-tag">episodes.jsonl · facts.db</span></h3>
+              <p>Nightly extraction turns yesterday&rsquo;s conversation into a structured fact store the bot can recall on demand.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">05</div>
+            <div class="body">
+              <h3>Skill autonomy <span class="mono-tag">propose_skill</span></h3>
+              <p>Bot notices a missing capability, proposes a GitHub repo, you approve in one tap — abyss clones &amp; attaches it.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">06</div>
+            <div class="body">
+              <h3>Goal tracking <span class="mono-tag">goals.yaml</span></h3>
+              <p>Per-bot sub-goals with KPI, target, and an append-only progress timeline. Weekly digest cron summarises movement.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">07</div>
+            <div class="body">
+              <h3>Cross-bot delegation <span class="mono-tag">call_bot</span></h3>
+              <p>Any bot can ask another bot for help. The peer answers with its own personality, memory, and skills.</p>
+            </div>
+          </div>
+          <div class="coev-row">
+            <div class="num">08</div>
+            <div class="body">
+              <h3>Persona drift <span class="mono-tag">persona_snapshots.jsonl</span></h3>
+              <p>Daily hash + section sizes of the composed CLAUDE.md. Compact eats your personality? You get a push notification.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="capabilities">
       <div class="container">
         <div class="cap-header">
-          <div class="mono">02 — CAPABILITIES</div>
+          <div class="mono">03 — CAPABILITIES</div>
           <div class="gold-hairline"></div>
           <h2>Built for <i>power</i> users.</h2>
         </div>
@@ -489,8 +647,8 @@
           </div>
           <div class="cap-card">
             <div class="num">05</div>
-            <h3>Group Collaboration</h3>
-            <p>Multiple bots in one shared workspace.</p>
+            <h3>Cross-Bot Delegation</h3>
+            <p>One bot calls another via the <code>call_bot</code> MCP. Depth-capped.</p>
           </div>
           <div class="cap-card">
             <div class="num">06</div>
@@ -522,11 +680,15 @@
             <h3>Voice Chat</h3>
             <p>ElevenLabs Scribe + TTS streaming, hands-free.</p>
           </div>
-          <div class="cap-card empty"></div>
+          <div class="cap-card">
+            <div class="num">12</div>
+            <h3>Persona Drift Alert</h3>
+            <p>Daily snapshot of composed CLAUDE.md. Compact eats personality &rarr; you get pushed.</p>
+          </div>
         </div>
 
         <div class="cap-coda">
-          Seventeen built-in skills. One CLI. Your data, your machine.
+          Eight co-evolution axes. One CLI. Your data, your machine.
         </div>
       </div>
     </section>
