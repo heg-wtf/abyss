@@ -1,0 +1,22 @@
+name: linear
+emoji: "\U0001F4DD"
+description: "Linear issue tracking via official OAuth MCP (search, create, update, comment)"
+type: mcp
+status: inactive
+allowed_tools:
+  # Workspace lookup
+  - "mcp__linear__list_teams"
+  - "mcp__linear__list_projects"
+  - "mcp__linear__list_users"
+  - "mcp__linear__list_workflow_states"
+  - "mcp__linear__list_issue_labels"
+  - "mcp__linear__list_cycles"
+  # Search & read
+  - "mcp__linear__search_issues"
+  - "mcp__linear__list_my_issues"
+  - "mcp__linear__get_issue"
+  - "mcp__linear__list_comments"
+  # Create / update (must confirm before calling)
+  - "mcp__linear__create_issue"
+  - "mcp__linear__update_issue"
+  - "mcp__linear__create_comment"

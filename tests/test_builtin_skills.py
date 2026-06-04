@@ -671,6 +671,101 @@ def test_jira_mcp_config_merges(temp_abyss_home):
     assert "jira" in merged["mcpServers"]
 
 
+# --- Linear Built-in Skill Tests ---
+
+
+def test_list_builtin_skills_returns_linear():
+    """list_builtin_skills includes the linear skill."""
+    skills = list_builtin_skills()
+    names = [skill["name"] for skill in skills]
+    assert "linear" in names
+
+    linear = next(skill for skill in skills if skill["name"] == "linear")
+    assert linear["description"] != ""
+    assert linear["path"].is_dir()
+
+
+def test_get_builtin_skill_path_linear():
+    """get_builtin_skill_path returns path for linear skill."""
+    path = get_builtin_skill_path("linear")
+    assert path is not None
+    assert (path / "SKILL.md").exists()
+    assert (path / "skill.yaml").exists()
+    assert (path / "mcp.json").exists()
+
+
+def test_is_builtin_skill_linear():
+    """is_builtin_skill returns True for linear."""
+    assert is_builtin_skill("linear") is True
+
+
+def test_install_builtin_skill_linear(temp_abyss_home):
+    """install_builtin_skill creates the linear skill directory with files."""
+    directory = install_builtin_skill("linear")
+    assert directory.exists()
+    assert directory == temp_abyss_home / "skills" / "linear"
+    assert (directory / "SKILL.md").exists()
+    assert (directory / "skill.yaml").exists()
+    assert (directory / "mcp.json").exists()
+
+    # SKILL.md surfaces safety + auth guidance.
+    skill_md_content = (directory / "SKILL.md").read_text()
+    assert "confirm" in skill_md_content.lower()
+    assert "OAuth" in skill_md_content
+    assert "search_issues" in skill_md_content
+    assert "create_issue" in skill_md_content
+
+    # skill.yaml: HTTP MCP type, OAuth-only (no env vars / required commands).
+    with open(directory / "skill.yaml") as file:
+        config = yaml.safe_load(file)
+    assert config["name"] == "linear"
+    assert config["type"] == "mcp"
+    assert "required_commands" not in config, (
+        "Linear uses hosted HTTP MCP; no local binary should be required."
+    )
+    assert "environment_variables" not in config, (
+        "Linear uses OAuth via Claude Code; should not require env vars."
+    )
+    assert "allowed_tools" in config
+    assert "mcp__linear__search_issues" in config["allowed_tools"]
+    assert "mcp__linear__list_my_issues" in config["allowed_tools"]
+    assert "mcp__linear__get_issue" in config["allowed_tools"]
+    assert "mcp__linear__create_issue" in config["allowed_tools"]
+    assert "mcp__linear__update_issue" in config["allowed_tools"]
+    assert "mcp__linear__create_comment" in config["allowed_tools"]
+
+    # mcp.json: HTTP transport pointing at Linear's official endpoint.
+    import json
+
+    with open(directory / "mcp.json") as file:
+        mcp_config = json.load(file)
+    assert "mcpServers" in mcp_config
+    assert "linear" in mcp_config["mcpServers"]
+    assert mcp_config["mcpServers"]["linear"]["type"] == "http"
+    assert mcp_config["mcpServers"]["linear"]["url"] == "https://mcp.linear.app/mcp"
+
+
+def test_installed_linear_skill_starts_inactive(temp_abyss_home):
+    """Installed linear skill starts with inactive status."""
+    install_builtin_skill("linear")
+    assert skill_status("linear") == "inactive"
+
+
+def test_linear_mcp_config_merges(temp_abyss_home):
+    """Linear mcp.json integrates with merge_mcp_configs."""
+    from abyss.skill import load_skill_mcp_config, merge_mcp_configs
+
+    install_builtin_skill("linear")
+
+    mcp_config = load_skill_mcp_config("linear")
+    assert mcp_config is not None
+    assert "linear" in mcp_config["mcpServers"]
+
+    merged = merge_mcp_configs(["linear"])
+    assert merged is not None
+    assert "linear" in merged["mcpServers"]
+
+
 # --- Translate Skill Tests ---
 
 
