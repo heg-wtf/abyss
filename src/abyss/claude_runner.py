@@ -19,6 +19,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 300
@@ -642,14 +644,25 @@ def _conversation_search_mcp_server(working_directory: str) -> dict | None:
     return {"conversation_search": entry}
 
 
-def _record_progress_mcp_server() -> dict | None:
-    """Build the record_progress MCP entry. Always-on per bot.
+def _record_progress_mcp_server(bot_dir: Path) -> dict | None:
+    """Build the record_progress MCP entry when the bot has goals.
 
-    The server reads ``ABYSS_HOME`` to locate the goals.yaml file.
+    Gated on ``goals.yaml`` existing and parsing to a non-empty list —
+    same usage-signal pattern as ``recall_fact`` (gates on
+    ``facts.db``). A bot with no goals can never legally call
+    ``record_progress``, so spawning the server would be pure cost.
+    Once the human (or a future CLI flow) writes the first goal, the
+    next new session picks the MCP up automatically.
+
+    The server itself reads ``ABYSS_HOME`` and resolves the goal store
+    via cwd walking; this gate is purely about whether to spawn it.
     """
     import sys
 
     from abyss.config import abyss_home, is_mcp_always_load_enabled
+
+    if not _has_active_goals(bot_dir):
+        return None
 
     entry: dict = {
         "command": sys.executable,
@@ -661,8 +674,33 @@ def _record_progress_mcp_server() -> dict | None:
     return {"record_progress": entry}
 
 
+def _has_active_goals(bot_dir: Path) -> bool:
+    """Return True iff ``bot_dir/goals.yaml`` parses to a non-empty list.
+
+    Malformed YAML, missing file, or empty list all map to False. We
+    intentionally avoid importing ``abyss.goals`` here to keep the
+    gate cheap (no slug regex compile, no Goal dataclass build) — the
+    MCP injection path runs on every chat turn that creates a new
+    session.
+    """
+    path = bot_dir / "goals.yaml"
+    if not path.exists():
+        return False
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, OSError):
+        return False
+    return isinstance(data, list) and len(data) > 0
+
+
 def _call_bot_mcp_server() -> dict | None:
-    """Build the call_bot MCP entry. Always-on per bot.
+    """Build the call_bot MCP entry when the host has peers to delegate to.
+
+    Gated on ``len(config.bots) > 1`` — a single-bot install can never
+    legally delegate, so spawning the server would be pure cost. When
+    config.yaml is unreadable (test isolation with no ABYSS_HOME, etc.)
+    we **conservatively keep the MCP on**: bots in production already
+    have config, and a silent gate-off there would be surprising.
 
     Forwards ``ABYSS_HOME`` so the peer-bot lookup works in tests, and
     seeds ``ABYSS_CALL_BOT_DEPTH`` to "0" so the depth counter starts
@@ -671,7 +709,16 @@ def _call_bot_mcp_server() -> dict | None:
     """
     import sys
 
-    from abyss.config import abyss_home, is_mcp_always_load_enabled
+    from abyss.config import abyss_home, is_mcp_always_load_enabled, load_config
+
+    try:
+        cfg = load_config()
+    except Exception:  # noqa: BLE001 — best effort; fall through to attach
+        cfg = None
+    if cfg is not None:
+        bots = cfg.get("bots") or []
+        if isinstance(bots, list) and len(bots) < 2:
+            return None
 
     entry: dict = {
         "command": sys.executable,
@@ -825,11 +872,13 @@ def _prepare_skill_config(
             if tool not in allowed_tools:
                 allowed_tools.append(tool)
 
-    # Auto-inject call_bot MCP for every bot. Phase 7.0: any bot can
-    # delegate a question to another bot whose personality / memory /
-    # skills are better suited. ``ABYSS_CALL_BOT_DEPTH`` env caps
-    # recursion at 3 — start at 0 here so a top-level bot is depth 0
-    # and its first call_bot bumps the env to 1.
+    # Auto-inject call_bot MCP when the host has more than one bot
+    # configured. Phase 7.0: any bot can delegate a question to another
+    # bot whose personality / memory / skills are better suited. A
+    # single-bot install has no peers, so we skip the spawn cost.
+    # ``ABYSS_CALL_BOT_DEPTH`` env caps recursion at 3 — start at 0
+    # here so a top-level bot is depth 0 and its first call_bot bumps
+    # the env to 1.
     cb_server = _call_bot_mcp_server()
     if cb_server is not None:
         if mcp_config:
@@ -840,25 +889,32 @@ def _prepare_skill_config(
             if tool not in allowed_tools:
                 allowed_tools.append(tool)
 
-    # Auto-inject record_progress MCP for every bot. Phase 6: the bot
-    # can log progress on any goal the human already defined in
-    # goals.yaml. No gate condition — the tool is always available,
-    # it just errors out cleanly when goals.yaml is empty.
-    rp_server = _record_progress_mcp_server()
-    if rp_server is not None:
-        if mcp_config:
-            mcp_config["mcpServers"].update(rp_server)
-        else:
-            mcp_config = {"mcpServers": dict(rp_server)}
-        for tool in RECORD_PROGRESS_ALLOWED_TOOLS:
-            if tool not in allowed_tools:
-                allowed_tools.append(tool)
+    # Bot-scoped MCP gates below all need ``bots/<name>/``. Resolve
+    # once so we don't walk parent dirs three times on every chat turn.
+    bot_dir_for_gates = _resolve_bot_dir_from_working_directory(working_directory)
+
+    # Auto-inject record_progress MCP when the bot has at least one
+    # goal in ``goals.yaml``. Phase 6+: bots with no goals can never
+    # call ``record_progress`` legally, so spawning the server would be
+    # pure cold-start cost. Mirrors the ``recall_fact`` gate on
+    # ``facts.db``. The next new session picks the MCP up automatically
+    # once the human writes the first goal via the CLI / dashboard.
+    if bot_dir_for_gates is not None:
+        rp_server = _record_progress_mcp_server(bot_dir_for_gates)
+        if rp_server is not None:
+            if mcp_config:
+                mcp_config["mcpServers"].update(rp_server)
+            else:
+                mcp_config = {"mcpServers": dict(rp_server)}
+            for tool in RECORD_PROGRESS_ALLOWED_TOOLS:
+                if tool not in allowed_tools:
+                    allowed_tools.append(tool)
 
     # Auto-inject recall_fact MCP when the bot has a facts.db. The bot
     # resolves the same way as conversation_search; we only attach the
     # server when the structured store actually exists so a fresh bot
     # with no extraction history doesn't pay the spawn cost.
-    rf_bot_dir = _resolve_bot_dir_from_working_directory(working_directory)
+    rf_bot_dir = bot_dir_for_gates
     if rf_bot_dir is not None and (rf_bot_dir / "facts.db").exists():
         rf_server = _recall_fact_mcp_server(rf_bot_dir)
         if rf_server is not None:
