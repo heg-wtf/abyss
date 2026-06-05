@@ -779,6 +779,50 @@ SKILL.md enforces confirmation before creating issues and before transitioning w
 
 Only 5 tools are auto-approved: `jira_search`, `jira_get_issue`, `jira_create_issue`, `jira_update_issue`, `jira_transition_issue`. The `mcp-atlassian` package also provides Confluence tools, but they are not listed in `allowed_tools` and therefore blocked in `-p` mode.
 
+## Linear MCP Skill
+
+### Why a stdio Linear MCP, not the hosted OAuth one
+
+Linear publishes an official hosted MCP at `https://mcp.linear.app/mcp` (HTTP transport, OAuth 2.1 with dynamic client registration). The official Claude Code `linear` plugin uses this hosted server. **It does not work for abyss bots**, and this is a structural limitation, not a configuration mistake.
+
+When Claude Code's MCP client encounters a hosted OAuth MCP that needs auth, it spins up a localhost HTTP listener on an ephemeral port (e.g., `http://localhost:55920/callback`) and emits an authorization URL the user is expected to open in a browser. The OAuth callback hits that local listener, which then completes the token exchange and persists credentials.
+
+abyss runs each chat turn as a fresh `claude -p` subprocess (or a pooled `ClaudeSDKClient` whose lifetime is bounded by `--resume`). When the bot emits the OAuth URL in its reply, the **turn ends** — the subprocess (and its callback listener) terminates seconds later. By the time the user finishes authorizing in the browser, the listener is gone and the callback hits `ERR_CONNECTION_REFUSED`. There is no path to keep the listener alive across turns without rearchitecting Claude Code's MCP layer.
+
+Even if the listener survived, the OAuth token Claude Code stores is keyed to that interactive session's context and is not visible to fresh `claude -p` invocations.
+
+→ Conclusion: hosted-OAuth MCPs are fundamentally incompatible with abyss. The builtin `linear` skill uses [`@tacticlaunch/mcp-linear`](https://www.npmjs.com/package/@tacticlaunch/mcp-linear), a stdio MCP server that authenticates via a personal API token. The user generates the token once (Linear → Settings → API → Create new personal API key) and stores it via `abyss skills setup linear`. The token lives in `~/.abyss/skills/linear/skill.yaml` under `environment_variable_values.LINEAR_API_TOKEN`.
+
+This same rule applies to any other hosted-OAuth MCP: prefer the stdio variant with an API token / personal access token over the OAuth-redirected hosted one.
+
+### MCP Env Propagation: `/bin/sh -c` Wrapper
+
+Even with the token stored in `skill.yaml`, abyss's first attempt with a plain `npx -y @tacticlaunch/mcp-linear` config failed — the MCP server reported `Linear API token not found`. The root cause is that Claude Code's MCP subprocess spawn does not reliably propagate `ClaudeAgentOptions.env` to the MCP child process under every release (env appears to be scrubbed in some code paths).
+
+The fix mirrors the existing `twitter` skill: wrap the spawn in `/bin/sh -c` and interpolate the env var inline, then `exec` into npx so the MCP server's PID is the actual Node process (clean signal forwarding, no zombie shell).
+
+```json
+{
+  "mcpServers": {
+    "linear": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "LINEAR_API_TOKEN=\"$LINEAR_API_TOKEN\" exec npx -y @tacticlaunch/mcp-linear"
+      ]
+    }
+  }
+}
+```
+
+`$LINEAR_API_TOKEN` resolves from the shell's own env (which IS inherited from the claude subprocess), so the value reaches the MCP server deterministically. The token literal never appears in `mcp.json` — a regression test pins `lin_api_` absence so a future edit cannot bake the secret into the repo.
+
+This pattern is the canonical recipe for any abyss MCP skill that needs to forward a credential to an npx-launched server. Use it whenever a new MCP package requires an env var.
+
+### Allowed Tools
+
+27 tools are auto-approved, covering: workspace lookup (viewer/teams/users/labels/projects/cycles), issue read (search/get/history/comments), issue create + update, comment create, partial mutators (assignIssue / setIssuePriority / addIssueLabel / removeIssueLabel), and membership management (addIssueToProject / addIssueToCycle / removeIssueFromCycle / subscribeToIssue). All bulk-destructive operations from the upstream package (`linear_delete*`, `linear_archive*`) are deliberately excluded from the whitelist and therefore blocked in `-p` mode. SKILL.md enforces the confirm-before-mutating rule for everything that creates or changes state.
+
 ## Token Compact
 
 ### Target Selection
