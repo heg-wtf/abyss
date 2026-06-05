@@ -1,8 +1,11 @@
 {
   "mcpServers": {
     "linear": {
-      "command": "npx",
-      "args": ["-y", "@tacticlaunch/mcp-linear"]
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "LINEAR_API_TOKEN=\"$LINEAR_API_TOKEN\" exec npx -y @tacticlaunch/mcp-linear"
+      ]
     }
   }
 }

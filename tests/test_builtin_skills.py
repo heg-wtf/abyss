@@ -749,19 +749,36 @@ def test_install_builtin_skill_linear(temp_abyss_home):
         tool.startswith("mcp__linear__linear_archive") for tool in config["allowed_tools"]
     )
 
-    # mcp.json: stdio transport via npx, no embedded credentials.
+    # mcp.json: stdio transport via /bin/sh -c so the LINEAR_API_TOKEN env
+    # var is interpolated into the spawn command line. This mirrors the
+    # ``twitter`` builtin skill's pattern — Claude Code's MCP subprocess
+    # spawn does NOT reliably inherit the parent claude process's env in
+    # every release, so we wrap the npx invocation in a shell that reads
+    # the var from its own env (which IS inherited).
     import json
 
     with open(directory / "mcp.json") as file:
         mcp_config = json.load(file)
     assert "mcpServers" in mcp_config
     server = mcp_config["mcpServers"]["linear"]
-    assert server["command"] == "npx"
-    assert server["args"] == ["-y", "@tacticlaunch/mcp-linear"]
-    # The token lives in the host env (LINEAR_API_TOKEN), never in this
-    # file. Pinning the absence here so a future edit doesn't bake a
-    # secret into the repo.
-    assert "env" not in server
+    assert server["command"] == "/bin/sh"
+    assert server["args"][0] == "-c"
+    # The shell wrapper must reference $LINEAR_API_TOKEN so the value
+    # propagates into the npx subprocess's env. ``exec`` keeps PID 1 of
+    # the MCP server on the npx process for clean signal forwarding.
+    assert "LINEAR_API_TOKEN" in server["args"][1]
+    assert "$LINEAR_API_TOKEN" in server["args"][1]
+    assert "npx -y @tacticlaunch/mcp-linear" in server["args"][1]
+    assert "exec " in server["args"][1]
+    # The token must NOT be baked into this file — only the env var
+    # reference. Guard against a future edit accidentally pasting in
+    # the literal token.
+    assert "lin_api_" not in json.dumps(mcp_config), (
+        "mcp.json must reference $LINEAR_API_TOKEN, never the token literal."
+    )
+    assert "env" not in server, (
+        "Token lives in the host env (LINEAR_API_TOKEN); do not embed it here."
+    )
     assert "type" not in server, "Default stdio transport — explicit 'type' would shadow stdio."
     assert "url" not in server, "stdio MCP must not carry an http URL."
 
