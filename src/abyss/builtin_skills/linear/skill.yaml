@@ -10,33 +10,11 @@ install_hints:
 environment_variables:
   - LINEAR_API_TOKEN
 allowed_tools:
-  # Workspace lookup
-  - "mcp__linear__linear_getViewer"
-  - "mcp__linear__linear_getOrganization"
-  - "mcp__linear__linear_getUsers"
-  - "mcp__linear__linear_getLabels"
-  - "mcp__linear__linear_getTeams"
-  - "mcp__linear__linear_getWorkflowStates"
-  - "mcp__linear__linear_getProjects"
-  - "mcp__linear__linear_getCycles"
-  - "mcp__linear__linear_getActiveCycle"
-  # Search & read
-  - "mcp__linear__linear_searchIssues"
-  - "mcp__linear__linear_getIssues"
-  - "mcp__linear__linear_getIssueById"
-  - "mcp__linear__linear_getComments"
-  - "mcp__linear__linear_getIssueHistory"
-  - "mcp__linear__linear_getCycleIssues"
-  - "mcp__linear__linear_getProjectIssues"
-  # Create / update (must confirm before calling)
-  - "mcp__linear__linear_createIssue"
-  - "mcp__linear__linear_updateIssue"
-  - "mcp__linear__linear_createComment"
-  - "mcp__linear__linear_assignIssue"
-  - "mcp__linear__linear_setIssuePriority"
-  - "mcp__linear__linear_addIssueLabel"
-  - "mcp__linear__linear_removeIssueLabel"
-  - "mcp__linear__linear_addIssueToProject"
-  - "mcp__linear__linear_addIssueToCycle"
-  - "mcp__linear__linear_removeIssueFromCycle"
-  - "mcp__linear__linear_subscribeToIssue"
+  # Open the whole Linear surface — the upstream package exposes ~140
+  # tools (issues / projects / cycles / roadmaps / releases / docs /
+  # webhooks / audit). Enumerating each one bloats the whitelist and
+  # silently denies any tool the bot legitimately needs but we forgot
+  # to list (caught in production via ``linear_createProject``).
+  # SKILL.md still enforces "confirm-before-mutating" as a behavioral
+  # rule, so this is a permission grant, not a safety bypass.
+  - "mcp__linear__*"
