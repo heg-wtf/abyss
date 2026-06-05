@@ -725,8 +725,7 @@ def test_install_builtin_skill_linear(temp_abyss_home):
         "Linear MCP spawns via npx; the host must have Node installed."
     )
     assert config["environment_variables"] == ["LINEAR_API_TOKEN"], (
-        "@tacticlaunch/mcp-linear reads its credential from LINEAR_API_TOKEN "
-        "(not LINEAR_API_KEY)."
+        "@tacticlaunch/mcp-linear reads its credential from LINEAR_API_TOKEN (not LINEAR_API_KEY)."
     )
     assert "allowed_tools" in config
     # Read tools — workspace lookup + issue search/read.
@@ -763,9 +762,7 @@ def test_install_builtin_skill_linear(temp_abyss_home):
     # file. Pinning the absence here so a future edit doesn't bake a
     # secret into the repo.
     assert "env" not in server
-    assert "type" not in server, (
-        "Default stdio transport — explicit 'type' would shadow stdio."
-    )
+    assert "type" not in server, "Default stdio transport — explicit 'type' would shadow stdio."
     assert "url" not in server, "stdio MCP must not carry an http URL."
 
 
