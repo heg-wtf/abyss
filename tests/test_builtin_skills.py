@@ -728,25 +728,19 @@ def test_install_builtin_skill_linear(temp_abyss_home):
         "@tacticlaunch/mcp-linear reads its credential from LINEAR_API_TOKEN (not LINEAR_API_KEY)."
     )
     assert "allowed_tools" in config
-    # Read tools — workspace lookup + issue search/read.
-    assert "mcp__linear__linear_getViewer" in config["allowed_tools"]
-    assert "mcp__linear__linear_getTeams" in config["allowed_tools"]
-    assert "mcp__linear__linear_searchIssues" in config["allowed_tools"]
-    assert "mcp__linear__linear_getIssueById" in config["allowed_tools"]
-    # Mutating tools — must be present (UI flow), but every call requires
-    # explicit confirmation per the SKILL.md safety rule.
-    assert "mcp__linear__linear_createIssue" in config["allowed_tools"]
-    assert "mcp__linear__linear_updateIssue" in config["allowed_tools"]
-    assert "mcp__linear__linear_createComment" in config["allowed_tools"]
-
-    # Deny-by-default: bulk-destructive operations stay out of the
-    # whitelist so a chatty bot can't accidentally archive a project or
-    # delete a release.
-    assert not any(
-        tool.startswith("mcp__linear__linear_delete") for tool in config["allowed_tools"]
-    )
-    assert not any(
-        tool.startswith("mcp__linear__linear_archive") for tool in config["allowed_tools"]
+    # The whitelist grants the entire Linear MCP surface via the
+    # ``mcp__linear__*`` wildcard — the upstream package exposes ~140
+    # tools (issues / projects / cycles / roadmaps / releases / docs /
+    # webhooks / audit) and an explicit enumeration silently denied
+    # tools the bot legitimately needed (caught when
+    # ``linear_createProject`` was missing from the prior enumerated
+    # list). SKILL.md still enforces confirm-before-mutating as a
+    # behavioral rule, so this is a permission grant, not a safety
+    # bypass.
+    assert config["allowed_tools"] == ["mcp__linear__*"], (
+        "Linear uses a single wildcard so future upstream tools auto-attach. "
+        "If a specific tool needs to be denied, do it via a dedicated "
+        "permissions.deny in settings.json — not by shrinking this list."
     )
 
     # mcp.json: stdio transport via /bin/sh -c so the LINEAR_API_TOKEN env
