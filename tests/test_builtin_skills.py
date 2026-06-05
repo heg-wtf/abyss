@@ -711,38 +711,62 @@ def test_install_builtin_skill_linear(temp_abyss_home):
     # SKILL.md surfaces safety + auth guidance.
     skill_md_content = (directory / "SKILL.md").read_text()
     assert "confirm" in skill_md_content.lower()
-    assert "OAuth" in skill_md_content
-    assert "search_issues" in skill_md_content
-    assert "create_issue" in skill_md_content
+    assert "LINEAR_API_TOKEN" in skill_md_content
+    assert "linear_searchIssues" in skill_md_content
+    assert "linear_createIssue" in skill_md_content
+    assert "@tacticlaunch/mcp-linear" in skill_md_content
 
-    # skill.yaml: HTTP MCP type, OAuth-only (no env vars / required commands).
+    # skill.yaml: stdio MCP via npx + personal API token.
     with open(directory / "skill.yaml") as file:
         config = yaml.safe_load(file)
     assert config["name"] == "linear"
     assert config["type"] == "mcp"
-    assert "required_commands" not in config, (
-        "Linear uses hosted HTTP MCP; no local binary should be required."
+    assert config["required_commands"] == ["npx"], (
+        "Linear MCP spawns via npx; the host must have Node installed."
     )
-    assert "environment_variables" not in config, (
-        "Linear uses OAuth via Claude Code; should not require env vars."
+    assert config["environment_variables"] == ["LINEAR_API_TOKEN"], (
+        "@tacticlaunch/mcp-linear reads its credential from LINEAR_API_TOKEN "
+        "(not LINEAR_API_KEY)."
     )
     assert "allowed_tools" in config
-    assert "mcp__linear__search_issues" in config["allowed_tools"]
-    assert "mcp__linear__list_my_issues" in config["allowed_tools"]
-    assert "mcp__linear__get_issue" in config["allowed_tools"]
-    assert "mcp__linear__create_issue" in config["allowed_tools"]
-    assert "mcp__linear__update_issue" in config["allowed_tools"]
-    assert "mcp__linear__create_comment" in config["allowed_tools"]
+    # Read tools — workspace lookup + issue search/read.
+    assert "mcp__linear__linear_getViewer" in config["allowed_tools"]
+    assert "mcp__linear__linear_getTeams" in config["allowed_tools"]
+    assert "mcp__linear__linear_searchIssues" in config["allowed_tools"]
+    assert "mcp__linear__linear_getIssueById" in config["allowed_tools"]
+    # Mutating tools — must be present (UI flow), but every call requires
+    # explicit confirmation per the SKILL.md safety rule.
+    assert "mcp__linear__linear_createIssue" in config["allowed_tools"]
+    assert "mcp__linear__linear_updateIssue" in config["allowed_tools"]
+    assert "mcp__linear__linear_createComment" in config["allowed_tools"]
 
-    # mcp.json: HTTP transport pointing at Linear's official endpoint.
+    # Deny-by-default: bulk-destructive operations stay out of the
+    # whitelist so a chatty bot can't accidentally archive a project or
+    # delete a release.
+    assert not any(
+        tool.startswith("mcp__linear__linear_delete") for tool in config["allowed_tools"]
+    )
+    assert not any(
+        tool.startswith("mcp__linear__linear_archive") for tool in config["allowed_tools"]
+    )
+
+    # mcp.json: stdio transport via npx, no embedded credentials.
     import json
 
     with open(directory / "mcp.json") as file:
         mcp_config = json.load(file)
     assert "mcpServers" in mcp_config
-    assert "linear" in mcp_config["mcpServers"]
-    assert mcp_config["mcpServers"]["linear"]["type"] == "http"
-    assert mcp_config["mcpServers"]["linear"]["url"] == "https://mcp.linear.app/mcp"
+    server = mcp_config["mcpServers"]["linear"]
+    assert server["command"] == "npx"
+    assert server["args"] == ["-y", "@tacticlaunch/mcp-linear"]
+    # The token lives in the host env (LINEAR_API_TOKEN), never in this
+    # file. Pinning the absence here so a future edit doesn't bake a
+    # secret into the repo.
+    assert "env" not in server
+    assert "type" not in server, (
+        "Default stdio transport — explicit 'type' would shadow stdio."
+    )
+    assert "url" not in server, "stdio MCP must not carry an http URL."
 
 
 def test_installed_linear_skill_starts_inactive(temp_abyss_home):

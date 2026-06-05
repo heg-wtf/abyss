@@ -1,22 +1,42 @@
 name: linear
 emoji: "\U0001F4DD"
-description: "Linear issue tracking via official OAuth MCP (search, create, update, comment)"
+description: "Linear issue tracking via @tacticlaunch/mcp-linear (stdio, personal API token)"
 type: mcp
 status: inactive
+required_commands:
+  - npx
+install_hints:
+  npx: "Install Node.js (https://nodejs.org/) — npx ships with it"
+environment_variables:
+  - LINEAR_API_TOKEN
 allowed_tools:
   # Workspace lookup
-  - "mcp__linear__list_teams"
-  - "mcp__linear__list_projects"
-  - "mcp__linear__list_users"
-  - "mcp__linear__list_workflow_states"
-  - "mcp__linear__list_issue_labels"
-  - "mcp__linear__list_cycles"
+  - "mcp__linear__linear_getViewer"
+  - "mcp__linear__linear_getOrganization"
+  - "mcp__linear__linear_getUsers"
+  - "mcp__linear__linear_getLabels"
+  - "mcp__linear__linear_getTeams"
+  - "mcp__linear__linear_getWorkflowStates"
+  - "mcp__linear__linear_getProjects"
+  - "mcp__linear__linear_getCycles"
+  - "mcp__linear__linear_getActiveCycle"
   # Search & read
-  - "mcp__linear__search_issues"
-  - "mcp__linear__list_my_issues"
-  - "mcp__linear__get_issue"
-  - "mcp__linear__list_comments"
+  - "mcp__linear__linear_searchIssues"
+  - "mcp__linear__linear_getIssues"
+  - "mcp__linear__linear_getIssueById"
+  - "mcp__linear__linear_getComments"
+  - "mcp__linear__linear_getIssueHistory"
+  - "mcp__linear__linear_getCycleIssues"
+  - "mcp__linear__linear_getProjectIssues"
   # Create / update (must confirm before calling)
-  - "mcp__linear__create_issue"
-  - "mcp__linear__update_issue"
-  - "mcp__linear__create_comment"
+  - "mcp__linear__linear_createIssue"
+  - "mcp__linear__linear_updateIssue"
+  - "mcp__linear__linear_createComment"
+  - "mcp__linear__linear_assignIssue"
+  - "mcp__linear__linear_setIssuePriority"
+  - "mcp__linear__linear_addIssueLabel"
+  - "mcp__linear__linear_removeIssueLabel"
+  - "mcp__linear__linear_addIssueToProject"
+  - "mcp__linear__linear_addIssueToCycle"
+  - "mcp__linear__linear_removeIssueFromCycle"
+  - "mcp__linear__linear_subscribeToIssue"
