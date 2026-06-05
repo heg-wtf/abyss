@@ -606,6 +606,46 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
    * candidate selection) so the first key release after a composition
    * never triggers send.
    */
+  // HEG-31: Cmd+K / Ctrl+K toggles the sessions drawer on desktop.
+  // Registered as a window-level listener so it works regardless of
+  // focus (user may not have the textarea focused). Touch devices are
+  // skipped — the hamburger menu is their primary affordance.
+  React.useEffect(() => {
+    if (isTouchDevice) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSessionsOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isTouchDevice]);
+
+  // HEG-30: Paste handler for the message textarea.
+  // When the clipboard contains image files, intercept the event,
+  // convert the items to File objects and feed them through the
+  // existing addFiles() pipeline. Plain-text paste falls through
+  // to the textarea's default behavior.
+  const handlePaste = React.useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      const imageFiles: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file" && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) imageFiles.push(file);
+        }
+      }
+      if (imageFiles.length === 0) return;
+      event.preventDefault();
+      addFiles(imageFiles);
+    },
+    [addFiles],
+  );
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== "Enter") return;
     if (event.nativeEvent.isComposing) return;
@@ -783,6 +823,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="메시지 작성…"
             rows={1}
             className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden"
