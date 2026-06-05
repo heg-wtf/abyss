@@ -232,6 +232,35 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [draft]);
 
+  // Keyboard shortcut: Cmd/Ctrl+B toggles the sessions drawer so a
+  // desktop / bluetooth-keyboard user can jump between chats without
+  // reaching for the hamburger. Registered on ``window`` so it fires
+  // regardless of focus (textarea included). Esc-to-close is already
+  // handled by SlideDrawer. Skipped while the full-screen voice
+  // overlay is up — the drawer renders behind it and would fight the
+  // exclusivity handled by handleVoiceOpen. Plain ``b`` and combos
+  // with Shift/Alt fall through so we never shadow native shortcuts
+  // (Cmd+Shift+B = browser bookmark bar) or eat normal typing.
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "b") return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.shiftKey || event.altKey) return;
+      if (voiceMode) return;
+      event.preventDefault();
+      setSessionsOpen((prev) => {
+        const next = !prev;
+        if (next) {
+          setWorkspaceOpen(false);
+          setSlashOpen(false);
+        }
+        return next;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [voiceMode]);
+
   const hasText = draft.trim().length > 0;
   const hasPending = pending.some((p) => p.uploading);
   const sendable = (hasText || pending.some((p) => p.uploaded)) && !hasPending;
@@ -591,6 +620,36 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
   };
 
   /**
+   * Clipboard paste → attachment. When the clipboard carries files —
+   * a screenshot from the OS snipping tool, "copy image" from a
+   * browser, or a copied file — intercept the paste and enqueue them
+   * as attachments instead of dropping binary noise into the
+   * textarea. Plain-text pastes leave ``files`` empty and fall
+   * through to the textarea's default behavior. MIME validation and
+   * the per-message cap live in ``addFiles`` → ``enqueueFile``, so an
+   * unsupported type surfaces the same inline error as the file
+   * picker. ``DataTransferItemList`` is index-accessed (not
+   * ``for..of``) because it isn't reliably iterable across browsers.
+   */
+  const handlePaste = React.useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind !== "file") continue;
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+      if (files.length === 0) return;
+      event.preventDefault();
+      addFiles(files);
+    },
+    [addFiles],
+  );
+
+  /**
    * Enter-key semantics differ by device:
    *
    * - **Desktop / non-touch.** Enter sends, Shift+Enter inserts a newline.
@@ -783,6 +842,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="메시지 작성…"
             rows={1}
             className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden"
