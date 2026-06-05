@@ -324,6 +324,7 @@ abyss/
 │   │   ├── gcalendar/      # Google Calendar skill (gogcli)
 │   │   ├── twitter/        # Twitter/X skill (MCP, tweet posting/search)
 │   │   ├── jira/           # Jira skill (MCP, issue management)
+│   │   ├── linear/         # Linear skill (MCP via @tacticlaunch/mcp-linear, issue/cycle/project mgmt)
 │   │   ├── translate/      # Translate skill (translatecli, Gemini)
 │   │   ├── qmd/            # QMD knowledge search skill (MCP, HTTP daemon)
 │   │   ├── conversation_search/ # Past conversation recall (FTS5 MCP, auto-injected)
