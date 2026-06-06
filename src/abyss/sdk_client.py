@@ -163,6 +163,44 @@ async def sdk_query(
     )
 
 
+async def _consume_stream(
+    aiterator: Any,
+    *,
+    idle_timeout: int,
+    max_total: int | None,
+    session_key: str,
+    process: Callable[[Any], Any],
+) -> None:
+    """Drive a streaming async iterator under an *idle* (no-progress) timeout.
+
+    ``idle_timeout`` is a per-event cap that resets on every message, so a
+    long-but-progressing turn is never killed — only genuine silence (a hung
+    client) trips it. ``max_total`` is an absolute wall-clock backstop for a
+    runaway turn; pass ``None`` to disable it and rely purely on idle.
+
+    Raises ``TimeoutError`` on idle silence or when ``max_total`` is exceeded.
+    """
+    start = time.monotonic()
+    while True:
+        if max_total is not None and (time.monotonic() - start) > max_total:
+            logger.error("SDK streaming exceeded max_total %ds for %s", max_total, session_key)
+            raise TimeoutError(f"SDK streaming exceeded max_total {max_total} seconds")
+        try:
+            message = await asyncio.wait_for(aiterator.__anext__(), timeout=idle_timeout)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError:
+            logger.error(
+                "SDK streaming idle for %ds (no progress) for %s",
+                idle_timeout,
+                session_key,
+            )
+            raise TimeoutError(f"SDK streaming idle for {idle_timeout} seconds (no progress)")
+        result = process(message)
+        if asyncio.iscoroutine(result):
+            await result
+
+
 async def sdk_query_streaming(
     *,
     session_key: str,
@@ -176,7 +214,8 @@ async def sdk_query_streaming(
     allowed_tools: list[str] | None = None,
     system_prompt: str | None = None,
     environment_variables: dict[str, str] | None = None,
-    timeout: int = 300,
+    idle_timeout: int = 180,
+    max_total: int | None = 3600,
 ) -> SDKQueryResult:
     """Run a streaming query via Python Agent SDK.
 
@@ -194,13 +233,15 @@ async def sdk_query_streaming(
         allowed_tools: List of tools to auto-approve.
         system_prompt: System prompt override.
         environment_variables: Environment variables to pass.
-        timeout: Maximum execution time in seconds.
+        idle_timeout: No-progress timeout in seconds; resets on every streamed
+            event so a long-but-progressing turn is never killed.
+        max_total: Absolute wall-clock backstop in seconds (None to disable).
 
     Returns:
         SDKQueryResult with final text, session_id, and cost.
 
     Raises:
-        TimeoutError: If execution exceeds timeout.
+        TimeoutError: On idle silence or when max_total is exceeded.
         RuntimeError: If the SDK returns an error or no result.
     """
     from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, query
@@ -224,38 +265,39 @@ async def sdk_query_streaming(
     cost_usd: float | None = None
     last_partial_length = 0
 
-    async def _run_streaming() -> None:
+    async def _process(message: Any) -> None:
         nonlocal result_text, result_session_id, cost_usd, last_partial_length
-        async for message in query(prompt=prompt, options=options):
-            if isinstance(message, AssistantMessage):
-                current_text = ""
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        current_text += block.text
+        if isinstance(message, AssistantMessage):
+            current_text = ""
+            for block in message.content:
+                if isinstance(block, TextBlock):
+                    current_text += block.text
 
-                if current_text and on_text_chunk:
-                    new_text = current_text[last_partial_length:]
-                    if new_text:
-                        try:
-                            callback_result = on_text_chunk(new_text)
-                            if asyncio.iscoroutine(callback_result):
-                                await callback_result
-                        except Exception as callback_error:
-                            logger.debug("Stream chunk callback error: %s", callback_error)
-                    last_partial_length = len(current_text)
-                result_text = current_text
+            if current_text and on_text_chunk:
+                new_text = current_text[last_partial_length:]
+                if new_text:
+                    try:
+                        callback_result = on_text_chunk(new_text)
+                        if asyncio.iscoroutine(callback_result):
+                            await callback_result
+                    except Exception as callback_error:
+                        logger.debug("Stream chunk callback error: %s", callback_error)
+                last_partial_length = len(current_text)
+            result_text = current_text
 
-            elif isinstance(message, ResultMessage):
-                if message.result is not None:
-                    result_text = message.result
-                result_session_id = message.session_id
-                cost_usd = message.total_cost_usd
+        elif isinstance(message, ResultMessage):
+            if message.result is not None:
+                result_text = message.result
+            result_session_id = message.session_id
+            cost_usd = message.total_cost_usd
 
-    try:
-        await asyncio.wait_for(_run_streaming(), timeout=timeout)
-    except asyncio.TimeoutError:
-        logger.error("SDK streaming timed out after %ds for %s", timeout, session_key)
-        raise TimeoutError(f"SDK streaming timed out after {timeout} seconds")
+    await _consume_stream(
+        query(prompt=prompt, options=options).__aiter__(),
+        idle_timeout=idle_timeout,
+        max_total=max_total,
+        session_key=session_key,
+        process=_process,
+    )
 
     if not result_text and not result_session_id:
         raise RuntimeError("SDK streaming query returned no result")
@@ -377,11 +419,17 @@ class SDKClientPool:
         system_prompt: str | None = None,
         environment_variables: dict[str, str] | None = None,
         resume_session_id: str | None = None,
-        timeout: int = 300,
+        idle_timeout: int = 180,
+        max_total: int | None = 3600,
     ) -> SDKQueryResult:
         """Send a streaming query via a persistent client.
 
         Calls ``on_text_chunk`` for each new text delta received.
+
+        ``idle_timeout`` is a no-progress (inter-event) cap that resets on
+        every streamed message, so a long-but-progressing turn is never
+        killed. ``max_total`` is an absolute wall-clock backstop (None to
+        disable). Raises ``TimeoutError`` on idle silence or max_total.
         """
         from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 
@@ -403,42 +451,43 @@ class SDKClientPool:
         cost_usd: float | None = None
         last_partial_length = 0
 
-        async def _run() -> None:
+        async def _process(message: Any) -> None:
             nonlocal result_text, result_session_id, cost_usd, last_partial_length
-            await client.query(prompt)
-            async for message in client.receive_response():
-                if isinstance(message, AssistantMessage):
-                    current_text = ""
-                    for block in message.content:
-                        if isinstance(block, TextBlock):
-                            current_text += block.text
+            if isinstance(message, AssistantMessage):
+                current_text = ""
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        current_text += block.text
 
-                    if current_text and on_text_chunk:
-                        new_text = current_text[last_partial_length:]
-                        if new_text:
-                            try:
-                                callback_result = on_text_chunk(new_text)
-                                if asyncio.iscoroutine(callback_result):
-                                    await callback_result
-                            except Exception as callback_error:
-                                logger.debug(
-                                    "Stream chunk callback error: %s",
-                                    callback_error,
-                                )
-                        last_partial_length = len(current_text)
-                    result_text = current_text
+                if current_text and on_text_chunk:
+                    new_text = current_text[last_partial_length:]
+                    if new_text:
+                        try:
+                            callback_result = on_text_chunk(new_text)
+                            if asyncio.iscoroutine(callback_result):
+                                await callback_result
+                        except Exception as callback_error:
+                            logger.debug(
+                                "Stream chunk callback error: %s",
+                                callback_error,
+                            )
+                    last_partial_length = len(current_text)
+                result_text = current_text
 
-                elif isinstance(message, ResultMessage):
-                    if message.result is not None:
-                        result_text = message.result
-                    result_session_id = message.session_id
-                    cost_usd = message.total_cost_usd
+            elif isinstance(message, ResultMessage):
+                if message.result is not None:
+                    result_text = message.result
+                result_session_id = message.session_id
+                cost_usd = message.total_cost_usd
 
-        try:
-            await asyncio.wait_for(_run(), timeout=timeout)
-        except asyncio.TimeoutError:
-            logger.error("Pool streaming timed out after %ds for %s", timeout, session_key)
-            raise TimeoutError(f"Pool streaming timed out after {timeout} seconds")
+        await client.query(prompt)
+        await _consume_stream(
+            client.receive_response().__aiter__(),
+            idle_timeout=idle_timeout,
+            max_total=max_total,
+            session_key=session_key,
+            process=_process,
+        )
 
         if not result_text and not result_session_id:
             raise RuntimeError("Pool streaming query returned no result")

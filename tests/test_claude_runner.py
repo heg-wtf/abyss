@@ -1721,6 +1721,44 @@ class TestSDKAwareRunner:
         assert result == "subprocess streamed"
         mock_stream.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_run_streaming_with_sdk_timeout_evicts_and_falls_back(self, tmp_path):
+        """On a streaming TimeoutError the wedged pool client is evicted
+        (``close_session``) before falling back to subprocess.
+
+        HEG-41 regression guard: ``TimeoutError`` subclasses ``OSError``, so a
+        prior revision swallowed it in the ``OSError`` branch without eviction,
+        leaving the next message to reuse the dead client and re-hang.
+        """
+        from abyss.claude_runner import run_claude_streaming_with_sdk
+        from abyss.sdk_client import SDKClientPool
+
+        mock_pool = MagicMock(spec=SDKClientPool)
+        mock_pool.has_session.return_value = False
+        mock_pool.query_streaming = AsyncMock(
+            side_effect=TimeoutError("SDK streaming idle for 180 seconds (no progress)")
+        )
+        mock_pool.close_session = AsyncMock()
+
+        with (
+            patch("abyss.sdk_client.is_sdk_available", return_value=True),
+            patch("abyss.sdk_client.get_pool", return_value=mock_pool),
+            patch(
+                "abyss.claude_runner.run_claude_streaming",
+                new_callable=AsyncMock,
+            ) as mock_stream,
+        ):
+            mock_stream.return_value = "subprocess streamed"
+            result = await run_claude_streaming_with_sdk(
+                working_directory=str(tmp_path),
+                message="hello",
+                session_key="bot1:chat_1",
+            )
+
+        assert result == "subprocess streamed"
+        mock_pool.close_session.assert_awaited_once_with("bot1:chat_1")
+        mock_stream.assert_called_once()
+
 
 # --- cancel_sdk_session tests ---
 

@@ -400,18 +400,72 @@ class TestSDKQueryStreaming:
         assert result.text == "response"
 
     @pytest.mark.asyncio
-    async def test_streaming_timeout(self):
+    async def test_streaming_idle_timeout_on_silence(self):
+        """A client that goes silent trips the idle timeout."""
+
         async def slow_generator():
             await asyncio.sleep(10)
             yield MockResultMessage(result="late", session_id="x")
 
         with _sdk_patches(slow_generator()):
-            with pytest.raises(TimeoutError, match="timed out"):
+            with pytest.raises(TimeoutError, match="idle"):
                 await sdk_query_streaming(
                     session_key="bot1:chat_1",
                     prompt="hi",
                     working_directory="/tmp/test",
-                    timeout=0,
+                    idle_timeout=0,
+                )
+
+    @pytest.mark.asyncio
+    async def test_streaming_long_but_progressing_not_killed(self):
+        """A turn whose total runtime exceeds the per-event idle cap still
+        completes, as long as each event arrives within ``idle_timeout``.
+
+        Core HEG-41 regression guard: the old wall-clock cap would have
+        killed this; the idle cap must not.
+        """
+
+        async def progressing_generator():
+            for index in range(5):
+                await asyncio.sleep(0.03)
+                yield MockAssistantMessage(content=[MockTextBlock(text=f"step{index}")])
+            await asyncio.sleep(0.03)
+            yield MockResultMessage(result="done", session_id="sess-long")
+
+        with _sdk_patches(progressing_generator()):
+            result = await sdk_query_streaming(
+                session_key="bot1:chat_1",
+                prompt="hi",
+                working_directory="/tmp/test",
+                idle_timeout=0.08,
+                max_total=None,
+            )
+
+        assert result.text == "done"
+        assert result.session_id == "sess-long"
+
+    @pytest.mark.asyncio
+    async def test_streaming_max_total_backstop(self):
+        """``max_total`` fires even while events keep arriving (runaway turn).
+
+        Each event lands well inside ``idle_timeout`` (so the idle cap never
+        trips), but the cumulative runtime crosses the small ``max_total``
+        backstop, which must terminate the turn.
+        """
+
+        async def busy_generator():
+            for index in range(50):
+                await asyncio.sleep(0.03)
+                yield MockAssistantMessage(content=[MockTextBlock(text=f"x{index}")])
+
+        with _sdk_patches(busy_generator()):
+            with pytest.raises(TimeoutError, match="max_total"):
+                await sdk_query_streaming(
+                    session_key="bot1:chat_1",
+                    prompt="hi",
+                    working_directory="/tmp/test",
+                    idle_timeout=1.0,
+                    max_total=0.05,
                 )
 
 
@@ -655,6 +709,25 @@ class TestSDKClientPool:
 
         assert result.text == "Hello world!"
         assert received_chunks == ["Hello ", "world!"]
+
+    @pytest.mark.asyncio
+    async def test_query_streaming_idle_timeout(self):
+        """Pool streaming trips the idle timeout when the client goes silent."""
+
+        class SilentClient(MockClient):
+            async def receive_response(self):
+                await asyncio.sleep(10)
+                yield MockResultMessage(result="late", session_id="x")
+
+        pool = SDKClientPool()
+        with _pool_patches(SilentClient()):
+            with pytest.raises(TimeoutError, match="idle"):
+                await pool.query_streaming(
+                    "bot:1",
+                    "hello",
+                    working_directory="/tmp/test",
+                    idle_timeout=0,
+                )
 
     @pytest.mark.asyncio
     async def test_close_nonexistent_session_is_safe(self):

@@ -479,3 +479,63 @@ def test_compose_bot_sandbox_ignores_malformed_extras():
     assert "good.example.com" in domains
     assert 42 not in domains
     assert "" not in domains
+
+
+# --- SDK streaming timeouts ---
+
+
+def test_sdk_timeouts_default_when_no_config(monkeypatch):
+    """Falls back to module defaults when config is missing."""
+    from abyss.config import (
+        DEFAULT_SDK_IDLE_TIMEOUT,
+        DEFAULT_SDK_MAX_TOTAL,
+        get_sdk_idle_timeout,
+        get_sdk_max_total,
+    )
+
+    monkeypatch.setattr("abyss.config.load_config", lambda: None)
+    assert get_sdk_idle_timeout() == DEFAULT_SDK_IDLE_TIMEOUT
+    assert get_sdk_max_total() == DEFAULT_SDK_MAX_TOTAL
+
+
+def test_sdk_timeouts_default_when_section_absent(monkeypatch):
+    """Falls back when config exists but has no sdk_streaming section."""
+    from abyss.config import (
+        DEFAULT_SDK_IDLE_TIMEOUT,
+        DEFAULT_SDK_MAX_TOTAL,
+        get_sdk_idle_timeout,
+        get_sdk_max_total,
+    )
+
+    monkeypatch.setattr("abyss.config.load_config", lambda: {"language": "Korean"})
+    assert get_sdk_idle_timeout() == DEFAULT_SDK_IDLE_TIMEOUT
+    assert get_sdk_max_total() == DEFAULT_SDK_MAX_TOTAL
+
+
+def test_sdk_timeouts_read_from_config(monkeypatch):
+    """Reads overrides from sdk_streaming section."""
+    from abyss.config import get_sdk_idle_timeout, get_sdk_max_total
+
+    monkeypatch.setattr(
+        "abyss.config.load_config",
+        lambda: {"sdk_streaming": {"idle_timeout": 240, "max_total": 7200}},
+    )
+    assert get_sdk_idle_timeout() == 240
+    assert get_sdk_max_total() == 7200
+
+
+def test_sdk_timeouts_reject_invalid_values(monkeypatch):
+    """Non-positive or non-integer values fall back to defaults."""
+    from abyss.config import (
+        DEFAULT_SDK_IDLE_TIMEOUT,
+        DEFAULT_SDK_MAX_TOTAL,
+        get_sdk_idle_timeout,
+        get_sdk_max_total,
+    )
+
+    monkeypatch.setattr(
+        "abyss.config.load_config",
+        lambda: {"sdk_streaming": {"idle_timeout": 0, "max_total": "nope"}},
+    )
+    assert get_sdk_idle_timeout() == DEFAULT_SDK_IDLE_TIMEOUT
+    assert get_sdk_max_total() == DEFAULT_SDK_MAX_TOTAL

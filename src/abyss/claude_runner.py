@@ -1240,6 +1240,14 @@ async def run_claude_with_sdk(
                 save_claude_session_id(session_directory, result.session_id)
 
             return result.text
+        except TimeoutError as error:
+            # ``TimeoutError`` subclasses ``OSError``; this branch MUST come
+            # first so a wedged client is evicted instead of silently reused.
+            logger.warning(
+                "SDK pool query timed out, evicting client and falling back to subprocess: %s",
+                error,
+            )
+            await pool.close_session(session_key)
         except (ConnectionError, OSError) as error:
             logger.warning("SDK pool unavailable, falling back to subprocess: %s", error)
         except Exception as error:
@@ -1308,6 +1316,8 @@ async def run_claude_streaming_with_sdk(
                 message[:100],
             )
 
+            from abyss.config import get_sdk_idle_timeout, get_sdk_max_total
+
             result = await pool.query_streaming(
                 session_key=session_key,
                 prompt=message,
@@ -1317,13 +1327,25 @@ async def run_claude_streaming_with_sdk(
                 allowed_tools=allowed_tools,
                 environment_variables=environment_variables,
                 resume_session_id=saved_session_id,
-                timeout=timeout,
+                idle_timeout=get_sdk_idle_timeout(),
+                max_total=get_sdk_max_total(),
             )
 
             if session_directory and result.session_id:
                 save_claude_session_id(session_directory, result.session_id)
 
             return result.text
+        except TimeoutError as error:
+            # A streaming timeout (idle silence or max_total) means the
+            # persistent client is wedged. ``TimeoutError`` subclasses
+            # ``OSError``, so this branch MUST precede the ``OSError`` one or
+            # the dead client is never evicted — the next message would reuse
+            # it and re-hang. Evict, then fall back to a fresh subprocess.
+            logger.warning(
+                "SDK pool streaming timed out, evicting client and falling back to subprocess: %s",
+                error,
+            )
+            await pool.close_session(session_key)
         except (ConnectionError, OSError) as error:
             logger.warning(
                 "SDK pool unavailable (streaming), falling back to subprocess: %s",
