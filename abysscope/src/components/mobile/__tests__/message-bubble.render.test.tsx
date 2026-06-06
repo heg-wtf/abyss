@@ -43,8 +43,8 @@ describe("MessageBubble", () => {
     expect(container.querySelector("li.justify-start")).not.toBeNull();
   });
 
-  it("renders an attachment chip for each attachment", () => {
-    render(
+  it("renders image attachments as an inline thumbnail and non-images as a chip", () => {
+    const { container } = render(
       <MessageBubble
         message={makeMessage({
           attachments: [
@@ -64,7 +64,17 @@ describe("MessageBubble", () => {
         })}
       />,
     );
-    expect(screen.getByText(/design\.png/)).toBeTruthy();
+    // Image → <img> preview (alt = display name), linking to the file.
+    const image = container.querySelector("img");
+    expect(image).not.toBeNull();
+    expect(image!.getAttribute("src")).toBe("/files/abc__design.png");
+    expect(image!.getAttribute("alt")).toBe("design.png");
+    expect(image!.closest("a")!.getAttribute("href")).toBe(
+      "/files/abc__design.png",
+    );
+    // The filename is NOT printed as text for an image.
+    expect(screen.queryByText(/design\.png/)).toBeNull();
+    // Non-image → filename chip preserved.
     expect(screen.getByText(/notes\.pdf/)).toBeTruthy();
   });
 
