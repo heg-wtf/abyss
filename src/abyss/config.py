@@ -426,3 +426,47 @@ def get_elevenlabs_api_key() -> str:
         if key:
             return str(key)
     return os.environ.get("ELEVENLABS_API_KEY", "")
+
+
+# SDK streaming timeouts. ``idle_timeout`` is the inter-event (no-progress)
+# cap that resets on every streamed message, so a long-but-progressing agent
+# turn is never killed. ``max_total`` is an absolute wall-clock backstop for a
+# genuinely runaway turn. Both live under the ``sdk_streaming`` config key.
+DEFAULT_SDK_IDLE_TIMEOUT = 180
+DEFAULT_SDK_MAX_TOTAL = 3600
+
+
+def _sdk_streaming_int(key: str, default: int) -> int:
+    """Read a positive integer from ``config.yaml`` ``sdk_streaming.<key>``.
+
+    Falls back to ``default`` when config is missing, the key is unset, or the
+    value is not a positive integer.
+    """
+    config = load_config()
+    if not config:
+        return default
+    section = config.get("sdk_streaming")
+    if not isinstance(section, dict):
+        return default
+    raw = section.get(key, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def get_sdk_idle_timeout() -> int:
+    """Inter-event (no-progress) timeout for SDK streaming, in seconds.
+
+    Single source of truth. Falls back to ``DEFAULT_SDK_IDLE_TIMEOUT``.
+    """
+    return _sdk_streaming_int("idle_timeout", DEFAULT_SDK_IDLE_TIMEOUT)
+
+
+def get_sdk_max_total() -> int:
+    """Absolute wall-clock backstop for a single SDK streaming turn, in seconds.
+
+    Single source of truth. Falls back to ``DEFAULT_SDK_MAX_TOTAL``.
+    """
+    return _sdk_streaming_int("max_total", DEFAULT_SDK_MAX_TOTAL)
