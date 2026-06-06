@@ -212,17 +212,38 @@ export function MessageBubble({
         )}
         {message.attachments?.length ? (
           <div className="mt-2 flex flex-wrap gap-2">
-            {message.attachments.map((att) => (
-              <a
-                key={att.real_name}
-                href={att.url}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-md border bg-background/30 px-2 py-1 text-xs text-current underline-offset-2 hover:underline"
-              >
-                📎 {att.display_name}
-              </a>
-            ))}
+            {message.attachments.map((att) =>
+              att.mime?.startsWith("image/") ? (
+                // Image attachments render as an inline thumbnail so a
+                // sent screenshot is recognisable at a glance instead of
+                // showing only its filename. Tapping opens the full image.
+                <a
+                  key={att.real_name}
+                  href={att.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block overflow-hidden rounded-md border bg-background/30"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={att.url}
+                    alt={att.display_name}
+                    loading="lazy"
+                    className="max-h-40 w-auto max-w-full object-contain"
+                  />
+                </a>
+              ) : (
+                <a
+                  key={att.real_name}
+                  href={att.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-md border bg-background/30 px-2 py-1 text-xs text-current underline-offset-2 hover:underline"
+                >
+                  📎 {att.display_name}
+                </a>
+              ),
+            )}
           </div>
         ) : null}
         {message.commandFile ? (
