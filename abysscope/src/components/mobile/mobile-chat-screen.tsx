@@ -759,7 +759,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
               aria-live="polite"
               aria-label="Assistant reply streaming"
             >
-              <div className="min-w-0 max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3 py-2 text-sm">
+              <div className="min-w-0 max-w-[85%] overflow-hidden rounded-2xl bg-muted px-3 py-2 text-base leading-relaxed">
                 {activeStream.text ? (
                   <>
                     <MarkdownBody content={activeStream.text} />
@@ -845,7 +845,7 @@ export function MobileChatScreen({ bots, session, initialMessages }: Props) {
             onPaste={handlePaste}
             placeholder="메시지 작성…"
             rows={1}
-            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden"
+            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-base outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden"
             style={{
               maxHeight: "160px",
               scrollbarWidth: "none",

@@ -335,7 +335,7 @@ describe("/mobile route skeleton", () => {
     const markdown = read("components/mobile/mobile-chat-markdown-body.tsx");
     expect(markdown).toMatch(/import ReactMarkdown from "react-markdown"/);
     expect(markdown).toMatch(/MarkdownBody/);
-    expect(markdown).toMatch(/prose prose-sm/);
+    expect(markdown).toMatch(/prose prose-base/);
 
     const bubble = read("components/mobile/mobile-chat-message-bubble.tsx");
     // User bubbles stay as plain pre-wrap text — only the assistant
@@ -345,6 +345,24 @@ describe("/mobile route skeleton", () => {
     const screen = read("components/mobile/mobile-chat-screen.tsx");
     expect(screen).toMatch(/MarkdownBody/);
     expect(screen).toMatch(/MessageBubble/);
+  });
+
+  it("mobile chat body uses 16px text to match the Claude mobile app", () => {
+    // HEG-60: bump the chat reading size from 14px (text-sm) to 16px
+    // (text-base / prose-base) for phone readability. A 16px input
+    // also stops iOS Safari from auto-zooming on focus.
+    const bubble = read("components/mobile/mobile-chat-message-bubble.tsx");
+    // The message body container carries the body size; metadata
+    // (timestamp, feedback pills) stays small.
+    expect(bubble).toMatch(/rounded-2xl px-3 py-2 text-base/);
+
+    const markdown = read("components/mobile/mobile-chat-markdown-body.tsx");
+    expect(markdown).toMatch(/prose prose-base/);
+
+    const screen = read("components/mobile/mobile-chat-screen.tsx");
+    // Streaming placeholder bubble + composer textarea both 16px.
+    expect(screen).toMatch(/bg-muted px-3 py-2 text-base/);
+    expect(screen).toMatch(/resize-none rounded-2xl border bg-background px-3 py-2 text-base/);
   });
 
   it("chat screen hides the textarea scrollbar across browser engines", () => {
