@@ -199,7 +199,7 @@ export function MessageBubble({
         }`}
       >
         <div
-          className={`min-w-0 overflow-hidden rounded-2xl px-3 py-2 text-sm ${
+          className={`min-w-0 overflow-hidden rounded-2xl px-3 py-2 text-base leading-relaxed ${
             isUser
               ? `bg-primary text-primary-foreground ${queued ? "opacity-70" : ""}`
               : "bg-muted text-foreground"

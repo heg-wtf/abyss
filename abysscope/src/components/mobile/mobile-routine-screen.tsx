@@ -274,7 +274,7 @@ export function MobileRoutineScreen({ routine, initialMessages }: Props) {
             placeholder={`${routine.job_name}에게 답하기…`}
             rows={1}
             disabled={sending}
-            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden disabled:opacity-50"
+            className="flex-1 resize-none rounded-2xl border bg-background px-3 py-2 text-base outline-none focus:ring-2 focus:ring-ring [&::-webkit-scrollbar]:hidden disabled:opacity-50"
             style={{
               maxHeight: "160px",
               scrollbarWidth: "none",
@@ -327,7 +327,7 @@ const RoutineMessageBubble = React.memo(function RoutineMessageBubble({
   return (
     <li className={`flex min-w-0 ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`min-w-0 max-w-[85%] overflow-hidden rounded-2xl px-3 py-2 text-sm ${
+        className={`min-w-0 max-w-[85%] overflow-hidden rounded-2xl px-3 py-2 text-base leading-relaxed ${
           isUser
             ? "bg-primary text-primary-foreground"
             : "bg-muted text-foreground"
@@ -342,7 +342,7 @@ const RoutineMessageBubble = React.memo(function RoutineMessageBubble({
             {message.content}
           </div>
         ) : (
-          <div className="prose prose-sm dark:prose-invert min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-em:text-foreground prose-li:text-foreground prose-blockquote:text-foreground prose-code:text-foreground prose-a:text-foreground prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
+          <div className="prose prose-base dark:prose-invert min-w-0 max-w-full break-words [overflow-wrap:anywhere] text-foreground prose-headings:text-foreground prose-p:text-foreground prose-strong:text-foreground prose-em:text-foreground prose-li:text-foreground prose-blockquote:text-foreground prose-code:text-foreground prose-a:text-foreground prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0">
             <ReactMarkdown remarkPlugins={[remarkBreaks, remarkGfm]}>
               {message.content || ""}
             </ReactMarkdown>
